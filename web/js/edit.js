@@ -68,20 +68,20 @@ function openEditor(host, cfg) {
     ed.value = original;
   } else {
     ed = document.createElement(cfg.multiline ? 'textarea' : 'input');
-    if (cfg.multiline) {
-      ed.rows = Math.min(8, Math.max(2, original.split('\n').length));
-      ed.placeholder = 'Ctrl+Enter 保存 · Esc 取消';
-    } else {
-      ed.placeholder = 'Enter 保存 · Esc 取消';
-    }
     ed.value = original;
+    ed.title = cfg.multiline ? 'Ctrl+Enter 保存 · Esc 取消' : 'Enter 保存 · Esc 取消';
   }
   ed.className = 'cell-editor';
   host.classList.add('editing');
   host.textContent = '';
   host.appendChild(ed);
+  fitEditor(ed);
   ed.focus();
-  if (ed.tagName === 'INPUT') ed.select();
+  if (ed.tagName === 'INPUT') {
+    ed.select();
+  } else if (ed.tagName === 'TEXTAREA') {
+    ed.setSelectionRange(ed.value.length, ed.value.length);
+  }
 
   let closed = false;
   const close = (commit) => {
@@ -101,6 +101,7 @@ function openEditor(host, cfg) {
       close(true);
     }
   });
+  ed.addEventListener('input', () => fitEditor(ed));
   if (ed.tagName === 'SELECT') ed.addEventListener('change', () => close(true));
   ed.addEventListener('blur', () => close(true));
 }
@@ -116,4 +117,10 @@ async function save(cfg, oldV, newV) {
     cfg.renderCell();
     toast('保存失败：' + err.message, 'err');
   }
+}
+
+function fitEditor(ed) {
+  if (ed.tagName !== 'TEXTAREA') return;
+  ed.style.height = 'auto';
+  ed.style.height = ed.scrollHeight + 'px';
 }
