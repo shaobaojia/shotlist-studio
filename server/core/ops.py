@@ -85,6 +85,97 @@ def renumber_scene(con, scene_id):
     return changes
 
 
+def _scene_beats(con, scene_id):
+    return list(con.execute("SELECT * FROM beats WHERE scene_id=? ORDER BY position, id", (scene_id,)))
+
+
+def _scene_shots(con, scene_id):
+    return list(con.execute("SELECT * FROM shots WHERE scene_id=? ORDER BY position, id", (scene_id,)))
+
+
+def move_shot(con, shot_id, target_beat_id, index):
+    """拖动落库：把镜头搬到目标节拍第 index 位（index 基于去掉自身后的目标序）。
+    重排全场 position（0 基、致密）；镜号不动（整理是独立按钮的事）。"""
+    shot = con.execute("SELECT * FROM shots WHERE id=?", (shot_id,)).fetchone()
+    if not shot:
+        raise ValueError("镜头不存在：%s" % shot_id)
+    scene_id = shot["scene_id"]
+    beats = _scene_beats(con, scene_id)
+    tgt = next((b for b in beats if b["id"] == target_beat_id), None)
+    if not tgt:
+        raise ValueError("目标节拍不存在或不属于本场")
+    rows = [r for r in _scene_shots(con, scene_id) if r["id"] != shot_id]
+    tgt_ids = [r["id"] for r in rows if r["beat_id"] == target_beat_id]
+    idx = max(0, min(int(index), len(tgt_ids)))
+    if tgt_ids:
+        anchor = next(r for r in rows if r["id"] == (tgt_ids[idx] if idx < len(tgt_ids) else tgt_ids[-1]))
+        pos = rows.index(anchor) + (0 if idx < len(tgt_ids) else 1)
+    else:
+        bi = beats.index(tgt)
+        prev_ids = {b["id"] for b in beats[:bi]}
+        pos = 0
+        for i, r in enumerate(rows):
+            if r["beat_id"] in prev_ids:
+                pos = i + 1
+    order = rows[:pos] + [shot] + rows[pos:]
+    before = [r["id"] for r in _scene_shots(con, scene_id)]
+    if [r["id"] for r in order] == before and shot["beat_id"] == target_beat_id:
+        return {"changed": False, "id": shot_id}
+    old_beat_no = next((b["beat_no"] for b in beats if b["id"] == shot["beat_id"]), "?")
+    for i, r in enumerate(order):
+        if r["id"] == shot_id:
+            con.execute("UPDATE shots SET position=?, beat_id=?, updated_at=datetime('now','localtime') WHERE id=?",
+                        (i, target_beat_id, shot_id))
+        elif r["position"] != i:
+            con.execute("UPDATE shots SET position=? WHERE id=?", (i, r["id"]))
+    con.execute(
+        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (scene_id, "shots", shot_id, "drag", "beat%s#%s" % (old_beat_no, shot["position"]),
+         "beat%s#%s" % (tgt["beat_no"], idx), "manual"))
+    con.commit()
+    return {"changed": True, "id": shot_id, "beat_id": target_beat_id, "index": idx,
+            "old_beat_id": shot["beat_id"], "old_index": shot["position"]}
+
+
+def move_beat(con, beat_id, index):
+    """节拍整体拖动：重排 beats.position（index 基于去掉自身后的节拍序），
+    镜头 position 跟随节拍顺序重排（节拍内相对顺序不变）。"""
+    beat = con.execute("SELECT * FROM beats WHERE id=?", (beat_id,)).fetchone()
+    if not beat:
+        raise ValueError("节拍不存在：%s" % beat_id)
+    scene_id = beat["scene_id"]
+    beats = _scene_beats(con, scene_id)
+    others = [b for b in beats if b["id"] != beat_id]
+    idx = max(0, min(int(index), len(others)))
+    new_beats = others[:idx] + [beat] + others[idx:]
+    if [b["id"] for b in new_beats] == [b["id"] for b in beats]:
+        return {"changed": False, "id": beat_id}
+    for i, b in enumerate(new_beats):
+        if b["position"] != i:
+            con.execute("UPDATE beats SET position=?, updated_at=datetime('now','localtime') WHERE id=?",
+                        (i, b["id"]))
+    shots = _scene_shots(con, scene_id)
+    by_beat = {}
+    for r in shots:
+        by_beat.setdefault(r["beat_id"], []).append(r)
+    flat = []
+    for b in new_beats:
+        flat.extend(by_beat.get(b["id"], []))
+    known = {b["id"] for b in new_beats}
+    flat.extend(r for r in shots if r["beat_id"] not in known)
+    for i, r in enumerate(flat):
+        if r["position"] != i:
+            con.execute("UPDATE shots SET position=? WHERE id=?", (i, r["id"]))
+    old_i = [b["id"] for b in beats].index(beat_id)
+    con.execute(
+        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (scene_id, "beats", beat_id, "drag", "#%s" % old_i, "#%s" % idx, "manual"))
+    con.commit()
+    return {"changed": True, "id": beat_id, "index": idx, "old_index": old_i}
+
+
 def history_of(con, scene_id=None, limit=100):
     q = "SELECT * FROM history"
     args = []

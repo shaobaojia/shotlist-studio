@@ -95,5 +95,74 @@ class TestRenumber(unittest.TestCase):
         self.assertEqual(again, [])
 
 
+class TestMove(unittest.TestCase):
+    def make(self):
+        con = make_db()  # 基准：beat id1；shots id1/2/3（全在 beat1）
+        con.execute("UPDATE beats SET position=0, beat_no='b1', name='b1' WHERE id=1")
+        con.execute("INSERT INTO beats (scene_id, position, beat_no, name) VALUES (1, 1, 'b2', 'b2')")
+        con.execute("UPDATE shots SET beat_id=1, position=0 WHERE id=1")
+        con.execute("UPDATE shots SET beat_id=1, position=1 WHERE id=2")
+        con.execute("UPDATE shots SET beat_id=2, position=2 WHERE id=3")
+        con.commit()
+        return con
+
+    def test_move_within_beat(self):
+        con = self.make()
+        r = ops.move_shot(con, 1, 1, 1)  # s1 在 b1 内挪到 s2 之后
+        self.assertTrue(r["changed"])
+        ids = [x["id"] for x in con.execute("SELECT id FROM shots WHERE scene_id=1 ORDER BY position")]
+        self.assertEqual(ids, [2, 1, 3])
+
+    def test_move_cross_beat(self):
+        con = self.make()
+        b2 = con.execute("SELECT id FROM beats WHERE beat_no='b2'").fetchone()["id"]
+        r = ops.move_shot(con, 1, b2, 1)  # s1 放到 b2 的 s3 之后
+        self.assertTrue(r["changed"])
+        order = [x["id"] for x in con.execute("SELECT id FROM shots WHERE scene_id=1 ORDER BY position")]
+        self.assertEqual(order, [2, 3, 1])
+        self.assertEqual(con.execute("SELECT beat_id FROM shots WHERE id=1").fetchone()["beat_id"], b2)
+        pos = [x["position"] for x in con.execute("SELECT position FROM shots WHERE scene_id=1 ORDER BY position")]
+        self.assertEqual(pos, [0, 1, 2])
+
+    def test_move_to_empty_beat(self):
+        con = self.make()
+        con.execute("INSERT INTO beats (scene_id, position, beat_no, name) VALUES (1, 2, 'b3', 'b3')")
+        con.commit()
+        b3 = con.execute("SELECT id FROM beats WHERE beat_no='b3'").fetchone()["id"]
+        r = ops.move_shot(con, 3, b3, 0)
+        self.assertTrue(r["changed"])
+        bids = [x["beat_id"] for x in con.execute("SELECT beat_id FROM shots WHERE scene_id=1 ORDER BY position")]
+        self.assertEqual(bids, [1, 1, b3])
+
+    def test_move_noop(self):
+        con = self.make()
+        r = ops.move_shot(con, 2, 1, 1)  # s2 落回 b1 原位
+        self.assertFalse(r["changed"])
+
+    def test_move_history_recorded(self):
+        con = self.make()
+        b2 = con.execute("SELECT id FROM beats WHERE beat_no='b2'").fetchone()["id"]
+        ops.move_shot(con, 1, b2, 0)
+        rows = con.execute("SELECT * FROM history WHERE field='drag'").fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["source"], "manual")
+
+    def test_move_beat_reorders_shots(self):
+        con = self.make()
+        b2 = con.execute("SELECT id FROM beats WHERE beat_no='b2'").fetchone()["id"]
+        r = ops.move_beat(con, b2, 0)
+        self.assertTrue(r["changed"])
+        order = [x["id"] for x in con.execute("SELECT id FROM shots WHERE scene_id=1 ORDER BY position")]
+        self.assertEqual(order, [3, 1, 2])
+        bpos = [x["id"] for x in con.execute("SELECT id FROM beats WHERE scene_id=1 ORDER BY position, id")]
+        self.assertEqual(bpos[0], b2)
+
+    def test_move_beat_noop(self):
+        con = self.make()
+        b2 = con.execute("SELECT id FROM beats WHERE beat_no='b2'").fetchone()["id"]
+        r = ops.move_beat(con, b2, 1)
+        self.assertFalse(r["changed"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

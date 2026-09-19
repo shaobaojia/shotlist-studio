@@ -28,5 +28,6 @@ export const api = {
   scene: (no) => get('/api/scenes/' + encodeURIComponent(no)),
   update: (table, id, field, value) => post('/api/update', { table: table, id: id, field: field, value: value }),
   renumber: (no) => post('/api/scenes/' + encodeURIComponent(no) + '/renumber', {}),
+  move: (table, id, payload) => post('/api/move', Object.assign({ table: table, id: id }, payload || {})),
   history: (sceneId, limit) => get('/api/history?scene_id=' + sceneId + '&limit=' + (limit || 100)),
 };

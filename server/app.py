@@ -26,6 +26,7 @@ ROUTES = [
 POST_ROUTES = [
     (re.compile(r"^/api/update$"), handlers.update),
     (re.compile(r"^/api/scenes/([a-zA-Z0-9]+)/renumber$"), handlers.renumber),
+    (re.compile(r"^/api/move$"), handlers.move),
 ]
 
 CONTENT_TYPES = {

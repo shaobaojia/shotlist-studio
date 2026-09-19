@@ -4,22 +4,29 @@
   # → 运镜 → 空间关系 → 摄影机 → 机位 → 动作调度 → 台词 → 时长 → 音频 → 导演备注 → 提示词
 设计逻辑：「先看画面怎么动 → 再看什么镜头 → 再看干什么 → 最后技术和声音 → 喂给 AI 的提示词」
 type 对应前端渲染器（web/js/cells.js）：text / spatial / camera / jiwei / duration / audio / dialogue / notes / prompt
+options = 类型化控件的预设清单（下拉）：
+  - shot_size：景别档位（★ 与档位一一对应，属编码非手填；前端摄影机列 = 两段景别 + 焦段复合控件）
+  - focal：焦段档位；camera_pos：机位五色（单选）；shot_fn：镜头职能
+  运镜（camera_move）刻意不设 options——你的值是创作型描述（拉跟→停、弧移+仰），下拉会锁死创作。
 写白名单由 core/ops.py 从各表清单派生（prompt 为虚拟列不进写白名单；position/id/时间戳不直改）。
 """
+CAM_TIERS = ["全景 ★", "中全 ★★", "中景 ★★★", "中近 ★★★", "近景 ★★★★", "特写 ★★★★★", "极特 ★★★★★"]
+CAM_FOCALS = ["24mm", "35mm", "50mm", "85mm", "100mm"]
+
 SHOT_FIELDS = [
     {"key": "shot_no",       "label": "#",        "type": "text",     "w": 42,  "in_table": True},
     {"key": "camera_move",   "label": "运镜",     "type": "text",     "w": 72,  "in_table": True},
     {"key": "spatial",       "label": "空间关系", "type": "spatial",  "w": 160, "in_table": True},
-    {"key": "shot_size",     "label": "摄影机",   "type": "camera",   "w": 110, "in_table": True},
-    {"key": "camera_pos",    "label": "机位",     "type": "jiwei",    "w": 90,  "in_table": True},
+    {"key": "shot_size",     "label": "摄影机",   "type": "camera",   "w": 110, "in_table": True, "options": CAM_TIERS},
+    {"key": "camera_pos",    "label": "机位",     "type": "jiwei",    "w": 90,  "in_table": True, "options": ["🔴 正打", "🟡 反打", "🟢 第三人称", "🔵 空间环境", "🟣 插入/切出"]},
     {"key": "blocking",      "label": "动作调度", "type": "text",     "w": 300, "in_table": True},
     {"key": "dialogue",      "label": "台词",     "type": "dialogue", "w": 180, "in_table": True},
     {"key": "duration",      "label": "时长",     "type": "duration", "w": 44,  "in_table": True},
     {"key": "audio",         "label": "音频",     "type": "audio",    "w": 120, "in_table": True},
     {"key": "director_note", "label": "导演备注", "type": "notes",    "w": 180, "in_table": True},
     {"key": "prompt",        "label": "提示词",   "type": "prompt",   "w": 160, "in_table": True},
-    {"key": "shot_fn",       "label": "职能",     "type": "text",     "w": 56,  "in_table": False},
-    {"key": "focal",         "label": "焦段",     "type": "text",     "w": 58,  "in_table": False},
+    {"key": "shot_fn",       "label": "职能",     "type": "text",     "w": 56,  "in_table": False, "options": ["建立", "动作镜", "反应镜", "触发", "插入"]},
+    {"key": "focal",         "label": "焦段",     "type": "text",     "w": 58,  "in_table": False, "options": CAM_FOCALS},
     {"key": "dof",           "label": "景深",     "type": "text",     "w": 44,  "in_table": False},
     {"key": "pov",           "label": "视点",     "type": "text",     "w": 52,  "in_table": False},
 ]

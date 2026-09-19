@@ -142,3 +142,27 @@ td.cell-prompt { cursor: pointer; }
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 #toast.err { border-left-color: #ef4444; }
+
+/* ── M2-2：类型化控件 / 拖动 / 筛选 ── */
+.cam-editor { display: flex; flex-direction: column; gap: 4px; }
+.cam-editor select { width: 100%; }
+td.cell-shot_no { cursor: grab; }
+td.cell-shot_no:not(.editing)::after { content: '⠿'; margin-left: 5px; font-size: 10px; color: var(--dim); opacity: 0; transition: opacity .12s; }
+tbody tr.shot:hover td.cell-shot_no:not(.editing)::after { opacity: .85; }
+tbody tr.shot.dragging td { opacity: .4; }
+tbody tr.shot.drop-before td { box-shadow: inset 0 2px 0 0 var(--accent); }
+tbody tr.shot.drop-after td { box-shadow: inset 0 -2px 0 0 var(--accent); }
+section.beat.drop-end { border-bottom: 2px solid var(--accent); }
+section.beat.dragging { opacity: .5; }
+section.beat.beat-drop-before { box-shadow: inset 0 3px 0 -1px var(--accent); }
+section.beat.beat-drop-after { box-shadow: inset 0 -3px 0 -1px var(--accent); }
+.beat-head { cursor: grab; }
+tbody tr.shot.flash td { animation: rowFlash 1.5s ease-out; }
+@keyframes rowFlash { 0% { background: rgba(244, 63, 94, 0.32); } 100% { background: transparent; } }
+.filter-input {
+  background: var(--card); border: 1px solid var(--line); color: var(--text);
+  border-radius: 3px; padding: 3px 8px; font-size: 12px; width: 128px;
+}
+.filter-input:focus { outline: none; border-color: var(--accent); }
+.jump-input { width: 96px; }
+.filter-info { font-size: 12px; color: var(--dim); }

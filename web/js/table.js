@@ -3,7 +3,8 @@
 import { state } from './state.js';
 import { el, fmt } from './ui.js';
 import { cellContent } from './cells.js';
-import { attachEditable } from './edit.js';
+import { attachEditable, attachCamEditor, parseCam, recordUndo } from './edit.js';
+import { api } from './api.js';
 
 const MULTILINE_TYPES = new Set(['spatial', 'dialogue', 'audio', 'notes', 'camera']);
 const MULTILINE_KEYS = new Set(['blocking']);
@@ -13,10 +14,10 @@ function isMultiline(f) {
 }
 
 function tableColumns(beatCol, prefs) {
-  const fields = state.meta.shot_fields.filter(f => f.in_table && (f.type !== 'prompt' || prefs.prompt));
+  const fields = state.meta.shot_fields.filter((f) => f.in_table && (f.type !== 'prompt' || prefs.prompt));
   const cols = [{ key: '__toggle', label: '', type: 'toggle', w: 26 }].concat(fields);
   if (beatCol) {
-    const i = cols.findIndex(c => c.key === 'shot_no');
+    const i = cols.findIndex((c) => c.key === 'shot_no');
     cols.splice(i + 1, 0, { key: '__beat', label: '节拍', type: 'beat', w: 110 });
   }
   return cols;
@@ -68,6 +69,7 @@ export function buildTable(shots, opts) {
 function shotRows(s, cols, groups, data) {
   const tr = el('tr', 'shot');
   tr.dataset.id = s.id;
+  tr.dataset.beatId = s.beat_id;
   for (const f of cols) tr.appendChild(shotCell(s, f, groups, data));
   const det = el('tr', 'detail');
   det.hidden = true;
@@ -103,7 +105,7 @@ function shotCell(s, f, groups, data) {
 
   td.className = 'cell-' + (f.key === '__beat' ? 'beatref' : f.key);
   if (f.key === '__beat') {
-    const b = data.beats.find(x => x.id === s.beat_id);
+    const b = data.beats.find((x) => x.id === s.beat_id);
     td.textContent = b
       ? ((/^\d+$/.test(String(b.beat_no)) ? b.beat_no + ' · ' : '') + (b.name || ''))
       : '—';
@@ -119,9 +121,33 @@ function shotCell(s, f, groups, data) {
 
   renderShotField(td, s, f);
   td.dataset.field = f.key;
+  if (f.key === 'shot_no') td.draggable = true;
+
+  if (f.type === 'camera') {
+    attachCamEditor(td, {
+      id: s.id,
+      getCam: () => ({ raw: s.shot_size, focal: s.focal, dof: s.dof }),
+      setCam: (k, v) => { s[k] = v; },
+      renderCell: () => {
+        renderShotField(td, s, f);
+        refreshDetailValue(s, 'shot_size');
+        refreshDetailValue(s, 'focal');
+        refreshDetailValue(s, 'dof');
+      },
+      refreshSiblings: () => {
+        refreshDetailValue(s, 'shot_size');
+        refreshDetailValue(s, 'focal');
+        refreshDetailValue(s, 'dof');
+      },
+      camOptions: camOptions,
+    });
+    return td;
+  }
+
   attachEditable(td, {
     table: 'shots', id: s.id, field: f.key, label: f.label,
     multiline: isMultiline(f),
+    select: f.options || undefined,
     getValue: () => s[f.key],
     onLocal: (v) => { s[f.key] = v; },
     renderCell: () => { renderShotField(td, s, f); refreshDetailValue(s, f.key); },
@@ -140,10 +166,64 @@ function refreshDetailValue(s, key) {
 }
 
 function refreshTableValue(s, key) {
-  const f = state.meta.shot_fields.find(x => x.key === key);
+  const f = state.meta.shot_fields.find((x) => x.key === key);
   if (!f) return;
   document.querySelectorAll('tr.shot[data-id="' + s.id + '"] td[data-field="' + key + '"]')
     .forEach((td) => { renderShotField(td, s, f); });
+}
+
+function camOptions() {
+  const sz = state.meta.shot_fields.find((x) => x.key === 'shot_size');
+  const fo = state.meta.shot_fields.find((x) => x.key === 'focal');
+  return { tiers: (sz && sz.options) || [], lens: (fo && fo.options) || [] };
+}
+
+function detailCamCfg(s, v) {
+  return {
+    id: s.id,
+    getCam: () => ({ raw: s.shot_size, focal: s.focal, dof: s.dof }),
+    setCam: (k, val) => { s[k] = val; },
+    renderCell: () => {
+      v.textContent = fmt(s.shot_size);
+      refreshTableValue(s, 'shot_size');
+      refreshDetailValue(s, 'shot_size');
+      refreshDetailValue(s, 'focal');
+      refreshDetailValue(s, 'dof');
+    },
+    refreshSiblings: () => {
+      refreshTableValue(s, 'shot_size');
+      refreshDetailValue(s, 'focal');
+      refreshDetailValue(s, 'dof');
+    },
+    camOptions: camOptions,
+  };
+}
+
+// 焦段编辑归一化：写 focal；若旧串内嵌焦段 → 顺带把串重写为纯景别（一份来源）
+function lensSave(s, refresh) {
+  return async (oldV, newV) => {
+    const p = parseCam(s.shot_size);
+    const oldValues = { shot_size: s.shot_size, focal: s.focal };
+    const writes = [['focal', newV]];
+    if (p.lens) writes.push(['shot_size', p.t1 + (p.t2 ? ' ↓ ' + p.t2 : '')]);
+    for (const w of writes) s[w[0]] = w[1];
+    refresh();
+    try {
+      for (const w of writes) await api.update('shots', s.id, w[0], w[1]);
+      recordUndo({
+        type: 'custom', label: '焦段',
+        undo: async () => {
+          await api.update('shots', s.id, 'shot_size', oldValues.shot_size == null ? '' : oldValues.shot_size);
+          await api.update('shots', s.id, 'focal', oldValues.focal == null ? '' : oldValues.focal);
+        },
+      });
+    } catch (err) {
+      s.shot_size = oldValues.shot_size;
+      s.focal = oldValues.focal;
+      refresh();
+      throw err;
+    }
+  };
 }
 
 function detailBox(s, groups) {
@@ -155,13 +235,31 @@ function detailBox(s, groups) {
     item.appendChild(el('div', 'kv-label', f.label));
     const v = el('div', 'kv-value', fmt(s[f.key]));
     v.dataset.field = f.key;
-    attachEditable(v, {
-      table: 'shots', id: s.id, field: f.key, label: f.label,
-      multiline: isMultiline(f),
-      getValue: () => s[f.key],
-      onLocal: (val) => { s[f.key] = val; },
-      renderCell: () => { v.textContent = fmt(s[f.key]); refreshTableValue(s, f.key); },
-    });
+    if (f.key === 'shot_size') {
+      attachCamEditor(v, detailCamCfg(s, v));
+    } else if (f.key === 'focal') {
+      attachEditable(v, {
+        table: 'shots', id: s.id, field: 'focal', label: f.label,
+        select: f.options || undefined,
+        getValue: () => s.focal,
+        onLocal: (val) => { s.focal = val; },
+        renderCell: () => { v.textContent = fmt(s.focal); },
+        save: lensSave(s, () => {
+          v.textContent = fmt(s.focal);
+          refreshTableValue(s, 'shot_size');
+          refreshDetailValue(s, 'shot_size');
+        }),
+      });
+    } else {
+      attachEditable(v, {
+        table: 'shots', id: s.id, field: f.key, label: f.label,
+        multiline: isMultiline(f),
+        select: f.options || undefined,
+        getValue: () => s[f.key],
+        onLocal: (val) => { s[f.key] = val; },
+        renderCell: () => { v.textContent = fmt(s[f.key]); refreshTableValue(s, f.key); },
+      });
+    }
     item.appendChild(v);
     box.appendChild(item);
   }
@@ -176,9 +274,12 @@ function detailBox(s, groups) {
 
 export function beatSection(b, data, opts) {
   const sec = el('section', 'beat');
+  if (b.id != null) sec.dataset.beatId = b.id;
   const numeric = b.beat_no != null && /^\d+$/.test(String(b.beat_no));
   if (numeric) {
     const head = el('div', 'beat-head');
+    head.draggable = true;
+    head.title = '点名称改字 · 拖动整节拍重排';
     if (b.kind) {
       const lab = el('span', 'beat-label beat-dot', String(b.kind));
       attachEditable(lab, {
@@ -200,7 +301,7 @@ export function beatSection(b, data, opts) {
     head.appendChild(title);
     sec.appendChild(head);
   } else {
-    sec.appendChild(el('div', 'space-label', '▸ ' + (b.name || '未归节拍') + '镜 (' + b.shots.length + ' 镜)'));
+    sec.appendChild(el('div', 'space-label', '▸ ' + (b.name || '未归节拍') + ' (' + b.shots.length + ' 镜)'));
   }
   if (b.beat_action) {
     const act = el('div', 'beat-action');

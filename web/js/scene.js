@@ -1,16 +1,26 @@
-// 场级页——页面组装：头部（可编）/ 工具条（整理镜号·开关·排序）/ 分组与平铺；
-// 表格与节拍区在 table.js；编辑引擎在 edit.js。
+// 场级页——页面组装：头部（可编）/ 工具条（整理镜号·开关·筛选·跳转）/ 分组与平铺；
+// 表格与节拍区在 table.js；编辑引擎在 edit.js；拖动在 drag.js；筛选在 filter.js。
 import { api } from './api.js';
 import { state } from './state.js';
 import { el, fmt, toast } from './ui.js';
 import { JIWEI_LEGEND } from './cells.js';
 import { buildTable, beatSection } from './table.js';
 import { attachEditable, recordUndo } from './edit.js';
+import { bindDrag } from './drag.js';
+import { filterActive, resetFilter, buildFilterTools, applyFilter } from './filter.js';
 
 const PREFS_KEY = 'shotlist_prefs_v1';
 let prefs = loadPrefs();   // { wrap: true, prompt: true }
 let sortState = null;      // { key, dir: 1|-1 } | null —— 仅视图，不改行序
 let currentData = null;
+
+const fctx = {
+  getData: () => currentData,
+  allShots: () => (currentData ? allShots(currentData) : []),
+  getView: () => document.getElementById('view'),
+  repaint: () => paintScene(document.getElementById('view')),
+  apply: () => applyFilter(fctx),
+};
 
 function loadPrefs() {
   try {
@@ -37,7 +47,9 @@ export async function renderScene(view, sceneNo) {
   }
   if (location.hash !== '' && location.hash !== '#/' + sceneNo) return;
   sortState = null;
+  resetFilter();
   currentData = data;
+  bindDragOnce(view);
   paintScene(view);
 }
 
@@ -49,6 +61,57 @@ export async function refreshCurrentView() {
     currentData = await api.scene(no);
     paintScene(view);
   } catch (e) { /* 保留现状 */ }
+}
+
+// ── 拖动接线（事件委托，绑定一次） ──
+function bindDragOnce(view) {
+  if (view.dataset.dragBound === '1') return;
+  view.dataset.dragBound = '1';
+  bindDrag(view, {
+    data: () => currentData,
+    enabled: () => !sortState && !filterActive(),
+    onMoveShot: async (shotId, beatId, index) => {
+      const info = shotDragInfo(shotId);
+      try {
+        const res = await api.move('shots', shotId, { beat_id: beatId, index: index });
+        if (res.moved && res.moved.changed) {
+          if (info) {
+            recordUndo({
+              type: 'custom', label: '拖动',
+              undo: async () => { await api.move('shots', shotId, { beat_id: info.beatId, index: info.index }); },
+            });
+          }
+          await refreshCurrentView();
+        }
+      } catch (err) {
+        toast('拖动失败：' + err.message, 'err');
+      }
+    },
+    onMoveBeat: async (beatId, index) => {
+      const oldIndex = currentData ? currentData.beats.findIndex((b) => b.id === beatId) : 0;
+      try {
+        const res = await api.move('beats', beatId, { index: index });
+        if (res.moved && res.moved.changed) {
+          recordUndo({
+            type: 'custom', label: '节拍拖动',
+            undo: async () => { await api.move('beats', beatId, { index: oldIndex }); },
+          });
+          await refreshCurrentView();
+        }
+      } catch (err) {
+        toast('拖动失败：' + err.message, 'err');
+      }
+    },
+  });
+}
+
+function shotDragInfo(shotId) {
+  if (!currentData) return null;
+  for (const b of currentData.beats) {
+    const i = b.shots.findIndex((x) => x.id === shotId);
+    if (i !== -1) return { beatId: b.id, index: i };
+  }
+  return null;
 }
 
 function paintScene(view) {
@@ -78,6 +141,7 @@ function paintScene(view) {
         data, topts));
     }
   }
+  applyFilter(fctx);
 }
 
 function allShots(data) {
@@ -195,8 +259,10 @@ function viewTools() {
     paintScene(document.getElementById('view'));
   }));
 
+  buildFilterTools(bar, fctx);
+
   if (sortState) {
-    const f = state.meta.shot_fields.find(x => x.key === sortState.key);
+    const f = state.meta.shot_fields.find((x) => x.key === sortState.key);
     bar.appendChild(el('span', 'sort-info',
       '视图排序：' + (f ? f.label : sortState.key) + (sortState.dir === 1 ? ' ↑' : ' ↓') + '（仅视图）'));
     const btn = el('button', 'tool-btn', '清除排序');

@@ -103,6 +103,29 @@ def update(m, body, q):
         con.close()
 
 
+def move(m, body, q):
+    table = (body or {}).get("table")
+    rid = (body or {}).get("id")
+    index = (body or {}).get("index", 0)
+    if table not in ("shots", "beats") or not isinstance(rid, int):
+        return {"error": "参数不完整（table/id/index）"}, 400
+    ops.ensure_daily_snapshot()
+    con = db.connect(rw=True)
+    try:
+        if table == "shots":
+            bid = (body or {}).get("beat_id")
+            if not isinstance(bid, int):
+                return {"error": "缺少目标节拍 beat_id"}, 400
+            res = ops.move_shot(con, rid, bid, index)
+        else:
+            res = ops.move_beat(con, rid, index)
+        return {"ok": True, "moved": res}, 200
+    except ValueError as e:
+        return {"error": str(e)}, 400
+    finally:
+        con.close()
+
+
 def renumber(m, body, q):
     """M2 整理镜号：按当前顺序整场顺排；旧号入痕迹。"""
     scene_no = m.group(1)
