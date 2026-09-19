@@ -29,18 +29,6 @@ export function buildFilterTools(bar, ctx) {
   });
   bar.appendChild(fq);
 
-  const lab = el('label', 'tool');
-  const cb = document.createElement('input');
-  cb.type = 'checkbox';
-  cb.checked = filterState.noPrompt;
-  cb.addEventListener('change', (e) => {
-    filterState.noPrompt = e.target.checked;
-    ctx.apply();
-  });
-  lab.appendChild(cb);
-  lab.appendChild(document.createTextNode(' 未写提示词'));
-  bar.appendChild(lab);
-
   const fj = document.createElement('input');
   fj.type = 'text';
   fj.className = 'filter-input jump-input';
@@ -52,6 +40,18 @@ export function buildFilterTools(bar, ctx) {
     }
   });
   bar.appendChild(fj);
+
+  const lab = el('label', 'tool');
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = filterState.noPrompt;
+  cb.addEventListener('change', (e) => {
+    filterState.noPrompt = e.target.checked;
+    ctx.apply();
+  });
+  lab.appendChild(cb);
+  lab.appendChild(document.createTextNode(' 未写提示词'));
+  bar.appendChild(lab);
 
   bar.appendChild(el('span', 'filter-info'));
   const clr = el('button', 'tool-btn clear-filter', '清除筛选');

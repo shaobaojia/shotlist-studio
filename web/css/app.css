@@ -411,3 +411,6 @@ body.col-resizing { cursor: col-resize; user-select: none; }
   padding: 3px 8px; font: inherit; font-size: 12px; color: var(--text);
 }
 .bm-input:focus { outline: none; border-color: var(--accent); }
+
+/* 工具排 B 案（2026-09-19 定案）：场务抽屉吸右 */
+.view-tools .vt-drawer { margin-left: auto; }

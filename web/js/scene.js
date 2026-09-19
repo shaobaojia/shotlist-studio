@@ -329,9 +329,45 @@ function sceneHead(sc, data) {
 function viewTools() {
   const bar = el('div', 'view-tools');
 
-  const rn = el('button', 'tool-btn', '整理镜号');
-  rn.title = '按当前顺序整场顺排（旧号入痕迹）；不点不排';
-  rn.addEventListener('click', async () => {
+  // 视图形态（常驻）
+  const effFlat = !!sortState || prefs.viewMode === 'flat';
+  const seg = el('span', 'seg');
+  seg.title = '视图：按节拍分组 / 平铺为一张表（本地记住）';
+  [['group', '分组'], ['flat', '平铺']].forEach(function (pair) {
+    const mode = pair[0];
+    const b = el('button', 'seg-b' + (((mode === 'flat') === effFlat) ? ' on' : ''), pair[1]);
+    b.addEventListener('click', () => {
+      if (mode === 'group') sortState = null;
+      prefs.viewMode = mode;
+      savePrefs();
+      paintScene(document.getElementById('view'));
+    });
+    seg.appendChild(b);
+  });
+  bar.appendChild(seg);
+
+  // 查找与定位（常驻：筛选 → 镜号跳转 → 未写提示词 → 计数 → 清除）
+  buildFilterTools(bar, fctx);
+
+  if (sortState) {
+    const f = state.meta.shot_fields.find((x) => x.key === sortState.key);
+    bar.appendChild(el('span', 'sort-info',
+      '视图排序：' + (f ? f.label : sortState.key) + (sortState.dir === 1 ? ' ↑' : ' ↓') + '（仅视图）'));
+    const btn = el('button', 'tool-btn', '清除排序');
+    btn.addEventListener('click', () => {
+      sortState = null;
+      paintScene(document.getElementById('view'));
+    });
+    bar.appendChild(btn);
+  }
+
+  // 场务（低频·吸右抽屉）：整理镜号 / 锁定本场 / 自动换行 / 列设置 / 痕迹
+  const setWrap = (v) => {
+    prefs.wrap = v;
+    savePrefs();
+    document.getElementById('view').classList.toggle('wrap-off', !v);
+  };
+  const doRenumber = async () => {
     try {
       const res = await api.renumber(currentData.scene.scene_no);
       const changes = res.changes || [];
@@ -350,13 +386,8 @@ function viewTools() {
     } catch (err) {
       toast('整理失败：' + err.message, 'err');
     }
-  });
-  bar.appendChild(rn);
-
-  const lockBtn = el('button', 'tool-btn' + (currentData.scene.locked ? ' locked' : ''),
-    currentData.scene.locked ? '已锁定 · 解锁' : '锁定本场');
-  lockBtn.title = '留底 + 标记：拍一张场次版本快照（锁定 ≠ 禁止编辑）';
-  lockBtn.addEventListener('click', async () => {
+  };
+  const doLockToggle = async () => {
     const want = !currentData.scene.locked;
     try {
       const res = await api.lock(currentData.scene.id, want);
@@ -367,75 +398,42 @@ function viewTools() {
     } catch (err) {
       toast((want ? '锁定' : '解锁') + '失败：' + err.message, 'err');
     }
-  });
-  bar.appendChild(lockBtn);
-
-  const effFlat = !!sortState || prefs.viewMode === 'flat';
-  const seg = el('span', 'seg');
-  seg.title = '视图：按节拍分组 / 平铺为一张表（本地记住）';
-  [['group', '分组'], ['flat', '平铺']].forEach(function (pair) {
-    const mode = pair[0];
-    const b = el('button', 'seg-b' + (((mode === 'flat') === effFlat) ? ' on' : ''), pair[1]);
-    b.addEventListener('click', () => {
-      if (mode === 'group') sortState = null;
-      prefs.viewMode = mode;
-      savePrefs();
-      paintScene(document.getElementById('view'));
-    });
-    seg.appendChild(b);
-  });
-  bar.appendChild(seg);
-
-  const mkBox = (labelText, checked, onChange) => {
-    const lab = el('label', 'tool');
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = checked;
-    cb.addEventListener('change', onChange);
-    lab.appendChild(cb);
-    lab.appendChild(document.createTextNode(' ' + labelText));
-    return lab;
   };
-  bar.appendChild(mkBox('自动换行', prefs.wrap, (e) => {
-    prefs.wrap = e.target.checked;
-    savePrefs();
-    document.getElementById('view').classList.toggle('wrap-off', !prefs.wrap);
-  }));
-  const cs = el('button', 'tool-btn', '列设置');
-  cs.title = '列的显示 / 隐藏（本地记住）';
-  cs.addEventListener('click', () => {
+  const openColsMenu = (anchor) => {
     const items = state.meta.shot_fields.filter((f) => f.in_table).map((f) => (
       { key: f.key, label: f.label || f.key, current: !prefs.hidden[f.key] }
     ));
     items.push({ sep: true }, { key: '__all', label: '全部显示' });
-    openMenu(cs, items, (k) => {
+    openMenu(anchor, items, (k) => {
       if (k === '__all') prefs.hidden = {};
       else if (prefs.hidden[k]) delete prefs.hidden[k];
       else prefs.hidden[k] = true;
       savePrefs();
       paintScene(document.getElementById('view'));
     });
-  });
-  bar.appendChild(cs);
-
-  const hs = el('button', 'tool-btn', '痕迹');
-  hs.title = '回看本场操作痕迹（旧值 → 新值）';
-  hs.addEventListener('click', () => toggleHistory(currentData.scene));
-  bar.appendChild(hs);
-
-  buildFilterTools(bar, fctx);
-
-  if (sortState) {
-    const f = state.meta.shot_fields.find((x) => x.key === sortState.key);
-    bar.appendChild(el('span', 'sort-info',
-      '视图排序：' + (f ? f.label : sortState.key) + (sortState.dir === 1 ? ' ↑' : ' ↓') + '（仅视图）'));
-    const btn = el('button', 'tool-btn', '清除排序');
-    btn.addEventListener('click', () => {
-      sortState = null;
-      paintScene(document.getElementById('view'));
+  };
+  const drawer = el('button', 'tool-btn vt-drawer', '场务 ⋯');
+  drawer.title = '场务：整理镜号 / 锁定本场 / 自动换行 / 列设置 / 痕迹';
+  drawer.addEventListener('click', () => {
+    const locked = !!currentData.scene.locked;
+    openMenu(drawer, [
+      { key: 'renum', label: '整理镜号' },
+      { key: 'lock', label: locked ? '解锁本场（当前已锁定）' : '锁定本场' },
+      { sep: true },
+      { key: 'wrap', label: '自动换行', current: !!prefs.wrap },
+      { key: 'cols', label: '列设置' },
+      { sep: true },
+      { key: 'hist', label: '痕迹' },
+    ], (k) => {
+      if (k === 'renum') doRenumber();
+      else if (k === 'lock') doLockToggle();
+      else if (k === 'wrap') setWrap(!prefs.wrap);
+      else if (k === 'cols') openColsMenu(drawer);
+      else if (k === 'hist') toggleHistory(currentData.scene);
     });
-    bar.appendChild(btn);
-  }
+  });
+  bar.appendChild(drawer);
+
   return bar;
 }
 
