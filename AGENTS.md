@@ -24,6 +24,8 @@
 
 - 2026-09-19 **M2 批次 4（选区系统 + 走格 + 批量设值）**：①框选——单元格拖拽出格即成选区（同格内仍是点击即编，互不干扰）；Shift 点选/拖拽扩选；Esc/点外部取消；**选区限定单张表内**。②表底选区条（selbar.js）：计数（单列「已选 N 镜 · 列名」/ 多列「N 格 · N 镜 · N 列」）+ 批量设值（12 字段；枚举走浮动菜单拾取即套用、文本输入回车套用）+ 复制（TSV）+ 清空 + 关闭。③键盘走格：方向键走格（多选先塌缩再移动）、Shift+方向键扩选、Enter 开编、Tab 右移；编辑中 Tab/Shift+Tab=保存并走格、Enter=保存并下移（单行）。④右键菜单选区内变体：复制选区 / 清空选区 / 粘贴（从选区左上起）。⑤服务端 /api/batch：逐项白名单+痕迹、单连接一次 commit、上限 400；单测 17/17。⑥修 applyFieldValue 越界写（见坑）。E2E 全绿（框选/设值只动选中行/撤销还原/键盘/走格/右键/回归三件套），数据完璧。
 
+- 2026-09-19 **服务常驻化（掉线根治）**：:8094 与老库 :8089 两个服务在会话收拢时被 Hermes 连带清掉（同刻 SIGTERM、termination_source=agent_close——托管后台进程随会话/应用动作被回收，已实证；主机与容器均未重启）；根治 = 脱会话守护：仓库新增 scripts/serve.sh；老库同款包装器 /opt/data/bin/serve-shotlist-archive.sh（不改 skill 内容）。两者实证 PPID=1 脱离 + 健康通过；浏览器端到端复核（9 场签 / 34 行 / 7 分区）。
+
 ## 正在做
 - M2 进行中：批次 1 = 编辑底座 ✅；批次 1a = 控件无缝化 ✅；批次 2 = 拖动/筛选/类型化 ✅；批次 3 = 浮动菜单/剪贴板/反哺修复 ✅；批次 3b = 拖动修正/行首手柄/卷展预热 ✅；批次 3c = 把手行线对齐 ✅；批次 4 = 选区/走格/批量设值 ✅（本次提交）。剩余见下一步。
 
@@ -39,7 +41,7 @@
 - 本仓库在 NAS 共享卷：容器内新建文件后注意权限（保持 a+rwX 双向可写）。
 - 凭证红线：一切 key / secret 不入库；飞书凭证在库外（feishu_config.json）。
 - 大文件改动走脚本替换，禁裸 patch（老库坑条）。
-- 老库页面服务 :8089 保留运行（迁移对照用）。
+- 老库页面服务 :8089 保留运行（迁移对照用）——管理：bash /opt/data/bin/serve-shotlist-archive.sh {start|stop|status}（同款脱会话守护，顺带治它自退老毛病）。
 - 老库表视图规格出处（移植对照用）：storyboard-shotlist 仓库 references/frontend-notes.md、templates/feishu-backed.html、read/done/*_feishu_backed.html；渲染器 web/js/cells.js。
 - 数据注意（M2 编辑前先定规则）：『景别』复合串内含焦段/景深信息（列上已不再显示景深，但数据里仍在），与独立 focal/dof 字段是两份来源；全量比对 46 镜仅 2 例不一致（均 s010：镜02 串内 50mm vs 独立 35mm；镜22 串内 35mm vs 独立 50mm；疑似当年单边手改）。两份均为原始数据、未动；M2 需先定同步/分工规则。
 - 迁移实测：①「节拍属性」= 逐镜字段（已落 shots.shot_fn）；② 镜24 beat标题（被确认屈从）与序号（6）不一致（已按序号归组、标题取多数，留档）；③ s010 节拍明细（外界动作/反应/闭环/说明）已从 s010_第一场_分析.md 补录。
@@ -48,7 +50,8 @@
 - 撤销走同一写路径 → history 同时有「改」与「撤销改」两条记录，属预期（痕迹 = 全操作留痕）；撤销栈是客户端内存栈，刷新页面即清空（数据层不依赖它）。
 - 写白名单与类型判定以 fields.py 单点为准；前端多行判定（table.js MULTILINE_TYPES / KEYS）与之对齐，改字段时两处一起看。
 - 每日快照落 data/snapshots/daily/studio-YYYYMMDD.db（幂等；snapshots 表暂未启用，以文件为准）。
-- 服务运行：python3 server/app.py（默认 :8094，SHOTLIST_PORT 可覆盖）；**本容器无 fuser/ss**——杀进程用 /proc 扫描匹配 server/app.py 后 SIGTERM；改 py 必须杀净旧进程再重起（否则旧进程占端口、新进程静默退出、旧代码继续服务——09-19 已踩坑）；当前由 Hermes 托管进程跑，容器重启后需重起。
+- 服务运行：**bash scripts/serve.sh {start|stop|status}**（官方姿势）——脱会话守护（setsid 独立会话 + 崩溃 2 秒自动重拉；日志 data/serve.log、pid data/serve.pid）；容器重启后手动跑一次 start。换端口：SHOTLIST_PORT 可覆盖。**本容器无 fuser/ss**——异常清退用 /proc 扫描匹配 server/app.py 后 SIGTERM；改 py 后走 serve.sh stop → start（不杀旧进程会让新进程静默退出、旧代码继续服务——已踩坑）。
+- **常驻服务禁用 Hermes 后台进程方式跑**：会话收拢/应用动作会连带 SIGTERM 回收（2026-09-19 两服务同死实证）——一切常驻走 scripts/serve.sh（脱会话）。
 - 拖动 index 语义：目标节拍「去掉被拖者后」的插入位；move_shot 重排全场 position（0 基）；拖动不改镜号（镜号整理是独立按钮）。
 - 摄影机归一化规则：任何对摄影机/焦段的编辑 → 串重写为纯景别（内嵌焦段/景深迁入独立字段，仅在字段为空时迁）；展示=『串内嵌优先、无则字段』——历史行不改动。
 - 镜号跳转数字归一：'6' = '06'（filter.js norm：纯数字去前导零、含字母转大写）；曾踩坑 '6' 匹配不到 '06'。
@@ -58,7 +61,6 @@
 - 原生 select 已全面退役（单元格单选/复合槽位/详情区都走 menu.js 浮动菜单）——不要再往编辑路径加 select。关闭协议：弹层内 mousedown 不算「点外」；Esc 先给菜单（表单 onEsc 里 menuOpen() 时让行）。
 - 剪贴板限制（实测）：局域网 http 下 isSecureContext=false、navigator.clipboard 不可用；复制走 execCommand 兜底（需在用户手势上下文内）；粘贴无法程序化读取 → 「Ctrl+V 待命」模式（6 秒超时、Esc 取消）。
 - 拖动把手 = .drag-dots 真实元素（非伪元素、非 td 属性）；td.cell-shot_no 不再 draggable（整格可拖会误触拖动、点编辑发飘）。
-。
 - 拖动落点语义（补）：放回自己（自己行/自己节拍）= 原地不动——客户端直接 return 不发请求；悬停自身行不显示落点指示。若不判自身，ti===-1 会误入『插到末尾』分支（乱跑根因）。
 - 拖动把手位置：.drag-dots 在 toggle 格（行首）左侧、悬停显示；靶区含 padding（≈10×18）。td.cell-shot_no 与把手无关。
 - 卷展性能：稳态开/关 17ms/帧干净；首开有一次性冷成本（偶现 ~50ms 级）——scheduleWarm 空闲预热兜底（只处理折叠态、同任务还原、不闪）。改动详情区结构时记得预热逻辑仍适用。
