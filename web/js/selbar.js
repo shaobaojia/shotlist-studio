@@ -4,6 +4,7 @@ import { el } from './ui.js';
 import { openMenu } from './menu.js';
 import { onChange, current, clearSel, rectOf, copySelectionTSV, clearSelectionCells, applyFieldValue } from './selection.js';
 import { deleteSelectedRows } from './cellmenu.js';
+import { mergeShotsByIds, detachShotsByIds } from './hotbox.js';
 
 // 可批量设值的字段（枚举优先排前；镜号/景深/虚拟列不进）
 const BATCH_KEYS = ['camera_pos', 'shot_size', 'focal', 'shot_fn', 'camera_move', 'spatial', 'blocking', 'dialogue', 'duration', 'audio', 'director_note', 'pov'];
@@ -45,6 +46,18 @@ function updateCount(s) {
     countEl.textContent = '已选 ' + (m * colsN) + ' 格 · ' + m + ' 镜 · ' + colsN + ' 列';
   }
   if (delBtn) delBtn.textContent = '删除行（' + m + '）';
+}
+
+function selectedRowIds() {
+  const s = current();
+  const rc = rectOf();
+  if (!s || !rc) return [];
+  const ids = [];
+  for (let r = rc.r1; r <= rc.r2; r++) {
+    const tr = s.rows[r];
+    if (tr) ids.push(Number(tr.dataset.id));
+  }
+  return ids;
 }
 
 function build() {
@@ -112,6 +125,15 @@ function build() {
   } else {
     mid.appendChild(el('span', 'sbar-hint', '先选字段，再设值'));
   }
+
+  const gm = el('button', 'tool-btn', '并为一组');
+  gm.title = '把选中的镜头合并为一个提示词组（保留首组文本，可 Ctrl+Z）';
+  gm.addEventListener('click', () => mergeShotsByIds(selectedRowIds()));
+  bar.appendChild(gm);
+  const gh = el('button', 'tool-btn', '独立成组');
+  gh.title = '选中的镜头各自拆成独立的提示词组（可 Ctrl+Z）';
+  gh.addEventListener('click', () => detachShotsByIds(selectedRowIds()));
+  bar.appendChild(gh);
 
   const cp = el('button', 'tool-btn', '复制');
   cp.title = '复制选区（TSV，可直接贴进 Excel）';

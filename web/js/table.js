@@ -5,6 +5,7 @@ import { el, fmt, toast } from './ui.js';
 import { cellContent } from './cells.js';
 import { attachEditable, attachCamEditor, parseCam, recordUndo } from './edit.js';
 import { api } from './api.js';
+import { buildPromptBox, toggleComposer } from './hotbox.js';
 
 const MULTILINE_TYPES = new Set(['spatial', 'dialogue', 'audio', 'notes', 'camera']);
 const MULTILINE_KEYS = new Set(['blocking']);
@@ -140,7 +141,7 @@ function shotRows(s, cols, groups, data) {
   det.dataset.for = s.id;
   const dtd = document.createElement('td');
   dtd.colSpan = cols.length;
-  dtd.appendChild(detailBox(s, groups));
+  dtd.appendChild(detailBox(s, groups, data));
   det.appendChild(dtd);
 
   const flip = () => {
@@ -150,7 +151,7 @@ function shotRows(s, cols, groups, data) {
   const tc = tr.querySelector('.cell-toggle');
   if (tc) tc.addEventListener('click', (e) => { e.stopPropagation(); flip(); });
   const pc = tr.querySelector('.cell-prompt');
-  if (pc) pc.addEventListener('click', (e) => { e.stopPropagation(); flip(); });
+  if (pc) pc.addEventListener('click', (e) => { e.stopPropagation(); toggleComposer(det, s); });
 
   const frag = document.createDocumentFragment();
   frag.appendChild(tr);
@@ -297,7 +298,7 @@ function lensSave(s, refresh) {
   };
 }
 
-function detailBox(s, groups) {
+function detailBox(s, groups, data) {
   const box = el('div', 'detail-grid');
   for (const f of state.meta.shot_fields) {
     if (f.type === 'prompt') continue;
@@ -334,12 +335,7 @@ function detailBox(s, groups) {
     item.appendChild(v);
     box.appendChild(item);
   }
-  const g = s.prompt_group_id != null ? groups[s.prompt_group_id] : null;
-  const pb = el('div', 'prompt-box');
-  pb.appendChild(el('div', 'kv-label',
-    g ? ('提示词（本组 ' + g.member_shots.length + ' 镜：' + g.member_shots.join(' / ') + '）') : '提示词'));
-  pb.appendChild(el('pre', 'prompt-text', g ? g.text : '（未写提示词）'));
-  box.appendChild(pb);
+  box.appendChild(buildPromptBox(s, groups, data));
   return box;
 }
 

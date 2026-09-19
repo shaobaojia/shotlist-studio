@@ -13,6 +13,7 @@ import { bindDrag } from './drag.js';
 import { filterActive, resetFilter, buildFilterTools, applyFilter } from './filter.js';
 import { openMenu } from './menu.js';
 import { toggleHistory, closeHistory, refreshHistoryIfOpen } from './history.js';
+import { initHotbox } from './hotbox.js';
 
 const PREFS_KEY = 'shotlist_prefs_v1';
 let prefs = loadPrefs();   // { wrap, hidden:{key:true=隐藏}, widths:{key:px} }
@@ -70,6 +71,7 @@ export async function renderScene(view, sceneNo) {
     refresh: refreshCurrentView,
   });
   bindSelection(view, { getShot: (id) => (currentData ? allShots(currentData).find((s) => s.id === id) : null) });
+  initHotbox({ getData: () => currentData, refresh: refreshCurrentView });
   paintScene(view);
 }
 
