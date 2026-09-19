@@ -88,7 +88,11 @@ function renderBox(pb) {
   body.appendChild(pre);
   body.appendChild(el('div', 'pb-tips',
     g ? '点击正文拼装 · 块库拼积木 + 自由手写' : '点击拼装（写入自动建组）· 块库拼积木 + 自由手写'));
-  body.addEventListener('click', () => activateBox(pb));
+  body.addEventListener('click', (e) => {
+    const t = e.target;
+    if (t && t.closest && t.closest('.hotbox')) return;   // 编辑面内部点击（定位光标 / 热盒条 / 搜索框）：只管拼，不重激活、不重设光标
+    activateBox(pb);
+  });
   pb.appendChild(body);
 }
 
@@ -178,8 +182,9 @@ function activateBox(pb) {
 function focusEditor(pb) {
   const st = pb._state;
   if (!st || !st.ta) return;
+  const hadFocus = document.activeElement === st.ta;
   st.ta.focus();
-  st.ta.setSelectionRange(st.ta.value.length, st.ta.value.length);
+  if (!hadFocus) st.ta.setSelectionRange(st.ta.value.length, st.ta.value.length);   // 仅首次激活时把光标放末尾；已聚焦则原地不动
   setTimeout(() => { try { pb.scrollIntoView({ block: 'nearest' }); } catch (e) { /* ignore */ } }, 0);
 }
 
