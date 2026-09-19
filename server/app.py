@@ -11,6 +11,7 @@ from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from api import handlers  # noqa: E402
+from api import prompts as prompts_api  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = (ROOT / "web").resolve()
@@ -21,6 +22,7 @@ ROUTES = [
     (re.compile(r"^/api/film$"), handlers.film),
     (re.compile(r"^/api/scenes/([^/]+)$"), handlers.scene),
     (re.compile(r"^/api/history$"), handlers.history),
+    (re.compile(r"^/api/blocks$"), prompts_api.blocks),
 ]
 
 POST_ROUTES = [
@@ -33,6 +35,8 @@ POST_ROUTES = [
     (re.compile(r"^/api/create$"), handlers.create),
     (re.compile(r"^/api/restore$"), handlers.restore),
     (re.compile(r"^/api/lock$"), handlers.lock),
+    (re.compile(r"^/api/blocks$"), prompts_api.blocks_op),
+    (re.compile(r"^/api/prompt/([a-z_]+)$"), prompts_api.prompt_op),
 ]
 
 CONTENT_TYPES = {
