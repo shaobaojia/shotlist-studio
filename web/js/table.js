@@ -121,7 +121,6 @@ function shotCell(s, f, groups, data) {
 
   renderShotField(td, s, f);
   td.dataset.field = f.key;
-  if (f.key === 'shot_no') td.draggable = true;
 
   if (f.type === 'camera') {
     attachCamEditor(td, {
@@ -157,10 +156,19 @@ function shotCell(s, f, groups, data) {
 
 export function renderShotField(td, s, f) {
   td.textContent = '';
-  td.appendChild(cellContent(f.type, s[f.key]));
+  td.appendChild(cellContent(f.type, s[f.key], f.type === 'camera' ? { focal: s.focal } : null));
+  if (f.key === 'shot_no') {
+    const d = document.createElement('span');
+    d.className = 'drag-dots';
+    d.textContent = '⠿';
+    d.draggable = true;
+    d.title = '拖动重排';
+    d.addEventListener('click', (e) => e.stopPropagation());
+    td.appendChild(d);
+  }
 }
 
-function refreshDetailValue(s, key) {
+export function refreshDetailValue(s, key) {
   document.querySelectorAll('tr.detail[data-for="' + s.id + '"] .kv-value[data-field="' + key + '"]')
     .forEach((v) => { v.textContent = fmt(s[key]); });
 }

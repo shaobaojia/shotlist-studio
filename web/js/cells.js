@@ -15,7 +15,7 @@ export const JIWEI_LEGEND = ['\u{1F534} 正打', '\u{1F7E1} 反打', '\u{1F7E2} 
 // 摄影机列 = 景别 + 焦段（景深后缀识别后丢弃；2026-09-19 实测弃用）
 const LENS_RE = /(\d+mm)(?:·(?:浅|中|深)(?:→(?:浅|中|深))?)?/;
 
-export function cellContent(type, value) {
+export function cellContent(type, value, extra) {
   const v = value == null ? '' : String(value);
   const frag = document.createDocumentFragment();
   const push = (n) => frag.appendChild(n);
@@ -36,7 +36,7 @@ export function cellContent(type, value) {
   if (type === 'camera') {
     const raw = v.trim();
     const m = raw.match(LENS_RE);
-    const lens = m ? m[1] : null;
+    const lens = m ? m[1] : (extra && extra.focal ? String(extra.focal).trim() : null);
     const framing = m ? (raw.slice(0, m.index) + raw.slice(m.index + m[0].length)).trim() : raw;
     const parts = framing.indexOf('\u2193') !== -1
       ? [framing.split('\u2193')[0].trim(), '\u2193', (framing.split('\u2193')[1] || '').trim()]

@@ -100,7 +100,7 @@ export function applyFilter(ctx) {
     if (ok) shown++;
     tr.style.display = ok ? '' : 'none';
     const det = tr.nextElementSibling;
-    if (det && det.classList.contains('detail') && !ok) det.style.display = 'none';
+    if (det && det.classList.contains('detail')) det.style.display = ok ? '' : 'none';
   });
   view.querySelectorAll('section.beat').forEach((sec) => {
     const rows = sec.querySelectorAll('tr.shot');

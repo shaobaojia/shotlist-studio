@@ -30,12 +30,13 @@ export function bindDrag(container, ctx) {
 
   container.addEventListener('dragstart', (e) => {
     if (!ctx.enabled()) { e.preventDefault(); return; }
-    const cell = e.target.closest ? e.target.closest('td.cell-shot_no') : null;
+    const dots = e.target.closest ? e.target.closest('.drag-dots') : null;
     const sec = e.target.closest ? e.target.closest('section.beat') : null;
-    if (cell) {
-      const tr = cell.closest('tr.shot');
+    if (dots) {
+      const tr = dots.closest('tr.shot');
       payload = { kind: 'shot', id: Number(tr.dataset.id) };
       tr.classList.add('dragging');
+      try { e.dataTransfer.setDragImage(tr, 24, 12); } catch (err) { /* ignore */ }
     } else if (e.target.closest && e.target.closest('.beat-head') && sec && sec.dataset.beatId) {
       payload = { kind: 'beat', id: Number(sec.dataset.beatId) };
       sec.classList.add('dragging');

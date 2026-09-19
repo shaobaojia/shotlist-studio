@@ -5,6 +5,7 @@ import { state } from './state.js';
 import { el, fmt, toast } from './ui.js';
 import { JIWEI_LEGEND } from './cells.js';
 import { buildTable, beatSection } from './table.js';
+import { bindCellMenu } from './cellmenu.js';
 import { attachEditable, recordUndo } from './edit.js';
 import { bindDrag } from './drag.js';
 import { filterActive, resetFilter, buildFilterTools, applyFilter } from './filter.js';
@@ -50,6 +51,7 @@ export async function renderScene(view, sceneNo) {
   resetFilter();
   currentData = data;
   bindDragOnce(view);
+  bindCellMenu(view, { allShots: () => (currentData ? allShots(currentData) : []) });
   paintScene(view);
 }
 

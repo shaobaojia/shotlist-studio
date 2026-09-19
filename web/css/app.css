@@ -145,10 +145,14 @@ td.cell-prompt { cursor: pointer; }
 
 /* ── M2-2：类型化控件 / 拖动 / 筛选 ── */
 .cam-editor { display: flex; flex-direction: column; gap: 4px; }
-.cam-editor select { width: 100%; }
-td.cell-shot_no { cursor: grab; }
-td.cell-shot_no:not(.editing)::after { content: '⠿'; margin-left: 5px; font-size: 10px; color: var(--dim); opacity: 0; transition: opacity .12s; }
-tbody tr.shot:hover td.cell-shot_no:not(.editing)::after { opacity: .85; }
+
+td.cell-shot_no { position: relative; }
+.drag-dots {
+  position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+  color: var(--dim); font-size: 10px; line-height: 1; cursor: grab;
+  opacity: 0; transition: opacity .12s; user-select: none;
+}
+tbody tr.shot:hover .drag-dots { opacity: .9; }
 tbody tr.shot.dragging td { opacity: .4; }
 tbody tr.shot.drop-before td { box-shadow: inset 0 2px 0 0 var(--accent); }
 tbody tr.shot.drop-after td { box-shadow: inset 0 -2px 0 0 var(--accent); }
@@ -166,3 +170,30 @@ tbody tr.shot.flash td { animation: rowFlash 1.5s ease-out; }
 .filter-input:focus { outline: none; border-color: var(--accent); }
 .jump-input { width: 96px; }
 .filter-info { font-size: 12px; color: var(--dim); }
+
+/* ── M2-3：浮动菜单（单选下拉 / 右键菜单共用） ── */
+.menu {
+  position: fixed; z-index: 60; min-width: 132px; max-width: 320px;
+  max-height: 320px; overflow: auto; padding: 4px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+}
+.menu-item {
+  display: flex; align-items: center; gap: 6px; padding: 7px 10px;
+  border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--text);
+  white-space: nowrap;
+}
+.menu-item:hover, .menu-item.hl { background: rgba(244, 63, 94, 0.14); }
+.menu-item.current .menu-check { visibility: visible; }
+.menu-item.disabled { color: var(--dim); pointer-events: none; }
+.menu-check { visibility: hidden; width: 13px; flex: none; color: var(--accent); font-size: 12px; }
+.menu-label { overflow: hidden; text-overflow: ellipsis; }
+.menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
+.cam-slot {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px;
+  cursor: pointer; font-size: 13px; color: var(--text);
+}
+.cam-slot:hover { border-color: var(--accent); }
+.cam-slot-car { color: var(--dim); font-size: 10px; flex: none; }
+.cam-slot-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
