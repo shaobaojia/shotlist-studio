@@ -157,6 +157,7 @@ function shotCell(s, f, groups, data) {
     getValue: () => s[f.key],
     onLocal: (v) => { s[f.key] = v; },
     renderCell: () => { renderShotField(td, s, f); refreshDetailValue(s, f.key); },
+    walk: (dir) => walkCell(td, dir),
   });
   return td;
 }
@@ -341,4 +342,39 @@ function renderBeatAction(act, b) {
     if (i) act.appendChild(document.createElement('br'));
     act.appendChild(document.createTextNode(line));
   });
+}
+
+// 单元格走格（Tab/Enter）：找同表相邻格并直接开编辑（合成点击 → 复用各控件开启路径）
+export function walkCell(td, dir) {
+  const tr = td.closest('tr.shot');
+  if (!tr) return;
+  const table = tr.closest('table');
+  if (!table) return;
+  if (dir === 'down' || dir === 'up') {
+    const rows = visibleRows(table);
+    const ti = rows.indexOf(tr);
+    const nt = rows[ti + (dir === 'down' ? 1 : -1)];
+    if (!nt) return;
+    const ntd = nt.querySelector('td[data-field="' + td.dataset.field + '"]');
+    if (ntd) ntd.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  } else {
+    const tds = Array.from(tr.querySelectorAll('td[data-field]'));
+    const i = tds.indexOf(td);
+    const ntd = tds[i + dir];
+    if (ntd) ntd.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  }
+}
+
+export function visibleRows(table) {
+  return Array.from(table.querySelectorAll('tbody tr.shot')).filter((tr) => tr.style.display !== 'none');
+}
+
+// 单格重画 + 详情区同步（批量/清空/粘贴共用）
+export function refreshShotCell(s, key) {
+  if (!s) return;
+  const f = state.meta.shot_fields.find((x) => x.key === key);
+  if (!f) return;
+  document.querySelectorAll('tr.shot[data-id="' + s.id + '"] td[data-field="' + key + '"]')
+    .forEach((td) => { renderShotField(td, s, f); });
+  refreshDetailValue(s, key);
 }

@@ -80,7 +80,7 @@ function openEditor(host, cfg) {
   const original = cfg.getValue() == null ? '' : String(cfg.getValue());
   const ed = document.createElement(cfg.multiline ? 'textarea' : 'input');
   ed.value = original;
-  ed.title = cfg.multiline ? 'Ctrl+Enter 保存 · Esc 取消' : 'Enter 保存 · Esc 取消';
+  ed.title = cfg.multiline ? 'Ctrl+Enter 保存 · Tab 走格 · Esc 取消' : 'Enter 保存并下移 · Tab 走格 · Esc 取消';
   ed.className = 'cell-editor';
   host.classList.add('editing');
   host.textContent = '';
@@ -106,9 +106,15 @@ function openEditor(host, cfg) {
     if (e.key === 'Escape') {
       e.preventDefault();
       close(false);
+    } else if (e.key === 'Tab' && cfg.walk) {
+      e.preventDefault();
+      close(true);
+      const dir = e.shiftKey ? -1 : 1;
+      setTimeout(() => { cfg.walk(dir); }, 0);
     } else if (e.key === 'Enter' && (!cfg.multiline || e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       close(true);
+      if (cfg.walk && !cfg.multiline) setTimeout(() => { cfg.walk('down'); }, 0);
     }
   });
   if (ed.tagName === 'TEXTAREA') ed.addEventListener('input', () => fitEditorLive(ed));

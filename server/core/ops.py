@@ -1,4 +1,4 @@
-"""领域操作（写路径的唯一实现）：字段更新 / 整理镜号 / 痕迹 / 每日快照。
+"""领域操作（写路径的唯一实现）：字段更新 / 批量更新 / 整理镜号 / 痕迹 / 每日快照。
 逻辑为主、可单测（tests/test_ops.py）。改动维护：写白名单从 fields.py 派生，不另写一份。"""
 import shutil
 from datetime import date
@@ -42,8 +42,8 @@ def ensure_daily_snapshot(db_path=None, snap_root=None):
     return str(dest)
 
 
-def update_field(con, table, row_id, field, value, source="manual"):
-    """更新单字段：白名单校验 → 写行 → 记痕迹。返回 (row, changed)。"""
+def _apply_field(con, table, row_id, field, value, source="manual"):
+    """单字段更新（不 commit）：白名单校验 → 写行 → 记痕迹。返回 (row, changed)。"""
     if field not in write_keys(table):
         raise ValueError("字段不可写：%s.%s" % (table, field))
     row = con.execute("SELECT * FROM %s WHERE id=?" % table, (row_id,)).fetchone()
@@ -59,9 +59,39 @@ def update_field(con, table, row_id, field, value, source="manual"):
         "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
         " VALUES (?,?,?,?,?,?,?)",
         (_scene_of(con, table, row_id), table, row_id, field, old, value, source))
-    con.commit()
     fresh = con.execute("SELECT * FROM %s WHERE id=?" % table, (row_id,)).fetchone()
     return dict(fresh), True
+
+
+def update_field(con, table, row_id, field, value, source="manual"):
+    """更新单字段并提交。返回 (row, changed)。"""
+    row, changed = _apply_field(con, table, row_id, field, value, source)
+    con.commit()
+    return row, changed
+
+
+def batch_update(con, items, source="manual"):
+    """批量单字段更新（一个连接、最后一次性 commit）：items=[{table,id,field,value}]。
+    逐项白名单校验；单项失败只记 error、不中断其余。返回 {changed, results}。"""
+    results = []
+    changed = 0
+    for it in items:
+        it = it or {}
+        table = it.get("table")
+        rid = it.get("id")
+        field = it.get("field")
+        value = it.get("value")
+        try:
+            if not isinstance(rid, int) or not field:
+                raise ValueError("参数不完整")
+            _row, did = _apply_field(con, table, rid, field, "" if value is None else str(value), source)
+            results.append({"table": table, "id": rid, "field": field, "changed": did})
+            if did:
+                changed += 1
+        except ValueError as e:
+            results.append({"table": table, "id": rid, "field": field, "error": str(e)})
+    con.commit()
+    return {"changed": changed, "results": results}
 
 
 def renumber_scene(con, scene_id):

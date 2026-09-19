@@ -103,6 +103,22 @@ def update(m, body, q):
         con.close()
 
 
+def batch(m, body, q):
+    """M2-4 写路径：批量单字段更新（逐项白名单 + 痕迹；上限 400 项）。"""
+    items = (body or {}).get("ops")
+    if not isinstance(items, list) or not items:
+        return {"error": "参数不完整（ops）"}, 400
+    if len(items) > 400:
+        return {"error": "一次最多 400 项"}, 400
+    ops.ensure_daily_snapshot()
+    con = db.connect(rw=True)
+    try:
+        res = ops.batch_update(con, items)
+        return {"ok": True, "changed": res["changed"], "results": res["results"]}, 200
+    finally:
+        con.close()
+
+
 def move(m, body, q):
     table = (body or {}).get("table")
     rid = (body or {}).get("id")

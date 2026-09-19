@@ -1,12 +1,12 @@
 // 右键菜单（M2-3）：复制本格 / 复制整行 / 粘贴（Excel 式块粘贴）/ 清空本格。
 // 挂在 #view 上（事件委托）；复制走 execCommand 兜底（局域 http 下无 clipboard API）。
-import { state } from './state.js';
 import { api } from './api.js';
 import { toast } from './ui.js';
 import { openMenu } from './menu.js';
 import { recordUndo } from './edit.js';
 import { writeClipboard, pasteBlock, toTSV, tableFieldKeys } from './clipboard.js';
-import { renderShotField, refreshDetailValue } from './table.js';
+import { refreshShotCell } from './table.js';
+import { current as selCurrent, inCell, copySelectionTSV, clearSelectionCells, tlCell, rectOf } from './selection.js';
 
 let shotsOf = null;
 
@@ -21,7 +21,8 @@ export function bindCellMenu(view, ctx) {
     if (!td || !tr || !td.dataset.field) return;
     if (td.querySelector('.cell-editor, .cam-editor')) return; // 编辑中：保留原生菜单
     e.preventDefault();
-    openCellMenu(td, tr, e);
+    if (inCell(td)) openSelMenu(td, tr, e);
+    else openCellMenu(td, tr, e);
   });
 }
 
@@ -45,6 +46,32 @@ function openCellMenu(td, tr, e) {
   openMenu({ x: e.clientX, y: e.clientY }, items, (k) => onCellMenuPick(k, td, tr, s, key, table));
 }
 
+// 选区内的右键菜单（多一套选区动作）
+function openSelMenu(td, tr, e) {
+  if (!selCurrent()) { openCellMenu(td, tr, e); return; }
+  const rc = rectOf();
+  const n = (rc.r2 - rc.r1 + 1) * (rc.c2 - rc.c1 + 1);
+  const items = [
+    { key: 'copySel', label: '复制选区（' + n + ' 格）' },
+    { key: 'copyCell', label: '复制本格' },
+    { key: 'copyRow', label: '复制整行（本表列）' },
+    { key: 'paste', label: '粘贴（从选区左上起）' },
+    { sep: true },
+    { key: 'clearSel', label: '清空选区' },
+    { key: 'clear', label: '清空本格' },
+  ];
+  openMenu({ x: e.clientX, y: e.clientY }, items, (k) => {
+    if (k === 'copySel') { copySelectionTSV(); return; }
+    if (k === 'clearSel') { clearSelectionCells(); return; }
+    if (k === 'paste') {
+      const tlc = tlCell();
+      if (tlc) armPaste({ td: tlc.td, tr: tlc.tr, field: tlc.field });
+      return;
+    }
+    onCellMenuPick(k, td, tr, findShot(Number(tr.dataset.id)), td.dataset.field, td.closest('table'));
+  });
+}
+
 async function onCellMenuPick(k, td, tr, s, key, table) {
   if (k === 'copyCell') {
     const ok = await writeClipboard(s[key] == null ? '' : String(s[key]));
@@ -59,14 +86,14 @@ async function onCellMenuPick(k, td, tr, s, key, table) {
     const old = s[key] == null ? '' : s[key];
     if (String(old) === '') { toast('本来就是空的'); return; }
     s[key] = '';
-    refreshCell(s.id, key);
+    refreshShotCell(s, key);
     try {
       await api.update('shots', s.id, key, '');
       recordUndo({ type: 'field', table: 'shots', id: s.id, field: key, restore: old, label: '清空' });
       toast('已清空');
     } catch (err) {
       s[key] = old;
-      refreshCell(s.id, key);
+      refreshShotCell(s, key);
       toast('清空失败：' + err.message, 'err');
     }
   }
@@ -107,15 +134,8 @@ function armPaste(anchor) {
 
 const pasteCtx = {
   getShot: findShot,
-  refreshCell: refreshCell,
+  refreshCell: function (id, key) {
+    const s = findShot(id);
+    if (s) refreshShotCell(s, key);
+  },
 };
-
-function refreshCell(id, key) {
-  const s = findShot(id);
-  if (!s) return;
-  const f = state.meta.shot_fields.find((x) => x.key === key);
-  if (!f) return;
-  document.querySelectorAll('tr.shot[data-id="' + id + '"] td[data-field="' + key + '"]')
-    .forEach((td) => { renderShotField(td, s, f); });
-  refreshDetailValue(s, key);
-}

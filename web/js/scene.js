@@ -6,6 +6,8 @@ import { el, fmt, toast } from './ui.js';
 import { JIWEI_LEGEND } from './cells.js';
 import { buildTable, beatSection } from './table.js';
 import { bindCellMenu } from './cellmenu.js';
+import { bindSelection, clearSel } from './selection.js';
+import { initSelBar } from './selbar.js';
 import { attachEditable, recordUndo } from './edit.js';
 import { bindDrag } from './drag.js';
 import { filterActive, resetFilter, buildFilterTools, applyFilter } from './filter.js';
@@ -20,8 +22,10 @@ const fctx = {
   allShots: () => (currentData ? allShots(currentData) : []),
   getView: () => document.getElementById('view'),
   repaint: () => paintScene(document.getElementById('view')),
-  apply: () => applyFilter(fctx),
+  apply: () => { clearSel(); applyFilter(fctx); },
 };
+
+initSelBar();
 
 function loadPrefs() {
   try {
@@ -52,6 +56,7 @@ export async function renderScene(view, sceneNo) {
   currentData = data;
   bindDragOnce(view);
   bindCellMenu(view, { allShots: () => (currentData ? allShots(currentData) : []) });
+  bindSelection(view, { getShot: (id) => (currentData ? allShots(currentData).find((s) => s.id === id) : null) });
   paintScene(view);
 }
 
@@ -119,6 +124,7 @@ function shotDragInfo(shotId) {
 function paintScene(view) {
   const data = currentData;
   if (!data) return;
+  clearSel();
   view.textContent = '';
   view.classList.toggle('wrap-off', !prefs.wrap);
 

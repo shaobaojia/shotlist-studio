@@ -164,5 +164,36 @@ class TestMove(unittest.TestCase):
         self.assertFalse(r["changed"])
 
 
+class TestBatch(unittest.TestCase):
+    def test_batch_mixed(self):
+        con = make_db()
+        items = [
+            {"table": "shots", "id": 1, "field": "director_note", "value": "A"},
+            {"table": "shots", "id": 2, "field": "director_note", "value": "B"},
+            {"table": "shots", "id": 2, "field": "director_note", "value": "B"},   # 无变化
+            {"table": "shots", "id": 3, "field": "id", "value": "9"},              # 白名单外
+            {"table": "shots", "id": 999, "field": "director_note", "value": "X"},  # 行不存在
+        ]
+        res = ops.batch_update(con, items)
+        self.assertEqual(res["changed"], 2)
+        r = res["results"]
+        self.assertTrue(r[0]["changed"])
+        self.assertTrue(r[1]["changed"])
+        self.assertFalse(r[2]["changed"])
+        self.assertIn("error", r[3])
+        self.assertIn("error", r[4])
+        h = ops.history_of(con, scene_id=1)
+        self.assertEqual(len(h), 2)
+        got = con.execute("SELECT director_note FROM shots WHERE id=1").fetchone()["director_note"]
+        self.assertEqual(got, "A")
+
+    def test_batch_single_commit_visible(self):
+        con = make_db()
+        ops.batch_update(con, [{"table": "shots", "id": 1, "field": "dialogue", "value": "x"}])
+        got = con.execute("SELECT dialogue FROM shots WHERE id=1").fetchone()["dialogue"]
+        self.assertEqual(got, "x")
+        self.assertEqual(len(ops.history_of(con, scene_id=1)), 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

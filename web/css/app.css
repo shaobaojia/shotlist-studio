@@ -59,7 +59,7 @@ a { color: inherit; text-decoration: none; }
 .space-label { color: var(--green); font-size: 13px; font-weight: 600; margin: 10px 0 8px; }
 
 /* 表格 */
-.table-wrap { overflow-x: auto; }
+.table-wrap { overflow-x: auto; position: relative; }
 table.shots { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; min-width: 900px; }
 table.shots th {
   background: var(--card); color: var(--head); padding: 10px 6px; text-align: left; font-weight: 600; font-size: 12px;
@@ -135,7 +135,7 @@ select.cell-editor {
 }
 td.cell-prompt { cursor: pointer; }
 #toast {
-  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(8px);
+  position: fixed; left: 50%; bottom: 72px; transform: translateX(-50%) translateY(8px);
   background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--accent);
   color: var(--text); padding: 8px 14px; border-radius: 4px; font-size: 13px;
   opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s; z-index: 100;
@@ -198,3 +198,25 @@ tbody tr.shot.flash td { animation: rowFlash 1.5s ease-out; }
 .cam-slot:hover { border-color: var(--accent); }
 .cam-slot-car { color: var(--dim); font-size: 10px; flex: none; }
 .cam-slot-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── M2-4：单元格选区 + 表底选区条 ── */
+.sel-box {
+  position: absolute; z-index: 0; pointer-events: none;
+  border: 2px solid var(--accent); background: rgba(244, 63, 94, 0.10);
+}
+body.no-select { user-select: none; }
+#sel-bar {
+  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+  z-index: 55; display: flex; align-items: center; gap: 10px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  padding: 7px 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); font-size: 13px;
+  white-space: nowrap;
+}
+.sbar-count { color: var(--text); }
+.sbar-hint { color: var(--dim); font-size: 12px; }
+.sbar-mid { display: inline-flex; align-items: center; gap: 6px; }
+.sbar-input {
+  background: var(--bg); border: 1px solid var(--line); color: var(--text);
+  border-radius: 4px; padding: 3px 8px; font-size: 12px; width: 150px;
+}
+.sbar-input:focus { outline: none; border-color: var(--accent); }
