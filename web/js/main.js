@@ -39,7 +39,6 @@ async function boot() {
     state.meta = meta;
     state.film = filmData.film;
     state.scenes = filmData.scenes || [];
-    document.getElementById('film-title').textContent = state.film ? state.film.title : '（无影片）';
     buildNav();
     window.addEventListener('hashchange', route);
     route();
