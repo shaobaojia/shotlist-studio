@@ -34,7 +34,7 @@
 }
 * { box-sizing: border-box; }
 html { color-scheme: light; }
-html, body { margin: 0; padding: 0; }
+html, body { margin: 0; padding: 0; overflow-x: clip; } /* clip：防 100vw 布面按滚动条宽度产生横滚 */
 body {
   background: var(--desk); color: var(--text);
   font: 15px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
@@ -69,13 +69,13 @@ a { color: inherit; text-decoration: none; }
 .scene-meta .kv b { color: var(--dim); font-weight: 500; margin-right: 5px; font-size: 11px; letter-spacing: .06em; }
 .scene-meta .legend { color: var(--dim); }
 
-/* 吸顶区（场次信息＋工具条）：以工具条下划线为界 */
-.scene-freeze { margin: 6px 0 16px; position: sticky; top: var(--topbar-h, 45px); z-index: 9;
-  background: rgba(226, 216, 193, 0.94); backdrop-filter: blur(10px);
-  border: 1px solid rgba(60, 50, 30, 0.12); border-radius: 10px; overflow: hidden; }
-.scene-freeze .scene-head { margin: 0; padding: 10px 14px 8px; position: static; background: none;
+/* 吸顶区（场次信息＋工具条）＝盖在桌面上的一块布：与桌面同宽、左右通栏，以工具条下划线为界
+   （-22px = #view 左右 padding；改 #view padding 时同步这里） */
+.scene-freeze { margin: 6px 0 16px -22px; width: 100vw; position: sticky; top: var(--topbar-h, 45px); z-index: 9;
+  background: rgba(226, 216, 193, 0.94); backdrop-filter: blur(10px); }
+.scene-freeze .scene-head { margin: 0; padding: 10px 22px 8px; position: static; background: none;
   border: 0; border-radius: 0; backdrop-filter: none; }
-.scene-freeze .view-tools { margin: 0; padding: 2px 14px 10px; }
+.scene-freeze .view-tools { margin: 0; padding: 2px 22px 10px; }
 
 /* 视图工具条：安静的文字钮 */
 .view-tools { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 10px 0; margin-bottom: 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
