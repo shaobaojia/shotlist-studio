@@ -12,7 +12,8 @@ export const JIWEI_SHORT = {
 };
 export const JIWEI_LEGEND = ['\u{1F534} 正打', '\u{1F7E1} 反打', '\u{1F7E2} 第三人称', '\u{1F535} 空间环境', '\u{1F7E3} 插入/切出'];
 
-const LENS_RE = /(\d+mm·(?:浅|中|深)(?:→(?:浅|中|深))?)/;
+// 摄影机列 = 景别 + 焦段（景深后缀识别后丢弃；2026-09-19 实测弃用）
+const LENS_RE = /(\d+mm)(?:·(?:浅|中|深)(?:→(?:浅|中|深))?)?/;
 
 export function cellContent(type, value) {
   const v = value == null ? '' : String(value);
