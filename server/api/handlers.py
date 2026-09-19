@@ -157,3 +157,35 @@ def renumber(m, body, q):
         return {"ok": True, "changes": ops.renumber_scene(con, sc["id"])}, 200
     finally:
         con.close()
+
+
+def duplicate(m, body, q):
+    """M2-5 行副本：在源镜头后插入整行副本（同节拍；镜号字母后缀；内容列全拷）。"""
+    rid = (body or {}).get("id")
+    if not isinstance(rid, int):
+        return {"error": "参数不完整（id）"}, 400
+    ops.ensure_daily_snapshot()
+    con = db.connect(rw=True)
+    try:
+        return {"ok": True, "shot": ops.duplicate_shot(con, rid)}, 200
+    except ValueError as e:
+        return {"error": str(e)}, 400
+    finally:
+        con.close()
+
+
+def delete_row(m, body, q):
+    """M2-5 删除行（内部：供「创建行副本」撤销用；只允许 shots）。"""
+    table = (body or {}).get("table") or "shots"
+    rid = (body or {}).get("id")
+    if table != "shots" or not isinstance(rid, int):
+        return {"error": "参数不完整（table=shots + id）"}, 400
+    ops.ensure_daily_snapshot()
+    con = db.connect(rw=True)
+    try:
+        return {"ok": True, "deleted": ops.delete_shot(con, rid)}, 200
+    except ValueError as e:
+        return {"error": str(e)}, 400
+    finally:
+        con.close()
+

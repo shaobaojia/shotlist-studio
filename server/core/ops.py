@@ -1,6 +1,8 @@
 """领域操作（写路径的唯一实现）：字段更新 / 批量更新 / 整理镜号 / 痕迹 / 每日快照。
 逻辑为主、可单测（tests/test_ops.py）。改动维护：写白名单从 fields.py 派生，不另写一份。"""
+import re
 import shutil
+import string
 from datetime import date
 from pathlib import Path
 
@@ -204,6 +206,68 @@ def move_beat(con, beat_id, index):
         (scene_id, "beats", beat_id, "drag", "#%s" % old_i, "#%s" % idx, "manual"))
     con.commit()
     return {"changed": True, "id": beat_id, "index": idx, "old_index": old_i}
+
+
+COPY_COLS = ("camera_move", "spatial", "shot_size", "focal", "dof", "camera_pos",
+             "blocking", "dialogue", "duration", "audio", "director_note", "shot_fn", "pov")
+
+
+def _next_shot_no(con, scene_id, src_no):
+    """副本镜号：数字基 + 首个空闲字母后缀（05→05A、17A→17B；A-Z 占满后 AA、AB…）。"""
+    m = re.match(r"^(\d+)([A-Za-z]*)$", (src_no or "").strip())
+    num = m.group(1) if m else (src_no or "").strip()
+    taken = {(r["shot_no"] or "").strip().upper() for r in
+             con.execute("SELECT shot_no FROM shots WHERE scene_id=?", (scene_id,))}
+    sufs = list(string.ascii_uppercase)
+    sufs += [a + b for a in string.ascii_uppercase for b in string.ascii_uppercase]
+    for suf in sufs:
+        cand = num + suf
+        if cand.upper() not in taken:
+            return cand
+    return num + "A*"  # 理论不可达
+
+
+def duplicate_shot(con, shot_id):
+    """创建行副本：源行后插入（同场同节拍）；13 个内容列全拷（不含 id/position/shot_no/提示词归属）。
+    镜号取字母后缀；位置致密后移；留一条 create 痕迹。返回新行 dict。"""
+    src = con.execute("SELECT * FROM shots WHERE id=?", (shot_id,)).fetchone()
+    if not src:
+        raise ValueError("镜头不存在：%s" % shot_id)
+    scene_id = src["scene_id"]
+    new_no = _next_shot_no(con, scene_id, src["shot_no"])
+    pos = int(src["position"]) + 1
+    con.execute("UPDATE shots SET position=position+1 WHERE scene_id=? AND position>=?",
+                (scene_id, pos))
+    cols = ", ".join(COPY_COLS)
+    qs = ", ".join(["?"] * len(COPY_COLS))
+    cur = con.execute(
+        "INSERT INTO shots (scene_id, beat_id, position, shot_no, %s) VALUES (?,?,?,?,%s)"
+        % (cols, qs),
+        [scene_id, src["beat_id"], pos, new_no] + [src[c] for c in COPY_COLS])
+    new_id = cur.lastrowid
+    con.execute(
+        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (scene_id, "shots", new_id, "create", src["shot_no"], new_no, "manual"))
+    con.commit()
+    return dict(con.execute("SELECT * FROM shots WHERE id=?", (new_id,)).fetchone())
+
+
+def delete_shot(con, shot_id):
+    """删除镜头行（当前用途：撤销「创建行副本」）；位置致密；留一条 delete 痕迹。"""
+    row = con.execute("SELECT * FROM shots WHERE id=?", (shot_id,)).fetchone()
+    if not row:
+        raise ValueError("镜头不存在：%s" % shot_id)
+    scene_id = row["scene_id"]
+    con.execute("DELETE FROM shots WHERE id=?", (shot_id,))
+    con.execute("UPDATE shots SET position=position-1 WHERE scene_id=? AND position>?",
+                (scene_id, row["position"]))
+    con.execute(
+        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (scene_id, "shots", shot_id, "delete", row["shot_no"], None, "manual"))
+    con.commit()
+    return {"id": shot_id, "shot_no": row["shot_no"]}
 
 
 def history_of(con, scene_id=None, limit=100):

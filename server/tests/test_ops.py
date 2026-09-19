@@ -195,5 +195,49 @@ class TestBatch(unittest.TestCase):
         self.assertEqual(len(ops.history_of(con, scene_id=1)), 1)
 
 
+class TestDuplicateDelete(unittest.TestCase):
+    def test_duplicate_inserts_after_source(self):
+        con = make_db()
+        shot = ops.duplicate_shot(con, 1)  # id1='03' 在 pos1
+        self.assertEqual(shot["shot_no"], "03A")
+        self.assertEqual(shot["position"], 2)
+        self.assertEqual(shot["beat_id"], 1)
+        self.assertEqual(shot["blocking"], "动作1")
+        order = [x["id"] for x in con.execute("SELECT id FROM shots WHERE scene_id=1 ORDER BY position")]
+        self.assertEqual(order, [1, shot["id"], 2, 3])
+
+    def test_duplicate_suffix_increments(self):
+        con = make_db()
+        a = ops.duplicate_shot(con, 1)
+        b = ops.duplicate_shot(con, 1)
+        self.assertEqual([a["shot_no"], b["shot_no"]], ["03A", "03B"])
+        c = ops.duplicate_shot(con, 3)  # 源 '17A' → '17B'
+        self.assertEqual(c["shot_no"], "17B")
+
+    def test_duplicate_history(self):
+        con = make_db()
+        ops.duplicate_shot(con, 1)
+        h = ops.history_of(con, scene_id=1)
+        self.assertEqual(len(h), 1)
+        self.assertEqual(h[0]["field"], "create")
+        self.assertEqual(h[0]["old_value"], "03")
+        self.assertEqual(h[0]["new_value"], "03A")
+
+    def test_delete_compacts(self):
+        con = make_db()
+        shot = ops.duplicate_shot(con, 1)
+        res = ops.delete_shot(con, shot["id"])
+        self.assertEqual(res["shot_no"], "03A")
+        order = [x["id"] for x in con.execute("SELECT id FROM shots WHERE scene_id=1 ORDER BY position")]
+        self.assertEqual(order, [1, 2, 3])
+        fields = [r["field"] for r in con.execute("SELECT field FROM history ORDER BY id")]
+        self.assertEqual(fields, ["create", "delete"])
+
+    def test_delete_missing(self):
+        con = make_db()
+        with self.assertRaises(ValueError):
+            ops.delete_shot(con, 999)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

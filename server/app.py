@@ -28,6 +28,8 @@ POST_ROUTES = [
     (re.compile(r"^/api/batch$"), handlers.batch),
     (re.compile(r"^/api/scenes/([a-zA-Z0-9]+)/renumber$"), handlers.renumber),
     (re.compile(r"^/api/move$"), handlers.move),
+    (re.compile(r"^/api/duplicate$"), handlers.duplicate),
+    (re.compile(r"^/api/delete$"), handlers.delete_row),
 ]
 
 CONTENT_TYPES = {

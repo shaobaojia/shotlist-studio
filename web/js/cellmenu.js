@@ -1,4 +1,4 @@
-// 右键菜单（M2-3）：复制本格 / 复制整行 / 粘贴（Excel 式块粘贴）/ 清空本格。
+// 右键菜单（M2-3；M2-5 加「创建行副本」）：复制本格 / 复制整行 / 粘贴（Excel 式块粘贴）/ 创建行副本 / 清空本格。
 // 挂在 #view 上（事件委托）；复制走 execCommand 兜底（局域 http 下无 clipboard API）。
 import { api } from './api.js';
 import { toast } from './ui.js';
@@ -9,10 +9,12 @@ import { refreshShotCell } from './table.js';
 import { current as selCurrent, inCell, copySelectionTSV, clearSelectionCells, tlCell, rectOf } from './selection.js';
 
 let shotsOf = null;
+let refreshView = null;
 
 // ctx: { allShots() -> 当前场全部镜头模型 }
 export function bindCellMenu(view, ctx) {
   shotsOf = ctx.allShots;
+  refreshView = ctx.refresh || null;
   if (view.dataset.menuBound === '1') return;
   view.dataset.menuBound = '1';
   view.addEventListener('contextmenu', (e) => {
@@ -41,6 +43,8 @@ function openCellMenu(td, tr, e) {
     { key: 'copyRow', label: '复制整行（本表列）' },
     { key: 'paste', label: '粘贴（从此格起）' },
     { sep: true },
+    { key: 'duplicate', label: '创建行副本' },
+    { sep: true },
     { key: 'clear', label: '清空本格' },
   ];
   openMenu({ x: e.clientX, y: e.clientY }, items, (k) => onCellMenuPick(k, td, tr, s, key, table));
@@ -56,6 +60,8 @@ function openSelMenu(td, tr, e) {
     { key: 'copyCell', label: '复制本格' },
     { key: 'copyRow', label: '复制整行（本表列）' },
     { key: 'paste', label: '粘贴（从选区左上起）' },
+    { sep: true },
+    { key: 'duplicate', label: '创建行副本' },
     { sep: true },
     { key: 'clearSel', label: '清空选区' },
     { key: 'clear', label: '清空本格' },
@@ -80,6 +86,8 @@ async function onCellMenuPick(k, td, tr, s, key, table) {
     const keys = tableFieldKeys(table);
     const ok = await writeClipboard(toTSV([keys.map((x) => (s[x] == null ? '' : String(s[x])))]));
     toast(ok ? '已复制整行' : '复制失败：浏览器限制', ok ? '' : 'err');
+  } else if (k === 'duplicate') {
+    await duplicateRow(s);
   } else if (k === 'paste') {
     armPaste({ td, tr, field: key });
   } else if (k === 'clear') {
@@ -96,6 +104,29 @@ async function onCellMenuPick(k, td, tr, s, key, table) {
       refreshShotCell(s, key);
       toast('清空失败：' + err.message, 'err');
     }
+  }
+}
+
+// 创建行副本：服务端插入 → 刷新视图 → 新行闪烁定位；撤销 = 删除新行
+async function duplicateRow(s) {
+  if (!s) return;
+  try {
+    const res = await api.duplicate(s.id);
+    const ns = res.shot || {};
+    toast('已创建副本' + (ns.shot_no ? '：' + ns.shot_no : ''));
+    recordUndo({
+      type: 'custom', label: '创建行副本',
+      undo: async () => { await api.del(ns.id); },
+    });
+    if (refreshView) await refreshView();
+    const ntr = document.querySelector('tr.shot[data-id="' + ns.id + '"]');
+    if (ntr) {
+      ntr.scrollIntoView({ block: 'nearest' });
+      ntr.classList.add('flash');
+      setTimeout(() => ntr.classList.remove('flash'), 1600);
+    }
+  } catch (err) {
+    toast('创建副本失败：' + err.message, 'err');
   }
 }
 

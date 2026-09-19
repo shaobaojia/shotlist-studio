@@ -55,7 +55,10 @@ export async function renderScene(view, sceneNo) {
   resetFilter();
   currentData = data;
   bindDragOnce(view);
-  bindCellMenu(view, { allShots: () => (currentData ? allShots(currentData) : []) });
+  bindCellMenu(view, {
+    allShots: () => (currentData ? allShots(currentData) : []),
+    refresh: refreshCurrentView,
+  });
   bindSelection(view, { getShot: (id) => (currentData ? allShots(currentData).find((s) => s.id === id) : null) });
   paintScene(view);
 }
