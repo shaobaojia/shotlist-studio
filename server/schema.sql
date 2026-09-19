@@ -86,6 +86,7 @@ CREATE TABLE shots (
   duration        TEXT,
   audio           TEXT,
   director_note   TEXT,
+  shot_fn         TEXT,                      -- 镜头职能：建立/触发/动作镜/反应镜/插入（原「节拍属性」列）
   pov             TEXT,
   prompt_group_id INTEGER REFERENCES prompt_groups(id) ON DELETE SET NULL,
   created_at      TEXT NOT NULL DEFAULT (datetime('now','localtime')),
