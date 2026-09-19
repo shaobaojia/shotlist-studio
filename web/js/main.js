@@ -221,6 +221,12 @@ function route() {
   else renderFilm(view);
 }
 
+function syncTopbarVar() {
+  const tb = document.getElementById('topbar');
+  if (!tb) return;
+  document.documentElement.style.setProperty('--topbar-h', Math.round(tb.getBoundingClientRect().height) + 'px');
+}
+
 async function boot() {
   const view = document.getElementById('view');
   try {
@@ -229,6 +235,8 @@ async function boot() {
     state.film = filmData.film;
     state.scenes = filmData.scenes || [];
     buildNav();
+    syncTopbarVar();
+    if (window.ResizeObserver) { try { new ResizeObserver(syncTopbarVar).observe(document.getElementById('topbar')); } catch (e) { /* ignore */ } }
     window.addEventListener('hashchange', route);
     window.addEventListener('shotlist:film-changed', () => { reloadFilm(); });
     route();

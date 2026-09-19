@@ -34,9 +34,9 @@ function loadPrefs() {
     const p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
     const hidden = Object.assign({}, p.hidden || {});
     if (p.prompt === false && hidden.prompt == null) hidden.prompt = true; // 旧「显示提示词」开关迁移
-    return { wrap: p.wrap !== false, hidden: hidden, widths: p.widths || {} };
+    return { wrap: p.wrap !== false, hidden: hidden, widths: p.widths || {}, viewMode: p.viewMode === 'flat' ? 'flat' : 'group' };
   } catch (e) {
-    return { wrap: true, hidden: {}, widths: {} };
+    return { wrap: true, hidden: {}, widths: {}, viewMode: 'group' };
   }
 }
 function savePrefs() {
@@ -89,7 +89,7 @@ function bindDragOnce(view) {
   view.dataset.dragBound = '1';
   bindDrag(view, {
     data: () => currentData,
-    enabled: () => !sortState && !filterActive(),
+    enabled: () => !sortState && !filterActive() && prefs.viewMode !== 'flat',
     onMoveShot: async (shotId, beatId, index) => {
       const info = shotDragInfo(shotId);
       try {
@@ -150,8 +150,9 @@ function paintScene(view) {
   }
   view.appendChild(viewTools());
   const topts = { prefs: prefs, sortState: sortState, onSort: cycleSort, refresh: refreshCurrentView, savePrefs: savePrefs };
-  if (sortState) {
-    view.appendChild(buildTable(sortedShots(shots), {
+  const flat = !!sortState || prefs.viewMode === 'flat';
+  if (flat) {
+    view.appendChild(buildTable(sortState ? sortedShots(shots) : shots, {
       beatCol: true, sortable: true, data: data,
       prefs: topts.prefs, sortState: topts.sortState, onSort: topts.onSort,
       savePrefs: topts.savePrefs,
@@ -164,7 +165,7 @@ function paintScene(view) {
         data, topts));
     }
   }
-  if (!sortState) view.appendChild(addBeatBar());
+  if (!flat) view.appendChild(addBeatBar());
   applyFilter(fctx);
   scheduleWarm(view);
   refreshHistoryIfOpen();
@@ -353,6 +354,22 @@ function viewTools() {
     }
   });
   bar.appendChild(lockBtn);
+
+  const effFlat = !!sortState || prefs.viewMode === 'flat';
+  const seg = el('span', 'seg');
+  seg.title = '视图：按节拍分组 / 平铺为一张表（本地记住）';
+  [['group', '分组'], ['flat', '平铺']].forEach(function (pair) {
+    const mode = pair[0];
+    const b = el('button', 'seg-b' + (((mode === 'flat') === effFlat) ? ' on' : ''), pair[1]);
+    b.addEventListener('click', () => {
+      if (mode === 'group') sortState = null;
+      prefs.viewMode = mode;
+      savePrefs();
+      paintScene(document.getElementById('view'));
+    });
+    seg.appendChild(b);
+  });
+  bar.appendChild(seg);
 
   const mkBox = (labelText, checked, onChange) => {
     const lab = el('label', 'tool');
