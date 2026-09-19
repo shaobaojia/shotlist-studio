@@ -36,10 +36,13 @@
 
 - 2026-09-19 **视觉落地 v2（三个体验件：吸顶 / 阶梯 / 平铺开关）**（场级页 + 全片页场头同规则）：①**场次信息吸顶**——.scene-head 变「场签」纸带（磨砂纸带 + 圆角 + 发丝边），sticky top: var(--topbar-h)；顶栏高度由 main.js syncTopbarVar() 实测回写（ResizeObserver 自适应换行/缩放），别写死像素。②**三级亮度阶梯**（由外向内一层比一层亮）：顶栏「桌沿」#c4b693（实底）→ 场签纸带 rgba(226,216,193,.92) → 节拍卡纸 #f6f0e1 → 镜头卡条 #fffef9（--card；hover #fffffb、展开 #ffffff）。③**「分组/平铺」正式开关**——工具条 seg 分段控件；平铺＝一张平表 + 节拍列（等价于点 # 表头那个效果，但独立于排序）；平铺下拖动禁用、加行/加节拍入口隐藏、表头排序照常；选择入 prefs.viewMode 本地记忆（默认 group）。核验＝E2E（吸顶咬合 46=46 无缝、平铺 34 行 1 表 0 分区、平铺内排序、刷新记忆、编辑回归、零 JS 报错）+ 截图视觉过审（含全片页零副作用）。
 
+- 2026-09-19 **视觉落地 v3（吸顶区扩容 + 平铺表头冻结）**：①吸顶区由「场签」扩为 **.scene-freeze 整块**（场次信息＋工具条）：一组 sticky top: var(--topbar-h)（磨砂底 + 圆角 + overflow:hidden），底边界＝工具条自身下划线；scene.js 把 sceneHead+viewTools 装进 freeze，syncFreezeH() 实测回写 --freeze-h（resize 跟随）。②**平铺表头冻结**——平铺表的 .table-wrap 加 .holdhead：overflow: visible（关键根因：wrap 的 overflow-x:auto 使其成为滚动容器，sticky 被关在内层、表头从来没真正冻住过）；th top = calc(--topbar-h + --freeze-h)、z-index 5；分组视图表头照旧（只按点名）。代价：平铺表放弃内部横滚（窄屏整页横滚，桌面无感）。核验＝E2E（冻结缝 diff=0 严丝合缝、滚到 2200 仍 0、分组行为不变、痕迹面板/空场正常、零 JS 报错）+ 截图/裁切视觉过审（工具排下划线为界成立）。
+
 ## 正在做
 - M2 进行中：批次 1 = 编辑底座 ✅；批次 1a = 控件无缝化 ✅；批次 2 = 拖动/筛选/类型化 ✅；批次 3 = 浮动菜单/剪贴板/反哺修复 ✅；批次 3b = 拖动修正/行首手柄/卷展预热 ✅；批次 3c = 把手行线对齐 ✅；批次 4 = 选区/走格/批量设值 ✅；批次 5 = 创建行副本 ✅；批次 6 = 三层结构操作全集（增删插复移）✅；批次 7 = 锁定本场/列宽列显隐/痕迹回看/概述空态 ✅（已提交 fdeaf71）。剩余见下一步。
 - 视觉专项 ✅：定案「案头 · A卡条 × 昼案」已落地 v1（《视觉宣言.md》+ design/ 定稿参考 + app.css 全量皮肤）。
 - 视觉 v2 ✅：场次信息吸顶（场签）+ 三级亮度阶梯 + 「分组/平铺」开关（提交见 git log）。
+- 视觉 v3 ✅：吸顶区 = 场次信息＋工具条（以工具条下划线为界）+ 平铺表头冻结（紧贴吸顶区正下方）。
 
 ## 下一步
 - M2 主体收官（批次 7 后余额 = 需求池/可选件）：①（需求池）多选行拖动=批量搬家 ②（需求池）跨节拍表框选 ③（需求池）选区条批量设值扩展 beats/scenes ④（可选）运镜「常用档 + 自定义」下拉。再往下 = M3 提示词热盒（块库/拼积木）。
@@ -99,3 +102,5 @@
 - 「案头」皮肤（昼案）= web/css/app.css 全量重写；改界面 / 加界面前先读《视觉宣言.md》——军规：视觉不得删减任何既有能力（列对齐 / 排序 / 列宽 / 直编 / 框选 / 拖动 / 撤销）。过程稿在 Hermes 工作区 /opt/data/cache/themes/（concept-desk*.html），不入库；库内定稿参考 = design/案头-A卡条-昼案.html。
 - 顶栏高度走 CSS 变量 --topbar-h（main.js syncTopbarVar 实测回写；:root 45px 为兜底）——场签（.scene-head）吸顶 top 就是它；以后任何吸顶元素照此对齐，别写死像素。
 - 视图模式 prefs.viewMode（'group'|'flat'）：平铺与排序共用 paintScene 的 flat 分支（beatCol:true）；拖动与「＋」入口在平铺下关闭；seg 开关在 viewTools（scene.js）。
+- 「冻结」变量链：--topbar-h（main.js 实测）→ .scene-freeze（--freeze-h 由 scene.js syncFreezeH 回写）→ 平铺表头（.table-wrap.holdhead th 用两变量 calc）。改吸顶区结构不用手调高度（会自动回写）；但新加任何吸顶元素都要停在这两个变量之后。
+- ⚠️ .table-wrap 默认 overflow-x:auto = 滚动容器，会吃掉内部 sticky（表头冻不住的老根因）；平铺冻头靠 .holdhead{overflow:visible} 放回文档滚动流。

@@ -134,6 +134,13 @@ function shotDragInfo(shotId) {
   return null;
 }
 
+function syncFreezeH() {
+  const f = document.querySelector('.scene-freeze');
+  if (!f) return;
+  document.documentElement.style.setProperty('--freeze-h', f.getBoundingClientRect().height + 'px');
+}
+window.addEventListener('resize', () => { if (document.querySelector('.scene-freeze')) syncFreezeH(); });
+
 function paintScene(view) {
   const data = currentData;
   if (!data) return;
@@ -141,22 +148,27 @@ function paintScene(view) {
   view.textContent = '';
   view.classList.toggle('wrap-off', !prefs.wrap);
 
-  view.appendChild(sceneHead(data.scene, data));
+  const freeze = el('div', 'scene-freeze');
+  freeze.appendChild(sceneHead(data.scene, data));
+  view.appendChild(freeze);
   const shots = allShots(data);
   if (!shots.length && !data.beats.length) {
     view.appendChild(el('div', 'empty', '本场暂无镜头——用下方「＋ 添加节拍」搭骨架，再往里加镜头。'));
     view.appendChild(addBeatBar());
+    syncFreezeH();
     return;
   }
-  view.appendChild(viewTools());
+  freeze.appendChild(viewTools());
   const topts = { prefs: prefs, sortState: sortState, onSort: cycleSort, refresh: refreshCurrentView, savePrefs: savePrefs };
   const flat = !!sortState || prefs.viewMode === 'flat';
   if (flat) {
-    view.appendChild(buildTable(sortState ? sortedShots(shots) : shots, {
+    const fwrap = buildTable(sortState ? sortedShots(shots) : shots, {
       beatCol: true, sortable: true, data: data,
       prefs: topts.prefs, sortState: topts.sortState, onSort: topts.onSort,
       savePrefs: topts.savePrefs,
-    }));
+    });
+    fwrap.classList.add('holdhead');
+    view.appendChild(fwrap);
   } else {
     for (const b of data.beats) view.appendChild(beatSection(b, data, topts));
     if (data.orphan_shots && data.orphan_shots.length) {
@@ -169,6 +181,7 @@ function paintScene(view) {
   applyFilter(fctx);
   scheduleWarm(view);
   refreshHistoryIfOpen();
+  syncFreezeH();
 }
 
 function allShots(data) {

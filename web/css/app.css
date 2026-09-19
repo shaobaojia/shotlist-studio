@@ -30,6 +30,7 @@
   --shadow-float: 0 14px 40px rgba(60, 45, 25, 0.30);
   --topbar-bg: #c4b693;       /* 桌沿（最深） */
   --topbar-h: 45px;           /* 顶栏实际高度：main.js 实测回写 */
+  --freeze-h: 140px;          /* 吸顶区实测高度：scene.js 回写 */
 }
 * { box-sizing: border-box; }
 html { color-scheme: light; }
@@ -68,6 +69,14 @@ a { color: inherit; text-decoration: none; }
 .scene-meta .kv b { color: var(--dim); font-weight: 500; margin-right: 5px; font-size: 11px; letter-spacing: .06em; }
 .scene-meta .legend { color: var(--dim); }
 
+/* 吸顶区（场次信息＋工具条）：以工具条下划线为界 */
+.scene-freeze { margin: 6px 0 16px; position: sticky; top: var(--topbar-h, 45px); z-index: 9;
+  background: rgba(226, 216, 193, 0.94); backdrop-filter: blur(10px);
+  border: 1px solid rgba(60, 50, 30, 0.12); border-radius: 10px; overflow: hidden; }
+.scene-freeze .scene-head { margin: 0; padding: 10px 14px 8px; position: static; background: none;
+  border: 0; border-radius: 0; backdrop-filter: none; }
+.scene-freeze .view-tools { margin: 0; padding: 2px 14px 10px; }
+
 /* 视图工具条：安静的文字钮 */
 .view-tools { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 10px 0; margin-bottom: 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .view-tools .tool { display: inline-flex; align-items: center; gap: 6px; color: var(--ink2); cursor: pointer; user-select: none; }
@@ -96,6 +105,9 @@ table.shots th {
   white-space: nowrap; position: sticky; top: 0; z-index: 1;
   border-bottom: 1px solid rgba(60, 50, 30, 0.30);
 }
+/* 平铺（.holdhead）：表头冻结在吸顶区正下方；代价＝此表放弃内部横滚（窄屏整页横滚） */
+.table-wrap.holdhead { overflow: visible; }
+.table-wrap.holdhead table.shots th { top: calc(var(--topbar-h, 45px) + var(--freeze-h, 140px)); z-index: 5; }
 table.shots th.sortable { cursor: pointer; }
 table.shots th.sortable:hover { color: var(--accent); }
 table.shots th .arrow { margin-left: 4px; font-size: 10px; color: var(--accent); }
