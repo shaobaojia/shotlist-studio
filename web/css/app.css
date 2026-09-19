@@ -220,3 +220,16 @@ body.no-select { user-select: none; }
   border-radius: 4px; padding: 3px 8px; font-size: 12px; width: 150px;
 }
 .sbar-input:focus { outline: none; border-color: var(--accent); }
+
+/* ── M2-6 结构操作 ── */
+.nav .chip.add-scene { padding: 2px 9px; border-style: dashed; }
+.nav .chip[draggable="true"] { cursor: grab; }
+.nav .chip.dragging { opacity: 0.4; }
+.nav .chip.drop-l { box-shadow: -4px 0 0 -1px var(--accent); }
+.nav .chip.drop-r { box-shadow: 4px 0 0 -1px var(--accent); }
+.beat.flash { animation: rowFlash 1.5s ease-out; }
+.add-beat-bar { margin: 14px 0 34px; }
+.add-beat-bar .tool-btn { font-size: 13px; padding: 6px 14px; }
+.add-shot-bar { padding: 2px 0 10px 12px; }
+.add-shot-bar .link-btn { background: none; border: none; color: var(--dim); font-size: 12px; cursor: pointer; padding: 2px 7px; border-radius: 4px; font-family: inherit; }
+.add-shot-bar .link-btn:hover { color: var(--accent); background: rgba(244, 63, 94, 0.08); }

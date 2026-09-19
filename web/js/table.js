@@ -1,7 +1,7 @@
 // 表格模块：列构建 / 单元格渲染 / 就地编辑绑定 / 节拍区 / 详情区。
 // 显示规格 = cells.js（老库移植）；编辑引擎 = edit.js；页面组装在 scene.js。
 import { state } from './state.js';
-import { el, fmt } from './ui.js';
+import { el, fmt, toast } from './ui.js';
 import { cellContent } from './cells.js';
 import { attachEditable, attachCamEditor, parseCam, recordUndo } from './edit.js';
 import { api } from './api.js';
@@ -282,7 +282,7 @@ function detailBox(s, groups) {
 export function beatSection(b, data, opts) {
   const sec = el('section', 'beat');
   if (b.id != null) sec.dataset.beatId = b.id;
-  const numeric = b.beat_no != null && /^\d+$/.test(String(b.beat_no));
+  const numeric = b.beat_no != null && /^\d+/.test(String(b.beat_no));
   if (numeric) {
     const head = el('div', 'beat-head');
     head.draggable = true;
@@ -329,7 +329,64 @@ export function beatSection(b, data, opts) {
   } else {
     sec.appendChild(el('div', 'empty small', '（暂无镜头）'));
   }
+  sec.appendChild(addShotBar(b, data, opts));
   return sec;
+}
+
+// 节拍末尾「＋ 镜头」：空节拍/空场的创作入口（编号服务端自动）
+function addShotBar(b, data, opts) {
+  const bar = el('div', 'add-shot-bar');
+  const btn = el('button', 'link-btn', '＋ 镜头');
+  btn.title = '在末尾添加空行，随后直接开写';
+  btn.addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    try {
+      const idx = beatInsertIndex(data, b);
+      const res = await api.create({
+        kind: 'shot', scene_id: data.scene.id,
+        beat_id: b.id == null ? null : b.id, index: idx,
+      });
+      const ns = res.shot || {};
+      toast('已添加' + (ns.shot_no ? '：' + ns.shot_no : ''));
+      recordUndo({
+        type: 'custom', label: '添加镜头',
+        undo: async () => { await api.del({ table: 'shots', ids: [ns.id] }); },
+      });
+      if (opts.refresh) await opts.refresh();
+      const ntr = document.querySelector('tr.shot[data-id="' + ns.id + '"]');
+      if (ntr) {
+        ntr.scrollIntoView({ block: 'nearest' });
+        ntr.classList.add('flash');
+        setTimeout(() => ntr.classList.remove('flash'), 1600);
+      }
+    } catch (err) {
+      toast('添加失败：' + err.message, 'err');
+    }
+  });
+  bar.appendChild(btn);
+  return bar;
+}
+
+// 空节拍里「第一颗镜头」的插入位：前序节拍镜头之后（全空则 0）
+function beatInsertIndex(data, b) {
+  if (b.shots && b.shots.length) return Number(b.shots[b.shots.length - 1].position) + 1;
+  const beats = data.beats || [];
+  const total = beats.reduce((n, x) => n + ((x.shots && x.shots.length) || 0), 0)
+    + ((data.orphan_shots && data.orphan_shots.length) || 0);
+  const i = (b.id != null) ? beats.findIndex((x) => x.id === b.id) : -1;
+  if (i === -1) return total;
+  let idx = null;
+  for (let j = 0; j < i; j++) {
+    const sh = beats[j].shots;
+    if (sh && sh.length) idx = Math.max(idx == null ? 0 : idx, Number(sh[sh.length - 1].position) + 1);
+  }
+  if (idx == null) {
+    for (let j = i + 1; j < beats.length; j++) {
+      const sh = beats[j].shots;
+      if (sh && sh.length) { idx = Number(sh[0].position); break; }
+    }
+  }
+  return idx == null ? total : idx;
 }
 
 function beatTitle(b) {

@@ -50,13 +50,18 @@ export async function renderScene(view, sceneNo) {
     view.appendChild(el('div', 'empty err', '加载失败：' + err.message));
     return;
   }
-  if (location.hash !== '' && location.hash !== '#/' + sceneNo) return;
+  const curH = location.hash === '' ? '#/' : location.hash;
+  let curD = curH;
+  try { curD = decodeURIComponent(curH); } catch (e) { /* keep */ }
+  if (curD !== '#/' + sceneNo) return;
   sortState = null;
   resetFilter();
   currentData = data;
   bindDragOnce(view);
   bindCellMenu(view, {
     allShots: () => (currentData ? allShots(currentData) : []),
+    beats: () => (currentData ? currentData.beats : []),
+    sceneId: () => (currentData ? currentData.scene.id : null),
     refresh: refreshCurrentView,
   });
   bindSelection(view, { getShot: (id) => (currentData ? allShots(currentData).find((s) => s.id === id) : null) });
@@ -133,12 +138,13 @@ function paintScene(view) {
 
   view.appendChild(sceneHead(data.scene, data));
   const shots = allShots(data);
-  if (!shots.length) {
-    view.appendChild(el('div', 'empty', '本场暂无镜头——价值弧线已登记，等待创作填入。'));
+  if (!shots.length && !data.beats.length) {
+    view.appendChild(el('div', 'empty', '本场暂无镜头——用下方「＋ 添加节拍」搭骨架，再往里加镜头。'));
+    view.appendChild(addBeatBar());
     return;
   }
   view.appendChild(viewTools());
-  const topts = { prefs: prefs, sortState: sortState, onSort: cycleSort };
+  const topts = { prefs: prefs, sortState: sortState, onSort: cycleSort, refresh: refreshCurrentView };
   if (sortState) {
     view.appendChild(buildTable(sortedShots(shots), {
       beatCol: true, sortable: true, data: data,
@@ -152,6 +158,7 @@ function paintScene(view) {
         data, topts));
     }
   }
+  if (!sortState) view.appendChild(addBeatBar());
   applyFilter(fctx);
   scheduleWarm(view);
 }
@@ -169,10 +176,77 @@ function fmtDur(sec) {
   return m + '\u2032' + String(s).padStart(2, '0') + '\u2033';
 }
 
+// 场次末尾「＋ 添加节拍」（空场也显示：搭骨架入口）
+function addBeatBar() {
+  const bar = el('div', 'add-beat-bar');
+  const btn = el('button', 'tool-btn add-beat', '＋ 添加节拍');
+  btn.title = '在本场末尾添加节拍';
+  btn.addEventListener('click', async () => {
+    if (!currentData) return;
+    try {
+      const res = await api.create({ kind: 'beat', scene_id: currentData.scene.id });
+      const nb = res.beat || {};
+      toast('已添加节拍：beat ' + (nb.beat_no || ''));
+      recordUndo({
+        type: 'custom', label: '添加节拍',
+        undo: async () => { await api.del({ table: 'beats', id: nb.id }); },
+      });
+      await refreshCurrentView();
+      const nsec = document.querySelector('section.beat[data-beat-id="' + nb.id + '"]');
+      if (nsec) {
+        nsec.scrollIntoView({ block: 'nearest' });
+        nsec.classList.add('flash');
+        setTimeout(() => nsec.classList.remove('flash'), 1600);
+      }
+    } catch (err) {
+      toast('添加失败：' + err.message, 'err');
+    }
+  });
+  bar.appendChild(btn);
+  return bar;
+}
+
 function sceneHead(sc, data) {
   const head = el('div', 'scene-head');
   const h1 = el('h1', 'scene-title');
-  h1.appendChild(document.createTextNode(sc.scene_no + ' · '));
+  const noSpan = el('span', 'scene-no', sc.scene_no);
+  attachEditable(noSpan, {
+    table: 'scenes', id: sc.id, field: 'scene_no', label: '场号',
+    getValue: () => sc.scene_no,
+    onLocal: (v) => { sc.scene_no = v; },
+    renderCell: () => { noSpan.textContent = sc.scene_no; },
+    save: async (oldV, newV) => {
+      const v = String(newV == null ? '' : newV).trim();
+      if (!v) throw new Error('场号不能为空');
+      if (v === oldV) return;
+      if (state.scenes.some((x) => x.id !== sc.id && x.scene_no === v)) {
+        throw new Error('场号已存在：' + v);
+      }
+      await api.update('scenes', sc.id, 'scene_no', v);
+      sc.scene_no = v;
+      const st = state.scenes.find((x) => x.id === sc.id);
+      if (st) st.scene_no = v;
+      if (location.hash === '#/' + oldV || location.hash === '#/' + encodeURIComponent(oldV)) {
+        location.hash = '#/' + v;
+      }
+      window.dispatchEvent(new CustomEvent('shotlist:film-changed'));
+      recordUndo({
+        type: 'custom', label: '场号',
+        undo: async () => {
+          await api.update('scenes', sc.id, 'scene_no', oldV);
+          sc.scene_no = oldV;
+          const st2 = state.scenes.find((x) => x.id === sc.id);
+          if (st2) st2.scene_no = oldV;
+          if (location.hash === '#/' + v || location.hash === '#/' + encodeURIComponent(v)) {
+            location.hash = '#/' + oldV;
+          }
+          window.dispatchEvent(new CustomEvent('shotlist:film-changed'));
+        },
+      });
+    },
+  });
+  h1.appendChild(noSpan);
+  h1.appendChild(document.createTextNode(' · '));
   const t = el('span', null, sc.title || '');
   attachEditable(t, {
     table: 'scenes', id: sc.id, field: 'title', label: '场景名',

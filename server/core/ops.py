@@ -279,3 +279,405 @@ def history_of(con, scene_id=None, limit=100):
     q += " ORDER BY id DESC LIMIT ?"
     args.append(int(limit))
     return [dict(r) for r in con.execute(q, args)]
+
+# ── M2-6 结构操作：三层（场次/节拍/镜头）增删插复移 + 完整还原 ──
+
+def _table_cols(con, name):
+    """表列名集合（还原白名单用，防注入列名）。"""
+    return {r[1] for r in con.execute("PRAGMA table_info(%s)" % name)}
+
+
+def _insert_restore(con, table, row, replace=None):
+    """还原回插（撤销专用）：优先带原 id——撤销栈里更早的闭包都按原 id 记的，id 稳定才不悬空；
+    id 已被占用时退回自增。replace 覆盖指定列（position / scene_id 等）。"""
+    cols_all = _table_cols(con, table)
+    rep = replace or {}
+    d = {k: rep.get(k, row.get(k)) for k in row.keys() if k in cols_all}
+    if d.get("id") is not None:
+        occupied = con.execute("SELECT 1 FROM %s WHERE id=?" % table, (d["id"],)).fetchone()
+        if occupied is not None:
+            d.pop("id", None)
+    cols = list(d.keys())
+    vals = [d[k] for k in cols]
+    cur = con.execute(
+        "INSERT INTO %s (%s) VALUES (%s)" % (table, ", ".join(cols), ", ".join(["?"] * len(cols))),
+        vals)
+    return cur.lastrowid
+
+
+def _next_scene_no(con):
+    """下一个场号：最大数字 +10，步进风格 sNNN（s010→s090；冲突顺延）。"""
+    mx = 0
+    for r in con.execute("SELECT scene_no FROM scenes"):
+        m = re.match(r"^s(\d+)$", (r["scene_no"] or "").strip())
+        if m:
+            mx = max(mx, int(m.group(1)))
+    n = (mx + 10) if mx else 10
+    taken = {(r["scene_no"] or "") for r in con.execute("SELECT scene_no FROM scenes")}
+    while ("s%03d" % n) in taken:
+        n += 10
+    return "s%03d" % n
+
+
+def _next_beat_no(con, scene_id, base):
+    """节拍副本编号：数字基 + 首个空闲字母（1→1A；A-Z 占满后 AA…）。"""
+    taken = {(r["beat_no"] or "").strip() for r in
+             con.execute("SELECT beat_no FROM beats WHERE scene_id=?", (scene_id,))}
+    m = re.match(r"^(\d+)([A-Za-z]*)$", (base or "").strip())
+    root = m.group(1) if m else (base or "").strip()
+    sufs = list(string.ascii_uppercase)
+    sufs += [a + b for a in string.ascii_uppercase for b in string.ascii_uppercase]
+    for suf in sufs:
+        cand = root + suf
+        if cand not in taken:
+            return cand
+    return root + "A*"
+
+
+def create_blank_shot(con, scene_id, beat_id, index):
+    """插入空行：index=0 基场序位。编号：追加（末尾）=数字顺延；中插=前邻字母后缀。"""
+    sc = con.execute("SELECT * FROM scenes WHERE id=?", (scene_id,)).fetchone()
+    if not sc:
+        raise ValueError("场景不存在：%s" % scene_id)
+    if beat_id is not None:
+        b = con.execute("SELECT * FROM beats WHERE id=?", (beat_id,)).fetchone()
+        if not b or b["scene_id"] != scene_id:
+            raise ValueError("节拍不存在或不属于本场：%s" % beat_id)
+    rows = _scene_shots(con, scene_id)
+    idx = max(0, min(int(index), len(rows)))
+    if not rows:
+        new_no = "01"
+    elif idx == len(rows):
+        mx = 0
+        for r in rows:
+            m = re.match(r"^(\d+)", (r["shot_no"] or ""))
+            if m:
+                mx = max(mx, int(m.group(1)))
+        new_no = "%02d" % (mx + 1) if mx else "01"
+    else:
+        base = rows[idx - 1]["shot_no"] if idx > 0 else rows[0]["shot_no"]
+        new_no = _next_shot_no(con, scene_id, base or "01")
+    con.execute("UPDATE shots SET position=position+1 WHERE scene_id=? AND position>=?", (scene_id, idx))
+    cur = con.execute(
+        "INSERT INTO shots (scene_id, beat_id, position, shot_no) VALUES (?,?,?,?)",
+        (scene_id, beat_id, idx, new_no))
+    new_id = cur.lastrowid
+    con.execute(
+        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (scene_id, "shots", new_id, "create",
+         (rows[idx - 1]["shot_no"] if idx > 0 and rows else None), new_no, "manual"))
+    con.commit()
+    return dict(con.execute("SELECT * FROM shots WHERE id=?", (new_id,)).fetchone())
+
+
+def delete_shots(con, ids):
+    """多行删除（一次事务）：位置致密；逐行 delete 痕迹。返回全量行快照（按原序升序，供撤销）。"""
+    rows = []
+    for i in ids:
+        r = con.execute("SELECT * FROM shots WHERE id=?", (i,)).fetchone()
+        if not r:
+            raise ValueError("镜头不存在：%s" % i)
+        rows.append(r)
+    scene_ids = {r["scene_id"] for r in rows}
+    if len(scene_ids) != 1:
+        raise ValueError("只能批量删除同一场的镜头")
+    scene_id = rows[0]["scene_id"]
+    rows.sort(key=lambda r: (r["position"], r["id"]))
+    for r in rows:
+        con.execute("DELETE FROM shots WHERE id=?", (r["id"],))
+        con.execute(
+            "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (scene_id, "shots", r["id"], "delete", r["shot_no"], None, "manual"))
+    surv = list(con.execute("SELECT id, position FROM shots WHERE scene_id=? ORDER BY position, id", (scene_id,)))
+    for i, r in enumerate(surv):
+        if r["position"] != i:
+            con.execute("UPDATE shots SET position=? WHERE id=?", (i, r["id"]))
+    con.commit()
+    return [dict(r) for r in rows]
+
+
+def restore_shots(con, rows_):
+    """撤销删除：按原序（position 升序）插回原位；原编号/内容/提示词归属全带回（新 id）。"""
+    rows_ = sorted(rows_, key=lambda r: (r.get("position") or 0))
+    cols = _table_cols(con, "shots")
+    out = []
+    for r in rows_:
+        scene_id = r.get("scene_id")
+        if not isinstance(scene_id, int):
+            raise ValueError("恢复行缺 scene_id")
+        cnt = con.execute("SELECT COUNT(*) c FROM shots WHERE scene_id=?", (scene_id,)).fetchone()["c"]
+        idx = max(0, min(int(r.get("position") or 0), cnt))
+        con.execute("UPDATE shots SET position=position+1 WHERE scene_id=? AND position>=?", (scene_id, idx))
+        new_id = _insert_restore(con, "shots", r, {"position": idx})
+        con.execute(
+            "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (scene_id, "shots", new_id, "create", None, r.get("shot_no"), "manual"))
+        out.append(dict(con.execute("SELECT * FROM shots WHERE id=?", (new_id,)).fetchone()))
+    con.commit()
+    return out
+
+
+def create_beat(con, scene_id):
+    """场景末尾追加空节拍（编号 = 最大数字 +1）。"""
+    sc = con.execute("SELECT * FROM scenes WHERE id=?", (scene_id,)).fetchone()
+    if not sc:
+        raise ValueError("场景不存在：%s" % scene_id)
+    beats = _scene_beats(con, scene_id)
+    mx = 0
+    for b in beats:
+        m = re.match(r"^(\d+)", str(b["beat_no"] or ""))
+        if m:
+            mx = max(mx, int(m.group(1)))
+    cur = con.execute(
+        "INSERT INTO beats (scene_id, position, beat_no, name, kind) VALUES (?,?,?,?,?)",
+        (scene_id, len(beats), str(mx + 1), "新节拍", "\u26aa 填充"))
+    new_id = cur.lastrowid
+    con.execute(
+        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (scene_id, "beats", new_id, "create", None, str(mx + 1), "manual"))
+    con.commit()
+    return dict(con.execute("SELECT * FROM beats WHERE id=?", (new_id,)).fetchone())
+
+
+def duplicate_beat(con, beat_id):
+    """节拍深拷：副本节拍紧跟源节拍；其下镜头连内容一起拷（字母后缀编号），插在其后连续块。"""
+    src = con.execute("SELECT * FROM beats WHERE id=?", (beat_id,)).fetchone()
+    if not src:
+        raise ValueError("节拍不存在：%s" % beat_id)
+    scene_id = src["scene_id"]
+    beats = _scene_beats(con, scene_id)
+    bi = [b["id"] for b in beats].index(beat_id)
+    new_no = _next_beat_no(con, scene_id, src["beat_no"])
+    con.execute("UPDATE beats SET position=position+1 WHERE scene_id=? AND position>?", (scene_id, src["position"]))
+    bcols = _table_cols(con, "beats")
+    bkeys = [k for k in src.keys() if k in bcols and k not in ("id", "position", "beat_no", "scene_id")]
+    bvals = [src[k] for k in bkeys]
+    cur = con.execute(
+        "INSERT INTO beats (scene_id, position, beat_no, %s) VALUES (?,?,?,%s)"
+        % (", ".join(bkeys), ", ".join(["?"] * len(bkeys))),
+        [scene_id, bi + 1, new_no] + bvals)
+    new_bid = cur.lastrowid
+    block = [s for s in _scene_shots(con, scene_id) if s["beat_id"] == beat_id]
+    if block:
+        last_pos = block[-1]["position"]
+        con.execute("UPDATE shots SET position=position+? WHERE scene_id=? AND position>?",
+                    (len(block), scene_id, last_pos))
+        cursor = last_pos + 1
+        for src_s in block:
+            new_s_no = _next_shot_no(con, scene_id, src_s["shot_no"])
+            cols = ", ".join(COPY_COLS)
+            con.execute(
+                "INSERT INTO shots (scene_id, beat_id, position, shot_no, %s) VALUES (?,?,?,?,%s)"
+                % (cols, ", ".join(["?"] * len(COPY_COLS))),
+                [scene_id, new_bid, cursor, new_s_no] + [src_s[c] for c in COPY_COLS])
+            cursor += 1
+    con.execute(
+        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (scene_id, "beats", new_bid, "create", src["beat_no"],
+         "%s（含 %d 镜）" % (new_no, len(block)), "manual"))
+    con.commit()
+    return dict(con.execute("SELECT * FROM beats WHERE id=?", (new_bid,)).fetchone())
+
+
+def delete_beat(con, beat_id, with_shots=False):
+    """删除节拍：默认其下镜头落「未归节拍」（beat_id=NULL）；with_shots=True 连镜头删除（副本撤销用）。"""
+    beat = con.execute("SELECT * FROM beats WHERE id=?", (beat_id,)).fetchone()
+    if not beat:
+        raise ValueError("节拍不存在：%s" % beat_id)
+    scene_id = beat["scene_id"]
+    block = [s for s in _scene_shots(con, scene_id) if s["beat_id"] == beat_id]
+    if with_shots:
+        for s in block:
+            con.execute("DELETE FROM shots WHERE id=?", (s["id"],))
+            con.execute(
+                "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+                " VALUES (?,?,?,?,?,?,?)",
+                (scene_id, "shots", s["id"], "delete", s["shot_no"], None, "manual"))
+        surv = list(con.execute("SELECT id, position FROM shots WHERE scene_id=? ORDER BY position, id", (scene_id,)))
+        for i, r in enumerate(surv):
+            if r["position"] != i:
+                con.execute("UPDATE shots SET position=? WHERE id=?", (i, r["id"]))
+    else:
+        for s in block:
+            con.execute("UPDATE shots SET beat_id=NULL WHERE id=?", (s["id"],))
+    con.execute("DELETE FROM beats WHERE id=?", (beat_id,))
+    bsurv = list(con.execute("SELECT id, position FROM beats WHERE scene_id=? ORDER BY position, id", (scene_id,)))
+    for i, b in enumerate(bsurv):
+        if b["position"] != i:
+            con.execute("UPDATE beats SET position=? WHERE id=?", (i, b["id"]))
+    con.execute(
+        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (scene_id, "beats", beat_id, "delete", beat["beat_no"], None, "manual"))
+    con.commit()
+    return {"beat": dict(beat), "shot_ids": [s["id"] for s in block]}
+
+
+def restore_beat(con, beat_row, shot_ids):
+    """撤销删除：重建节拍（原位）并认领镜头（按 id 重挂）。"""
+    scene_id = beat_row.get("scene_id")
+    if not isinstance(scene_id, int):
+        raise ValueError("恢复节拍缺 scene_id")
+    bs = _scene_beats(con, scene_id)
+    idx = max(0, min(int(beat_row.get("position") or 0), len(bs)))
+    con.execute("UPDATE beats SET position=position+1 WHERE scene_id=? AND position>=?", (scene_id, idx))
+    new_id = _insert_restore(con, "beats", beat_row, {"position": idx})
+    for sid in (shot_ids or []):
+        if isinstance(sid, int):
+            con.execute("UPDATE shots SET beat_id=? WHERE id=?", (new_id, sid))
+    con.execute(
+        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (scene_id, "beats", new_id, "create", None, beat_row.get("beat_no"), "manual"))
+    con.commit()
+    return dict(con.execute("SELECT * FROM beats WHERE id=?", (new_id,)).fetchone())
+
+
+def create_scene(con):
+    """在影片末尾追加空场（场号自动）。"""
+    f = db.film(con)
+    if not f:
+        raise ValueError("还没有影片")
+    scenes = list(con.execute("SELECT * FROM scenes WHERE film_id=? ORDER BY position, id", (f["id"],)))
+    no = _next_scene_no(con)
+    cur = con.execute(
+        "INSERT INTO scenes (film_id, position, scene_no, title) VALUES (?,?,?,?)",
+        (f["id"], len(scenes), no, "新场"))
+    new_id = cur.lastrowid
+    con.execute(
+        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (new_id, "scenes", new_id, "create", None, no, "manual"))
+    con.commit()
+    return dict(con.execute("SELECT * FROM scenes WHERE id=?", (new_id,)).fetchone())
+
+
+def move_scene(con, scene_id, index):
+    """场次排序：重排 scenes.position（index 基于去掉自身后的场序）。"""
+    sc = con.execute("SELECT * FROM scenes WHERE id=?", (scene_id,)).fetchone()
+    if not sc:
+        raise ValueError("场景不存在：%s" % scene_id)
+    scenes = list(con.execute("SELECT * FROM scenes WHERE film_id=? ORDER BY position, id", (sc["film_id"],)))
+    others = [s for s in scenes if s["id"] != scene_id]
+    idx = max(0, min(int(index), len(others)))
+    new_order = others[:idx] + [sc] + others[idx:]
+    if [s["id"] for s in new_order] == [s["id"] for s in scenes]:
+        return {"changed": False, "id": scene_id}
+    old_i = [s["id"] for s in scenes].index(scene_id)
+    for i, s in enumerate(new_order):
+        if s["position"] != i:
+            con.execute("UPDATE scenes SET position=? WHERE id=?", (i, s["id"]))
+    con.execute(
+        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (scene_id, "scenes", scene_id, "drag", "#%s" % old_i, "#%s" % idx, "manual"))
+    con.commit()
+    return {"changed": True, "id": scene_id, "index": idx, "old_index": old_i}
+
+
+def duplicate_scene(con, scene_id):
+    """场次深拷：场 + 节拍 + 镜头 + 提示词组；新场紧跟源场；场号自动；镜号原样（新场不冲突）。"""
+    src = con.execute("SELECT * FROM scenes WHERE id=?", (scene_id,)).fetchone()
+    if not src:
+        raise ValueError("场景不存在：%s" % scene_id)
+    film_id = src["film_id"]
+    new_no = _next_scene_no(con)
+    con.execute("UPDATE scenes SET position=position+1 WHERE film_id=? AND position>?", (film_id, src["position"]))
+    scols = _table_cols(con, "scenes")
+    skeys = [k for k in src.keys() if k in scols and k not in ("id", "position", "scene_no", "locked", "film_id")]
+    con.execute(
+        "INSERT INTO scenes (film_id, position, scene_no, locked, %s) VALUES (?,?,?,0,%s)"
+        % (", ".join(skeys), ", ".join(["?"] * len(skeys))),
+        [film_id, src["position"] + 1, new_no] + [src[k] for k in skeys])
+    new_sid = con.execute("SELECT last_insert_rowid() x").fetchone()["x"]
+    bmap = {}
+    for b in _scene_beats(con, scene_id):
+        bcols = _table_cols(con, "beats")
+        bkeys = [k for k in b.keys() if k in bcols and k not in ("id", "scene_id")]
+        con.execute(
+            "INSERT INTO beats (scene_id, %s) VALUES (?,%s)" % (", ".join(bkeys), ", ".join(["?"] * len(bkeys))),
+            [new_sid] + [b[k] for k in bkeys])
+        bmap[b["id"]] = con.execute("SELECT last_insert_rowid() x").fetchone()["x"]
+    gmap = {}
+    for g in con.execute("SELECT * FROM prompt_groups WHERE scene_id=? ORDER BY position, id", (scene_id,)):
+        gcols = _table_cols(con, "prompt_groups")
+        gkeys = [k for k in g.keys() if k in gcols and k not in ("id", "scene_id")]
+        con.execute(
+            "INSERT INTO prompt_groups (scene_id, %s) VALUES (?,%s)" % (", ".join(gkeys), ", ".join(["?"] * len(gkeys))),
+            [new_sid] + [g[k] for k in gkeys])
+        gmap[g["id"]] = con.execute("SELECT last_insert_rowid() x").fetchone()["x"]
+    s2 = _scene_shots(con, scene_id)
+    for shot in s2:
+        bid = bmap.get(shot["beat_id"]) if shot["beat_id"] is not None else None
+        gid = gmap.get(shot["prompt_group_id"]) if shot["prompt_group_id"] is not None else None
+        con.execute(
+            "INSERT INTO shots (scene_id, beat_id, position, shot_no, prompt_group_id, %s) VALUES (?,?,?,?,?,%s)"
+            % (", ".join(COPY_COLS), ", ".join(["?"] * len(COPY_COLS))),
+            [new_sid, bid, shot["position"], shot["shot_no"], gid] + [shot[c] for c in COPY_COLS])
+    nbeats = len(bmap)
+    con.execute(
+        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (new_sid, "scenes", new_sid, "create", src["scene_no"],
+         "%s（%d 节拍 / %d 镜）" % (new_no, nbeats, len(s2)), "manual"))
+    con.commit()
+    return {"id": new_sid, "scene_no": new_no, "beats": nbeats, "shots": len(s2)}
+
+
+def delete_scene(con, scene_id):
+    """删场：整场级联（节拍/镜头/提示词组随删）；返回全量快照供撤销。"""
+    sc = con.execute("SELECT * FROM scenes WHERE id=?", (scene_id,)).fetchone()
+    if not sc:
+        raise ValueError("场景不存在：%s" % scene_id)
+    film_id = sc["film_id"]
+    payload = {
+        "scene": dict(sc),
+        "beats": [dict(b) for b in _scene_beats(con, scene_id)],
+        "shots": [dict(s) for s in _scene_shots(con, scene_id)],
+        "groups": [dict(g) for g in con.execute("SELECT * FROM prompt_groups WHERE scene_id=? ORDER BY position, id", (scene_id,))],
+    }
+    con.execute("DELETE FROM scenes WHERE id=?", (scene_id,))
+    surv = list(con.execute("SELECT id, position FROM scenes WHERE film_id=? ORDER BY position, id", (film_id,)))
+    for i, r in enumerate(surv):
+        if r["position"] != i:
+            con.execute("UPDATE scenes SET position=? WHERE id=?", (i, r["id"]))
+    con.execute(
+        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (scene_id, "scenes", scene_id, "delete", sc["scene_no"], None, "manual"))
+    con.commit()
+    return payload
+
+
+def restore_scene_full(con, payload):
+    """撤销删场：重建整场（新 id；场号/顺序原样；节拍/镜头/提示词组外键重连）。"""
+    sc = dict(payload.get("scene") or {})
+    film_id = sc.get("film_id")
+    if not isinstance(film_id, int):
+        raise ValueError("恢复场次缺 film_id")
+    scenes = list(con.execute("SELECT id, position FROM scenes WHERE film_id=? ORDER BY position, id", (film_id,)))
+    idx = max(0, min(int(sc.get("position") or 0), len(scenes)))
+    con.execute("UPDATE scenes SET position=position+1 WHERE film_id=? AND position>=?", (film_id, idx))
+    new_sid = _insert_restore(con, "scenes", sc, {"position": idx})
+    bmap = {}
+    for b in payload.get("beats") or []:
+        bmap[b["id"]] = _insert_restore(con, "beats", b, {"scene_id": new_sid})
+    gmap = {}
+    for g in payload.get("groups") or []:
+        gmap[g["id"]] = _insert_restore(con, "prompt_groups", g, {"scene_id": new_sid})
+    for shot in payload.get("shots") or []:
+        bid = bmap.get(shot.get("beat_id")) if shot.get("beat_id") is not None else None
+        gid = gmap.get(shot.get("prompt_group_id")) if shot.get("prompt_group_id") is not None else None
+        _insert_restore(con, "shots", shot,
+                        {"scene_id": new_sid, "beat_id": bid, "prompt_group_id": gid})
+    con.execute(
+        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (new_sid, "scenes", new_sid, "create", None, sc.get("scene_no"), "manual"))
+    con.commit()
+    return {"id": new_sid, "scene_no": sc.get("scene_no")}

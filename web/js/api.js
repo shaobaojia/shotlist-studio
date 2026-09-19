@@ -30,7 +30,9 @@ export const api = {
   renumber: (no) => post('/api/scenes/' + encodeURIComponent(no) + '/renumber', {}),
   move: (table, id, payload) => post('/api/move', Object.assign({ table: table, id: id }, payload || {})),
   batch: (ops) => post('/api/batch', { ops: ops }),
-  duplicate: (id) => post('/api/duplicate', { id: id }),
-  del: (id) => post('/api/delete', { id: id }),
+  duplicate: (table, id) => post('/api/duplicate', { table: table, id: id }),
+  del: (payload) => post('/api/delete', payload),
+  create: (payload) => post('/api/create', payload),
+  restore: (payload) => post('/api/restore', payload),
   history: (sceneId, limit) => get('/api/history?scene_id=' + sceneId + '&limit=' + (limit || 100)),
 };

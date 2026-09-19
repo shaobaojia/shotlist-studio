@@ -16,6 +16,7 @@ SCHEMA = (SERVER / "schema.sql").read_text(encoding="utf-8")
 def make_db():
     con = sqlite3.connect(":memory:")
     con.row_factory = sqlite3.Row
+    con.execute("PRAGMA foreign_keys=ON")  # 与生产 rw 连接一致（删场级联依赖它）
     con.executescript(SCHEMA)
     con.execute("INSERT INTO films (title) VALUES ('t')")
     con.execute("INSERT INTO scenes (film_id, scene_no, title, value) VALUES (1, 's010', '第一场', '控制')")
@@ -239,5 +240,160 @@ class TestDuplicateDelete(unittest.TestCase):
             ops.delete_shot(con, 999)
 
 
+
+
+
+# ══════════ M2-6 结构操作（三层增删插复移）══════════
+
+def make_db0():
+    """夹具 position 规整为 0 基（与迁移后真实数据一致；结构操作 index 语义 = 0 基场序）。"""
+    con = make_db()
+    ids = [r["id"] for r in con.execute("SELECT id FROM shots WHERE scene_id=1 ORDER BY position")]
+    for i, sid in enumerate(ids):
+        con.execute("UPDATE shots SET position=? WHERE id=?", (i, sid))
+    con.commit()
+    return con
+
+
+class TestBlankShot(unittest.TestCase):
+    def test_insert_mid_suffix(self):
+        con = make_db0()
+        # 序：[03, 01, 17A]；在 03 之后（index 1）
+        s = ops.create_blank_shot(con, 1, 1, 1)
+        self.assertEqual(s["shot_no"], "03A")
+        self.assertEqual(s["position"], 1)
+        nos = [r["shot_no"] for r in con.execute("SELECT shot_no FROM shots WHERE scene_id=1 ORDER BY position")]
+        self.assertEqual(nos, ["03", "03A", "01", "17A"])
+        h = ops.history_of(con, scene_id=1)
+        self.assertEqual(h[0]["field"], "create")
+        self.assertEqual(h[0]["new_value"], "03A")
+
+    def test_insert_first_edge(self):
+        con = make_db0()
+        s = ops.create_blank_shot(con, 1, 1, 0)
+        self.assertEqual(s["position"], 0)
+        self.assertEqual(s["shot_no"], "03A")
+
+    def test_append_sequential(self):
+        con = make_db0()
+        s = ops.create_blank_shot(con, 1, 1, 3)  # 追尾（index == 行数）
+        self.assertEqual(s["shot_no"], "18")     # 最大数字 17 +1
+        self.assertEqual(s["position"], 3)
+
+    def test_empty_scene_first_shots(self):
+        con = make_db0()
+        con.execute("INSERT INTO scenes (film_id, scene_no, title) VALUES (1, 's020', '二')")
+        sid = con.execute("SELECT id FROM scenes WHERE scene_no='s020'").fetchone()["id"]
+        s1 = ops.create_blank_shot(con, sid, None, 0)
+        s2 = ops.create_blank_shot(con, sid, None, 1)
+        self.assertEqual([s1["shot_no"], s2["shot_no"]], ["01", "02"])
+
+    def test_bad_beat_rejected(self):
+        con = make_db0()
+        with self.assertRaises(ValueError):
+            ops.create_blank_shot(con, 1, 999, 0)
+
+
+class TestDeleteRestoreShots(unittest.TestCase):
+    def test_multi_delete_and_restore_keeps_ids(self):
+        con = make_db0()
+        rows = ops.delete_shots(con, [1, 3])
+        self.assertEqual([r["shot_no"] for r in rows], ["03", "17A"])
+        self.assertEqual(con.execute("SELECT COUNT(*) c FROM shots WHERE scene_id=1").fetchone()["c"], 1)
+        p0 = con.execute("SELECT position FROM shots WHERE scene_id=1").fetchone()["position"]
+        self.assertEqual(p0, 0)  # 位置致密
+        back = ops.restore_shots(con, [dict(r) for r in rows])
+        self.assertEqual([b["id"] for b in back], [1, 3])  # 原 id 复用（撤销栈寻址稳定）
+        nos = [r["shot_no"] for r in con.execute("SELECT shot_no FROM shots WHERE scene_id=1 ORDER BY position")]
+        self.assertEqual(nos, ["03", "01", "17A"])
+        self.assertEqual(con.execute("SELECT blocking FROM shots WHERE id=3").fetchone()["blocking"], "动作3")
+
+    def test_delete_missing_raises(self):
+        con = make_db0()
+        with self.assertRaises(ValueError):
+            ops.delete_shots(con, [999])
+
+
+class TestBeatsStruct(unittest.TestCase):
+    def test_create_beat_append(self):
+        con = make_db0()
+        b = ops.create_beat(con, 1)
+        self.assertEqual(b["beat_no"], "2")
+        self.assertEqual(b["position"], 1)
+        h = ops.history_of(con, scene_id=1)
+        self.assertEqual(h[0]["entity"], "beats")
+
+    def test_duplicate_beat_deep(self):
+        con = make_db0()
+        nb = ops.duplicate_beat(con, 1)
+        self.assertEqual(nb["beat_no"], "1A")
+        self.assertEqual(nb["position"], 1)
+        nos = [r["shot_no"] for r in con.execute("SELECT shot_no FROM shots WHERE scene_id=1 ORDER BY position")]
+        self.assertEqual(nos, ["03", "01", "17A", "03A", "01A", "17B"])
+        self.assertEqual(con.execute("SELECT COUNT(*) c FROM shots WHERE beat_id=?", (nb["id"],)).fetchone()["c"], 3)
+
+    def test_delete_beat_orphan_and_restore(self):
+        con = make_db0()
+        res = ops.delete_beat(con, 1)
+        self.assertEqual(len(res["shot_ids"]), 3)
+        self.assertIsNone(con.execute("SELECT beat_id FROM shots WHERE id=1").fetchone()["beat_id"])
+        self.assertEqual(con.execute("SELECT COUNT(*) c FROM beats WHERE scene_id=1").fetchone()["c"], 0)
+        b = ops.restore_beat(con, res["beat"], res["shot_ids"])
+        self.assertEqual(b["id"], 1)  # 原 id 复用
+        self.assertEqual(con.execute("SELECT beat_id FROM shots WHERE id=1").fetchone()["beat_id"], 1)
+
+    def test_delete_beat_with_shots(self):
+        con = make_db0()
+        ops.delete_beat(con, 1, with_shots=True)
+        self.assertEqual(con.execute("SELECT COUNT(*) c FROM shots WHERE scene_id=1").fetchone()["c"], 0)
+        self.assertEqual(con.execute("SELECT COUNT(*) c FROM beats WHERE scene_id=1").fetchone()["c"], 0)
+
+
+class TestScenesStruct(unittest.TestCase):
+    def test_create_scene_numbering(self):
+        con = make_db0()
+        s1 = ops.create_scene(con)
+        self.assertEqual(s1["scene_no"], "s020")
+        self.assertEqual(s1["position"], 1)
+        s2 = ops.create_scene(con)
+        self.assertEqual(s2["scene_no"], "s030")
+
+    def test_move_scene(self):
+        con = make_db0()
+        s2 = ops.create_scene(con)
+        res = ops.move_scene(con, s2["id"], 0)
+        self.assertTrue(res["changed"])
+        order = [r["scene_no"] for r in con.execute("SELECT scene_no FROM scenes ORDER BY position")]
+        self.assertEqual(order, ["s020", "s010"])
+        res2 = ops.move_scene(con, s2["id"], 0)
+        self.assertFalse(res2["changed"])  # 原地不动 = noop
+
+    def test_duplicate_scene_deep_and_restore(self):
+        con = make_db0()
+        con.execute("INSERT INTO prompt_groups (scene_id, position, text) VALUES (1, 0, '组文案')")
+        gid = con.execute("SELECT id FROM prompt_groups WHERE scene_id=1").fetchone()["id"]
+        con.execute("UPDATE shots SET prompt_group_id=? WHERE id=2", (gid,))
+        con.commit()
+        d = ops.duplicate_scene(con, 1)
+        self.assertEqual(d["scene_no"], "s020")
+        nid = d["id"]
+        self.assertEqual(con.execute("SELECT COUNT(*) c FROM beats WHERE scene_id=?", (nid,)).fetchone()["c"], 1)
+        self.assertEqual(con.execute("SELECT COUNT(*) c FROM shots WHERE scene_id=?", (nid,)).fetchone()["c"], 3)
+        nos = [r["shot_no"] for r in con.execute("SELECT shot_no FROM shots WHERE scene_id=? ORDER BY position", (nid,))]
+        self.assertEqual(nos, ["03", "01", "17A"])  # 新场镜号原样
+        g2 = con.execute("SELECT id FROM prompt_groups WHERE scene_id=?", (nid,)).fetchone()
+        self.assertIsNotNone(g2)
+        m = con.execute("SELECT COUNT(*) c FROM shots WHERE scene_id=? AND prompt_group_id=?",
+                        (nid, g2["id"])).fetchone()["c"]
+        self.assertEqual(m, 1)  # 词组外键重连
+        pay = ops.delete_scene(con, nid)
+        self.assertEqual(len(pay["shots"]), 3)
+        r = ops.restore_scene_full(con, pay)
+        self.assertEqual(r["id"], nid)  # 原 id 复用
+        self.assertEqual(con.execute("SELECT COUNT(*) c FROM shots WHERE scene_id=?", (nid,)).fetchone()["c"], 3)
+        bid = con.execute("SELECT beat_id FROM shots WHERE scene_id=? AND shot_no='03'", (nid,)).fetchone()["beat_id"]
+        self.assertIsNotNone(bid)  # 外键重连
+
+
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    unittest.main()

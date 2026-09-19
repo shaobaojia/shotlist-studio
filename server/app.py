@@ -19,17 +19,19 @@ ROUTES = [
     (re.compile(r"^/api/health$"), handlers.health),
     (re.compile(r"^/api/meta$"), handlers.meta),
     (re.compile(r"^/api/film$"), handlers.film),
-    (re.compile(r"^/api/scenes/([a-zA-Z0-9]+)$"), handlers.scene),
+    (re.compile(r"^/api/scenes/([^/]+)$"), handlers.scene),
     (re.compile(r"^/api/history$"), handlers.history),
 ]
 
 POST_ROUTES = [
     (re.compile(r"^/api/update$"), handlers.update),
     (re.compile(r"^/api/batch$"), handlers.batch),
-    (re.compile(r"^/api/scenes/([a-zA-Z0-9]+)/renumber$"), handlers.renumber),
+    (re.compile(r"^/api/scenes/([^/]+)/renumber$"), handlers.renumber),
     (re.compile(r"^/api/move$"), handlers.move),
     (re.compile(r"^/api/duplicate$"), handlers.duplicate),
     (re.compile(r"^/api/delete$"), handlers.delete_row),
+    (re.compile(r"^/api/create$"), handlers.create),
+    (re.compile(r"^/api/restore$"), handlers.restore),
 ]
 
 CONTENT_TYPES = {

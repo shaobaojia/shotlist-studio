@@ -1,4 +1,4 @@
-// 右键菜单（M2-3；M2-5 加「创建行副本」）：复制本格 / 复制整行 / 粘贴（Excel 式块粘贴）/ 创建行副本 / 清空本格。
+// 右键菜单（M2-3；M2-5 行副本；M2-6 结构操作）：镜头行（插入/删除/副本/清空）+ 节拍头（副本/删除）+ 选区变体。
 // 挂在 #view 上（事件委托）；复制走 execCommand 兜底（局域 http 下无 clipboard API）。
 import { api } from './api.js';
 import { toast } from './ui.js';
@@ -9,22 +9,33 @@ import { refreshShotCell } from './table.js';
 import { current as selCurrent, inCell, copySelectionTSV, clearSelectionCells, tlCell, rectOf } from './selection.js';
 
 let shotsOf = null;
+let beatsOf = null;
+let sceneIdOf = null;
 let refreshView = null;
 
-// ctx: { allShots() -> 当前场全部镜头模型 }
+// ctx: { allShots() -> 当前场全部镜头模型, beats() -> 节拍, sceneId() -> 场 id }
 export function bindCellMenu(view, ctx) {
   shotsOf = ctx.allShots;
+  beatsOf = ctx.beats || null;
+  sceneIdOf = ctx.sceneId || null;
   refreshView = ctx.refresh || null;
   if (view.dataset.menuBound === '1') return;
   view.dataset.menuBound = '1';
   view.addEventListener('contextmenu', (e) => {
     const td = e.target.closest ? e.target.closest('td[data-field]') : null;
     const tr = e.target.closest ? e.target.closest('tr.shot') : null;
-    if (!td || !tr || !td.dataset.field) return;
-    if (td.querySelector('.cell-editor, .cam-editor')) return; // 编辑中：保留原生菜单
-    e.preventDefault();
-    if (inCell(td)) openSelMenu(td, tr, e);
-    else openCellMenu(td, tr, e);
+    if (td && tr && td.dataset.field) {
+      if (td.querySelector('.cell-editor, .cam-editor')) return; // 编辑中：保留原生菜单
+      e.preventDefault();
+      if (inCell(td)) openSelMenu(td, tr, e);
+      else openCellMenu(td, tr, e);
+      return;
+    }
+    const sec = e.target.closest ? e.target.closest('section.beat') : null;
+    if (sec && sec.dataset.beatId) {
+      e.preventDefault();
+      openBeatMenu(sec, e);
+    }
   });
 }
 
@@ -44,8 +55,11 @@ function openCellMenu(td, tr, e) {
     { key: 'paste', label: '粘贴（从此格起）' },
     { sep: true },
     { key: 'duplicate', label: '创建行副本' },
+    { key: 'insertAbove', label: '上方插入空行' },
+    { key: 'insertBelow', label: '下方插入空行' },
     { sep: true },
     { key: 'clear', label: '清空本格' },
+    { key: 'deleteRow', label: '删除本行' },
   ];
   openMenu({ x: e.clientX, y: e.clientY }, items, (k) => onCellMenuPick(k, td, tr, s, key, table));
 }
@@ -55,6 +69,7 @@ function openSelMenu(td, tr, e) {
   if (!selCurrent()) { openCellMenu(td, tr, e); return; }
   const rc = rectOf();
   const n = (rc.r2 - rc.r1 + 1) * (rc.c2 - rc.c1 + 1);
+  const mrows = rc.r2 - rc.r1 + 1;
   const items = [
     { key: 'copySel', label: '复制选区（' + n + ' 格）' },
     { key: 'copyCell', label: '复制本格' },
@@ -62,13 +77,21 @@ function openSelMenu(td, tr, e) {
     { key: 'paste', label: '粘贴（从选区左上起）' },
     { sep: true },
     { key: 'duplicate', label: '创建行副本' },
+    { key: 'insertAbove', label: '上方插入空行' },
+    { key: 'insertBelow', label: '下方插入空行' },
     { sep: true },
     { key: 'clearSel', label: '清空选区' },
     { key: 'clear', label: '清空本格' },
+    { key: 'deleteRows', label: '删除选中行（' + mrows + '）' },
   ];
   openMenu({ x: e.clientX, y: e.clientY }, items, (k) => {
     if (k === 'copySel') { copySelectionTSV(); return; }
     if (k === 'clearSel') { clearSelectionCells(); return; }
+    if (k === 'deleteRows') { deleteSelectedRows(); return; }
+    if (k === 'insertAbove' || k === 'insertBelow') {
+      insertBlank(findShot(Number(tr.dataset.id)), k === 'insertAbove' ? 'above' : 'below');
+      return;
+    }
     if (k === 'paste') {
       const tlc = tlCell();
       if (tlc) armPaste({ td: tlc.td, tr: tlc.tr, field: tlc.field });
@@ -88,6 +111,12 @@ async function onCellMenuPick(k, td, tr, s, key, table) {
     toast(ok ? '已复制整行' : '复制失败：浏览器限制', ok ? '' : 'err');
   } else if (k === 'duplicate') {
     await duplicateRow(s);
+  } else if (k === 'insertAbove') {
+    await insertBlank(s, 'above');
+  } else if (k === 'insertBelow') {
+    await insertBlank(s, 'below');
+  } else if (k === 'deleteRow') {
+    await removeRow(s);
   } else if (k === 'paste') {
     armPaste({ td, tr, field: key });
   } else if (k === 'clear') {
@@ -111,20 +140,15 @@ async function onCellMenuPick(k, td, tr, s, key, table) {
 async function duplicateRow(s) {
   if (!s) return;
   try {
-    const res = await api.duplicate(s.id);
+    const res = await api.duplicate('shots', s.id);
     const ns = res.shot || {};
     toast('已创建副本' + (ns.shot_no ? '：' + ns.shot_no : ''));
     recordUndo({
       type: 'custom', label: '创建行副本',
-      undo: async () => { await api.del(ns.id); },
+      undo: async () => { await api.del({ table: 'shots', ids: [ns.id] }); },
     });
     if (refreshView) await refreshView();
-    const ntr = document.querySelector('tr.shot[data-id="' + ns.id + '"]');
-    if (ntr) {
-      ntr.scrollIntoView({ block: 'nearest' });
-      ntr.classList.add('flash');
-      setTimeout(() => ntr.classList.remove('flash'), 1600);
-    }
+    flashEl('tr.shot[data-id="' + ns.id + '"]');
   } catch (err) {
     toast('创建副本失败：' + err.message, 'err');
   }
@@ -170,3 +194,120 @@ const pasteCtx = {
     if (s) refreshShotCell(s, key);
   },
 };
+
+// ── M2-6 结构操作 ──
+
+function flashEl(sel) {
+  const n = document.querySelector(sel);
+  if (!n) return;
+  n.scrollIntoView({ block: 'nearest' });
+  n.classList.add('flash');
+  setTimeout(() => n.classList.remove('flash'), 1600);
+}
+
+// 上方/下方插入空行（编号规则在服务端：中插=前邻字母后缀；追尾=数字顺延）
+async function insertBlank(s, dir) {
+  if (!s) return;
+  const sceneId = sceneIdOf ? sceneIdOf() : null;
+  if (!sceneId) return;
+  try {
+    const idx = (Number(s.position) || 0) + (dir === 'below' ? 1 : 0);
+    const res = await api.create({
+      kind: 'shot', scene_id: sceneId,
+      beat_id: s.beat_id == null ? null : s.beat_id, index: idx,
+    });
+    const ns = res.shot || {};
+    toast('已插入空行' + (ns.shot_no ? '：' + ns.shot_no : ''));
+    recordUndo({
+      type: 'custom', label: '插入空行',
+      undo: async () => { await api.del({ table: 'shots', ids: [ns.id] }); },
+    });
+    if (refreshView) await refreshView();
+    flashEl('tr.shot[data-id="' + ns.id + '"]');
+  } catch (err) {
+    toast('插入失败：' + err.message, 'err');
+  }
+}
+
+// 删除本行（即时删 + Ctrl+Z 完整还原）
+async function removeRow(s) {
+  if (!s) return;
+  try {
+    const res = await api.del({ table: 'shots', ids: [s.id] });
+    const rows = (res.deleted && res.deleted.rows) || [];
+    toast('已删除' + (s.shot_no ? ' ' + s.shot_no : '') + '（Ctrl+Z 可撤销）');
+    recordUndo({
+      type: 'custom', label: '删除行',
+      undo: async () => { await api.restore({ kind: 'shots', rows: rows }); },
+    });
+    if (refreshView) await refreshView();
+  } catch (err) {
+    toast('删除失败：' + err.message, 'err');
+  }
+}
+
+// 删除选中行（N 行一次删；撤销=整组回插）
+export async function deleteSelectedRows() {
+  const s = selCurrent();
+  const rc = rectOf();
+  if (!s || !rc) return;
+  const ids = [];
+  for (let r = rc.r1; r <= rc.r2; r++) {
+    const tr = s.rows[r];
+    if (tr) ids.push(Number(tr.dataset.id));
+  }
+  if (!ids.length) return;
+  try {
+    const res = await api.del({ table: 'shots', ids: ids });
+    const rows = (res.deleted && res.deleted.rows) || [];
+    toast('已删除 ' + rows.length + ' 行（Ctrl+Z 可撤销）');
+    recordUndo({
+      type: 'custom', label: '删除行',
+      undo: async () => { await api.restore({ kind: 'shots', rows: rows }); },
+    });
+    if (refreshView) await refreshView();
+  } catch (err) {
+    toast('删除失败：' + err.message, 'err');
+  }
+}
+
+// 节拍头右键：副本（连镜头深拷）/ 删除（镜头落未归节拍）
+function openBeatMenu(sec, e) {
+  const bid = Number(sec.dataset.beatId);
+  const b = beatsOf ? beatsOf().find((x) => x.id === bid) : null;
+  if (!b) return;
+  const n = (b.shots || []).length;
+  const items = [
+    { key: 'dupBeat', label: '创建节拍副本（含 ' + n + ' 镜）' },
+    { sep: true },
+    { key: 'delBeat', label: '删除节拍' },
+  ];
+  openMenu({ x: e.clientX, y: e.clientY }, items, (k) => onBeatMenuPick(k, b));
+}
+
+async function onBeatMenuPick(k, b) {
+  try {
+    if (k === 'dupBeat') {
+      const res = await api.duplicate('beats', b.id);
+      const nb = res.beat || {};
+      toast('已创建节拍副本：beat ' + (nb.beat_no || ''));
+      recordUndo({
+        type: 'custom', label: '创建节拍副本',
+        undo: async () => { await api.del({ table: 'beats', id: nb.id, with_shots: true }); },
+      });
+      if (refreshView) await refreshView();
+      flashEl('section.beat[data-beat-id="' + nb.id + '"]');
+    } else if (k === 'delBeat') {
+      const res = await api.del({ table: 'beats', id: b.id });
+      const d = res.deleted || {};
+      toast('已删除节拍（其下镜头落「未归节拍」，Ctrl+Z 可撤销）');
+      recordUndo({
+        type: 'custom', label: '删除节拍',
+        undo: async () => { await api.restore({ kind: 'beat', beat: d.beat, shot_ids: d.shot_ids || [] }); },
+      });
+      if (refreshView) await refreshView();
+    }
+  } catch (err) {
+    toast('操作失败：' + err.message, 'err');
+  }
+}

@@ -32,6 +32,7 @@ SHOT_FIELDS = [
 ]
 
 SCENE_FIELDS = [
+    {"key": "scene_no",   "label": "场号",     "type": "text"},
     {"key": "title",      "label": "场景名",   "type": "text"},
     {"key": "value",      "label": "场景价值", "type": "text"},
     {"key": "pole_start", "label": "起点极",   "type": "text"},

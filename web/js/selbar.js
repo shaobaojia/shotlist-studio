@@ -3,6 +3,7 @@ import { state } from './state.js';
 import { el } from './ui.js';
 import { openMenu } from './menu.js';
 import { onChange, current, clearSel, rectOf, copySelectionTSV, clearSelectionCells, applyFieldValue } from './selection.js';
+import { deleteSelectedRows } from './cellmenu.js';
 
 // 可批量设值的字段（枚举优先排前；镜号/景深/虚拟列不进）
 const BATCH_KEYS = ['camera_pos', 'shot_size', 'focal', 'shot_fn', 'camera_move', 'spatial', 'blocking', 'dialogue', 'duration', 'audio', 'director_note', 'pov'];
@@ -10,6 +11,7 @@ const CLEAR = '（清空）';
 
 let bar = null;
 let countEl = null;
+let delBtn = null;
 let pick = { field: null, value: null };
 let sig = '';
 
@@ -42,6 +44,7 @@ function updateCount(s) {
   } else {
     countEl.textContent = '已选 ' + (m * colsN) + ' 格 · ' + m + ' 镜 · ' + colsN + ' 列';
   }
+  if (delBtn) delBtn.textContent = '删除行（' + m + '）';
 }
 
 function build() {
@@ -114,6 +117,10 @@ function build() {
   cp.title = '复制选区（TSV，可直接贴进 Excel）';
   cp.addEventListener('click', () => copySelectionTSV());
   bar.appendChild(cp);
+  delBtn = el('button', 'tool-btn', '删除行');
+  delBtn.title = '删除选中行（可撤销 · Ctrl+Z）';
+  delBtn.addEventListener('click', () => deleteSelectedRows());
+  bar.appendChild(delBtn);
   const cl = el('button', 'tool-btn', '清空');
   cl.title = '清空选中格（可撤销）';
   cl.addEventListener('click', () => clearSelectionCells());
