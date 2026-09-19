@@ -70,12 +70,12 @@ a { color: inherit; text-decoration: none; }
 .scene-meta .legend { color: var(--dim); }
 
 /* 吸顶区（场次信息＋工具条）＝盖在桌面上的一块布：与桌面同宽、左右通栏，以工具条下划线为界
-   （-22px = #view 左右 padding；改 #view padding 时同步这里） */
+   （-22px = #view 左右 padding；标题/元文字 45px＝卡纸药丸文字线；工具排 36px＝按钮盒线） */
 .scene-freeze { margin: 6px 0 16px -22px; width: 100vw; position: sticky; top: var(--topbar-h, 45px); z-index: 9;
   background: rgba(226, 216, 193, 0.94); backdrop-filter: blur(10px); }
-.scene-freeze .scene-head { margin: 0; padding: 10px 22px 8px; position: static; background: none;
+.scene-freeze .scene-head { margin: 0; padding: 10px 22px 8px 45px; position: static; background: none;
   border: 0; border-radius: 0; backdrop-filter: none; }
-.scene-freeze .view-tools { margin: 0; padding: 2px 22px 10px; }
+.scene-freeze .view-tools { margin: 0; padding: 2px 22px 10px 36px; } /* 36＝按钮盒贴卡纸内容线，无框按钮→字天然落 46 与标题同线 */
 
 /* 视图工具条：安静的文字钮 */
 .view-tools { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 10px 0; margin-bottom: 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
