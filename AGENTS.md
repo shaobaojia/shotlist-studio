@@ -29,6 +29,7 @@
 - 大文件改动走脚本替换，禁裸 patch（老库坑条）。
 - 老库页面服务 :8089 保留运行（迁移对照用）。
 - 老库表视图规格出处（移植对照用）：storyboard-shotlist 仓库 references/frontend-notes.md、templates/feishu-backed.html、read/done/*_feishu_backed.html；渲染器 web/js/cells.js。
+- 数据注意（M2 编辑前先定规则）：『景别』复合串内含焦段/景深（如 50mm·中→深），与独立 focal/dof 字段是两份来源；全量比对 46 镜仅 2 例不一致（均 s010：镜02 串内 50mm vs 独立 35mm；镜22 串内 35mm vs 独立 50mm；疑似当年单边手改）。两份均为原始数据、未动；M2 需先定同步/分工规则。
 - 迁移实测：①「节拍属性」= 逐镜字段（已落 shots.shot_fn）；② 镜24 beat标题（被确认屈从）与序号（6）不一致（已按序号归组、标题取多数，留档）；③ s010 节拍明细（外界动作/反应/闭环/说明）已从 s010_第一场_分析.md 补录。
 - s030–s080 现状：价值弧线已入库、镜头为空（待创作填入）。
 - 服务运行：python3 server/app.py（默认 :8094，SHOTLIST_PORT 可覆盖）；**本容器无 fuser/ss**——杀进程用 /proc 扫描匹配 server/app.py 后 SIGTERM；改 py 必须杀净旧进程再重起（否则旧进程占端口、新进程静默退出、旧代码继续服务——09-19 已踩坑）；当前由 Hermes 托管进程跑，容器重启后需重起。
