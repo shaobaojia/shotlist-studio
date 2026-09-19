@@ -1,10 +1,11 @@
-// 场级页——老库表视图移植版。
-// 规格来源：storyboard-shotlist（buildRow / formatKongjian / info-bar / beat-section 的忠实搬运）。
-// 移植项：列序与聚合列、自动换行开关、显示提示词开关、表头排序（视图级，自动平铺）。
+// 场级页——页面组装：头部（可编）/ 工具条（整理镜号·开关·排序）/ 分组与平铺；
+// 表格与节拍区在 table.js；编辑引擎在 edit.js。
 import { api } from './api.js';
 import { state } from './state.js';
-import { el, fmt } from './ui.js';
-import { cellContent, JIWEI_LEGEND } from './cells.js';
+import { el, fmt, toast } from './ui.js';
+import { JIWEI_LEGEND } from './cells.js';
+import { buildTable, beatSection } from './table.js';
+import { attachEditable, recordUndo } from './edit.js';
 
 const PREFS_KEY = 'shotlist_prefs_v1';
 let prefs = loadPrefs();   // { wrap: true, prompt: true }
@@ -40,6 +41,16 @@ export async function renderScene(view, sceneNo) {
   paintScene(view);
 }
 
+export async function refreshCurrentView() {
+  const view = document.getElementById('view');
+  if (!currentData || !view) return;
+  const no = currentData.scene.scene_no;
+  try {
+    currentData = await api.scene(no);
+    paintScene(view);
+  } catch (e) { /* 保留现状 */ }
+}
+
 function paintScene(view) {
   const data = currentData;
   if (!data) return;
@@ -53,12 +64,18 @@ function paintScene(view) {
     return;
   }
   view.appendChild(viewTools());
+  const topts = { prefs: prefs, sortState: sortState, onSort: cycleSort };
   if (sortState) {
-    view.appendChild(buildTable(sortedShots(shots), { beatCol: true, sortable: true, data: data }));
+    view.appendChild(buildTable(sortedShots(shots), {
+      beatCol: true, sortable: true, data: data,
+      prefs: topts.prefs, sortState: topts.sortState, onSort: topts.onSort,
+    }));
   } else {
-    for (const b of data.beats) view.appendChild(beatSection(b, data));
+    for (const b of data.beats) view.appendChild(beatSection(b, data, topts));
     if (data.orphan_shots && data.orphan_shots.length) {
-      view.appendChild(beatSection({ beat_no: null, name: '未归节拍', kind: null, beat_action: null, shots: data.orphan_shots }, data));
+      view.appendChild(beatSection(
+        { beat_no: null, name: '未归节拍', kind: null, beat_action: null, shots: data.orphan_shots },
+        data, topts));
     }
   }
 }
@@ -78,22 +95,50 @@ function fmtDur(sec) {
 
 function sceneHead(sc, data) {
   const head = el('div', 'scene-head');
-  head.appendChild(el('h1', 'scene-title', sc.scene_no + (sc.title ? ' · ' + sc.title : '')));
+  const h1 = el('h1', 'scene-title');
+  h1.appendChild(document.createTextNode(sc.scene_no + ' · '));
+  const t = el('span', null, sc.title || '');
+  attachEditable(t, {
+    table: 'scenes', id: sc.id, field: 'title', label: '场景名',
+    getValue: () => sc.title,
+    onLocal: (v) => { sc.title = v; },
+    renderCell: () => { t.textContent = sc.title || ''; },
+  });
+  h1.appendChild(t);
+  head.appendChild(h1);
+
   const meta = el('div', 'scene-meta');
-  const kv = (label, val) => {
-    if (val == null || val === '') return;
+  const kvEdit = (label, field) => {
+    if (sc[field] == null || sc[field] === '') return;
     const s = el('span', 'kv');
     s.appendChild(el('b', null, label));
-    s.appendChild(document.createTextNode(fmt(val)));
+    const v = el('span', 'kv-v', fmt(sc[field]));
+    attachEditable(v, {
+      table: 'scenes', id: sc.id, field: field, label: label,
+      getValue: () => sc[field],
+      onLocal: (x) => { sc[field] = x; },
+      renderCell: () => { v.textContent = fmt(sc[field]); },
+    });
+    s.appendChild(v);
     meta.appendChild(s);
   };
-  kv('价值', sc.value);
-  kv('弧线', [sc.pole_start, sc.pole_end].filter(Boolean).join(' → '));
-  kv('翻转', sc.turn);
-  kv('视点', sc.pov);
+  kvEdit('价值', 'value');
+  if (sc.pole_start || sc.pole_end) {
+    const s = el('span', 'kv');
+    s.appendChild(el('b', null, '弧线'));
+    s.appendChild(document.createTextNode([sc.pole_start, sc.pole_end].filter(Boolean).join(' → ')));
+    meta.appendChild(s);
+  }
+  kvEdit('翻转', 'turn');
+  kvEdit('视点', 'pov');
+
   const shots = allShots(data);
   const total = shots.reduce((n, s) => n + (parseFloat(s.duration) || 0), 0);
-  kv('规模', shots.length + ' 镜 / ' + data.beats.length + ' 节拍 / 总时长 ' + fmtDur(total));
+  const s1 = el('span', 'kv');
+  s1.appendChild(el('b', null, '规模'));
+  s1.appendChild(document.createTextNode(shots.length + ' 镜 / ' + data.beats.length + ' 节拍 / 总时长 ' + fmtDur(total)));
+  meta.appendChild(s1);
+
   const legend = el('span', 'kv legend');
   legend.appendChild(el('b', null, '机位'));
   legend.appendChild(document.createTextNode(JIWEI_LEGEND.join(' ')));
@@ -104,6 +149,31 @@ function sceneHead(sc, data) {
 
 function viewTools() {
   const bar = el('div', 'view-tools');
+
+  const rn = el('button', 'tool-btn', '整理镜号');
+  rn.title = '按当前顺序整场顺排（旧号入痕迹）；不点不排';
+  rn.addEventListener('click', async () => {
+    try {
+      const res = await api.renumber(currentData.scene.scene_no);
+      const changes = res.changes || [];
+      if (changes.length) {
+        const byId = {};
+        for (const c of changes) byId[c.id] = c.new;
+        for (const s of allShots(currentData)) {
+          if (byId[s.id] != null) s.shot_no = byId[s.id];
+        }
+        recordUndo({ type: 'renumber', changes: changes });
+        toast('已整理 ' + changes.length + ' 个镜号（旧号入痕迹）');
+        paintScene(document.getElementById('view'));
+      } else {
+        toast('镜号已是连续，无需整理');
+      }
+    } catch (err) {
+      toast('整理失败：' + err.message, 'err');
+    }
+  });
+  bar.appendChild(rn);
+
   const mkBox = (labelText, checked, onChange) => {
     const lab = el('label', 'tool');
     const cb = document.createElement('input');
@@ -124,6 +194,7 @@ function viewTools() {
     savePrefs();
     paintScene(document.getElementById('view'));
   }));
+
   if (sortState) {
     const f = state.meta.shot_fields.find(x => x.key === sortState.key);
     bar.appendChild(el('span', 'sort-info',
@@ -162,135 +233,4 @@ function cmpVal(va, vb) {
   if (!sa && sb) return 1;
   if (sa && !sb) return -1;
   return sa.localeCompare(sb, 'zh');
-}
-
-function tableColumns(beatCol) {
-  const fields = state.meta.shot_fields.filter(f => f.in_table && (f.type !== 'prompt' || prefs.prompt));
-  if (!beatCol) return fields;
-  const cols = fields.slice();
-  cols.splice(1, 0, { key: '__beat', label: '节拍', type: 'beat', w: 110 });
-  return cols;
-}
-
-function buildTable(shots, opts) {
-  const data = opts.data || currentData;
-  const cols = tableColumns(!!opts.beatCol);
-  const groups = {};
-  for (const g of data.prompt_groups) groups[g.id] = g;
-
-  const wrap = el('div', 'table-wrap');
-  const t = el('table', 'shots');
-  const cg = document.createElement('colgroup');
-  let sum = 0;
-  for (const f of cols) {
-    const c = document.createElement('col');
-    c.style.width = f.w + 'px';
-    cg.appendChild(c);
-    sum += f.w;
-  }
-  t.appendChild(cg);
-  t.style.minWidth = sum + 'px';
-
-  const thead = document.createElement('thead');
-  const htr = document.createElement('tr');
-  for (const f of cols) {
-    const th = el('th', null, f.label);
-    if (opts.sortable && f.type !== 'prompt' && f.key !== '__beat') {
-      th.classList.add('sortable');
-      if (sortState && sortState.key === f.key) {
-        th.classList.add(sortState.dir === 1 ? 'asc' : 'desc');
-        th.appendChild(el('span', 'arrow', sortState.dir === 1 ? '▲' : '▼'));
-      }
-      th.addEventListener('click', () => cycleSort(f.key));
-    }
-    htr.appendChild(th);
-  }
-  thead.appendChild(htr);
-  t.appendChild(thead);
-
-  const tb = document.createElement('tbody');
-  for (const s of shots) tb.appendChild(shotRows(s, cols, groups, data));
-  t.appendChild(tb);
-  wrap.appendChild(t);
-  return wrap;
-}
-
-function shotRows(s, cols, groups, data) {
-  const tr = el('tr', 'shot');
-  for (const f of cols) tr.appendChild(shotCell(s, f, groups, data));
-  const det = el('tr', 'detail');
-  det.hidden = true;
-  const dtd = document.createElement('td');
-  dtd.colSpan = cols.length;
-  dtd.appendChild(detailBox(s, groups));
-  det.appendChild(dtd);
-  tr.addEventListener('click', () => {
-    det.hidden = !det.hidden;
-    tr.classList.toggle('open', !det.hidden);
-  });
-  const frag = document.createDocumentFragment();
-  frag.appendChild(tr);
-  frag.appendChild(det);
-  return frag;
-}
-
-function shotCell(s, f, groups, data) {
-  const td = document.createElement('td');
-  td.className = 'cell-' + (f.key === '__beat' ? 'beatref' : f.key);
-  if (f.key === '__beat') {
-    const b = data.beats.find(x => x.id === s.beat_id);
-    td.textContent = b
-      ? ((/^\d+$/.test(String(b.beat_no)) ? b.beat_no + ' · ' : '') + (b.name || ''))
-      : '—';
-  } else if (f.type === 'prompt') {
-    const g = s.prompt_group_id != null ? groups[s.prompt_group_id] : null;
-    td.classList.add('prompt-cell');
-    td.textContent = g ? g.member_shots.join(' / ') : '—';
-    if (g) td.title = '提示词组：' + g.member_shots.join(' / ');
-  } else {
-    td.appendChild(cellContent(f.type, s[f.key]));
-  }
-  return td;
-}
-
-function beatSection(b, data) {
-  const sec = el('section', 'beat');
-  const numeric = b.beat_no != null && /^\d+$/.test(String(b.beat_no));
-  if (numeric) {
-    const head = el('div', 'beat-head');
-    if (b.kind) head.appendChild(el('span', 'beat-label beat-dot', String(b.kind)));
-    head.appendChild(el('span', 'beat-title', 'beat ' + b.beat_no + '：' + (b.name || '') + ' (' + b.shots.length + ' 镜)'));
-    sec.appendChild(head);
-  } else {
-    sec.appendChild(el('div', 'space-label', '▸ ' + (b.name || '未归节拍') + '镜 (' + b.shots.length + ' 镜)'));
-  }
-  if (b.beat_action) {
-    const act = el('div', 'beat-action');
-    String(b.beat_action).split('\n').forEach((line, i) => {
-      if (i) act.appendChild(document.createElement('br'));
-      act.appendChild(document.createTextNode(line));
-    });
-    sec.appendChild(act);
-  }
-  if (b.shots.length) sec.appendChild(buildTable(b.shots, { data: data, sortable: true }));
-  else sec.appendChild(el('div', 'empty small', '（暂无镜头）'));
-  return sec;
-}
-
-function detailBox(s, groups) {
-  const box = el('div', 'detail-grid');
-  for (const f of state.meta.shot_fields) {
-    if (f.type === 'prompt') continue;
-    const item = el('div', 'kv-item');
-    item.appendChild(el('div', 'kv-label', f.label));
-    item.appendChild(el('div', 'kv-value', fmt(s[f.key])));
-    box.appendChild(item);
-  }
-  const g = s.prompt_group_id != null ? groups[s.prompt_group_id] : null;
-  const pb = el('div', 'prompt-box');
-  pb.appendChild(el('div', 'kv-label',
-    g ? ('提示词（本组 ' + g.member_shots.length + ' 镜：' + g.member_shots.join(' / ') + '）') : '提示词'));
-  pb.appendChild(el('pre', 'prompt-text', g ? g.text : '（未写提示词）'));
-  box.appendChild(pb);
-  return box;
 }

@@ -10,6 +10,23 @@ export function fmt(v) {
   return String(v);
 }
 
+let _toastTimer = null;
+
+export function toast(msg, kind) {
+  let box = document.getElementById('toast');
+  if (!box) {
+    box = el('div');
+    box.id = 'toast';
+    document.body.appendChild(box);
+  }
+  box.textContent = msg;
+  box.className = 'show' + (kind === 'err' ? ' err' : '');
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => {
+    box.className = '';
+  }, kind === 'err' ? 3200 : 1800);
+}
+
 export function kindChip(kind) {
   const s = String(kind).trim();
   let cls = 'gray';

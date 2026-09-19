@@ -1,9 +1,10 @@
-"""字段字典（单点定义）：驱动前端表格列 / 详情区 / 将来的编辑控件。
+"""字段字典（单点定义）：驱动前端表格列 / 详情区 / 编辑控件 / 服务端写校验。
 
 列序与宽度 = 老库（storyboard-shotlist）最终方案移植：
   # → 运镜 → 空间关系 → 摄影机 → 机位 → 动作调度 → 台词 → 时长 → 音频 → 导演备注 → 提示词
 设计逻辑：「先看画面怎么动 → 再看什么镜头 → 再看干什么 → 最后技术和声音 → 喂给 AI 的提示词」
 type 对应前端渲染器（web/js/cells.js）：text / spatial / camera / jiwei / duration / audio / dialogue / notes / prompt
+写白名单由 core/ops.py 从各表清单派生（prompt 为虚拟列不进写白名单；position/id/时间戳不直改）。
 """
 SHOT_FIELDS = [
     {"key": "shot_no",       "label": "#",        "type": "text",     "w": 42,  "in_table": True},
@@ -23,6 +24,33 @@ SHOT_FIELDS = [
     {"key": "pov",           "label": "视点",     "type": "text",     "w": 52,  "in_table": False},
 ]
 
+SCENE_FIELDS = [
+    {"key": "title",      "label": "场景名",   "type": "text"},
+    {"key": "value",      "label": "场景价值", "type": "text"},
+    {"key": "pole_start", "label": "起点极",   "type": "text"},
+    {"key": "pole_end",   "label": "终点极",   "type": "text"},
+    {"key": "turn",       "label": "翻转",     "type": "text"},
+    {"key": "pov",        "label": "视点角色", "type": "text"},
+]
+
+BEAT_FIELDS = [
+    {"key": "beat_no",        "label": "节拍序号",     "type": "text"},
+    {"key": "name",           "label": "节拍名称",     "type": "text"},
+    {"key": "kind",           "label": "类型",         "type": "select"},
+    {"key": "outside_action", "label": "外界动作",     "type": "text"},
+    {"key": "reaction",       "label": "人物反应",     "type": "text"},
+    {"key": "closed_loop",    "label": "闭环",         "type": "text"},
+    {"key": "note",           "label": "说明",         "type": "text"},
+    {"key": "rhythm_section", "label": "节奏段落",     "type": "text"},
+    {"key": "rhythm_note",    "label": "节奏描述",     "type": "text"},
+    {"key": "mood_temp",      "label": "情绪温度",     "type": "text"},
+    {"key": "shot_estimate",  "label": "预估总镜头数", "type": "text"},
+    {"key": "rhythm_density", "label": "节奏密度",     "type": "text"},
+    {"key": "beat_action",    "label": "节拍动作",     "type": "text"},
+    {"key": "beat_attr",      "label": "节拍属性",     "type": "text"},
+    {"key": "pov",            "label": "视点角色",     "type": "text"},
+]
+
 
 def meta():
-    return {"shot_fields": SHOT_FIELDS}
+    return {"shot_fields": SHOT_FIELDS, "scene_fields": SCENE_FIELDS, "beat_fields": BEAT_FIELDS}

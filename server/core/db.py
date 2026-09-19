@@ -1,4 +1,4 @@
-"""数据层：只读 SQLite 连接与查询（schema v1）。服务只读打开，写操作走独立脚本。"""
+"""数据层：SQLite 连接与查询（schema v1）。默认只读；写操作经 rw=True（配套 core/ops.py）。"""
 import sqlite3
 from pathlib import Path
 
@@ -6,9 +6,16 @@ ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = ROOT / "data" / "studio.db"
 
 
-def connect(db_path=None):
+def connect(db_path=None, rw=False):
+    """默认只读（GET 路径）；rw=True 给写路径（M2 编辑），开外键约束。"""
     p = Path(db_path) if db_path else DB_PATH
-    con = sqlite3.connect("file:%s?mode=ro" % p, uri=True)
+    if rw:
+        if not p.exists():
+            raise FileNotFoundError("数据库不存在：%s" % p)
+        con = sqlite3.connect(str(p), timeout=10)
+        con.execute("PRAGMA foreign_keys=ON")
+    else:
+        con = sqlite3.connect("file:%s?mode=ro" % p, uri=True)
     con.row_factory = sqlite3.Row
     return con
 

@@ -2,7 +2,8 @@ import { api } from './api.js';
 import { state } from './state.js';
 import { el } from './ui.js';
 import { renderFilm } from './film.js';
-import { renderScene } from './scene.js';
+import { renderScene, refreshCurrentView } from './scene.js';
+import { undo } from './edit.js';
 
 function buildNav() {
   const nav = document.getElementById('scene-nav');
@@ -47,5 +48,14 @@ async function boot() {
     view.appendChild(el('div', 'empty err', '加载失败：' + err.message));
   }
 }
+
+document.addEventListener('keydown', async (e) => {
+  if (!(e.ctrlKey || e.metaKey) || String(e.key).toLowerCase() !== 'z') return;
+  const ae = document.activeElement;
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+  e.preventDefault();
+  const ok = await undo();
+  if (ok) await refreshCurrentView();
+});
 
 boot();

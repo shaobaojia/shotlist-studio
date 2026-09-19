@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""shotlist-studio 服务：路由（薄）+ 静态托管。运行：python3 server/app.py [--port 8094]"""
+"""shotlist-studio 服务：路由（薄，GET 读 + POST 写）+ 静态托管。运行：python3 server/app.py [--port 8094]"""
 import argparse
 import json
 import os
@@ -20,6 +20,12 @@ ROUTES = [
     (re.compile(r"^/api/meta$"), handlers.meta),
     (re.compile(r"^/api/film$"), handlers.film),
     (re.compile(r"^/api/scenes/([a-zA-Z0-9]+)$"), handlers.scene),
+    (re.compile(r"^/api/history$"), handlers.history),
+]
+
+POST_ROUTES = [
+    (re.compile(r"^/api/update$"), handlers.update),
+    (re.compile(r"^/api/scenes/([a-zA-Z0-9]+)/renumber$"), handlers.renumber),
 ]
 
 CONTENT_TYPES = {
@@ -63,6 +69,31 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "not found"}, 404)
                 return
             self._static(url.path)
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        except Exception as e:  # 单请求异常不拖垮服务
+            self._json({"error": str(e)}, 500)
+
+    def do_POST(self):
+        try:
+            url = urlparse(self.path)
+            length = int(self.headers.get("Content-Length") or 0)
+            if length > 2 * 1024 * 1024:
+                self._json({"error": "body too large"}, 413)
+                return
+            raw = self.rfile.read(length) if length else b""
+            try:
+                body = json.loads(raw.decode("utf-8")) if raw else {}
+            except ValueError:
+                self._json({"error": "bad json"}, 400)
+                return
+            for rx, fn in POST_ROUTES:
+                mm = rx.match(url.path)
+                if mm:
+                    obj, status = fn(mm, body, parse_qs(url.query))
+                    self._json(obj, status)
+                    return
+            self._json({"error": "not found"}, 404)
         except (BrokenPipeError, ConnectionResetError):
             return
         except Exception as e:  # 单请求异常不拖垮服务
