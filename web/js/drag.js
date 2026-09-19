@@ -57,6 +57,7 @@ export function bindDrag(container, ctx) {
       const tr = rowOf(t);
       clearDrop();
       if (tr) {
+        if (Number(tr.dataset.id) === payload.id) return; // 悬在自己行上：不显示落点
         const r = tr.getBoundingClientRect();
         tr.classList.add((e.clientY - r.top) < r.height / 2 ? 'drop-before' : 'drop-after');
         return;
@@ -67,6 +68,7 @@ export function bindDrag(container, ctx) {
       const sec = t.closest ? t.closest('section.beat') : null;
       clearDrop();
       if (sec) {
+        if (sec.dataset.beatId && Number(sec.dataset.beatId) === payload.id) return; // 悬在自己节拍上：不显示
         const r = sec.getBoundingClientRect();
         sec.classList.add((e.clientY - r.top) < r.height / 2 ? 'beat-drop-before' : 'beat-drop-after');
       }
@@ -83,6 +85,7 @@ export function bindDrag(container, ctx) {
     if (pl.kind === 'shot') {
       const tr = rowOf(t);
       if (tr) {
+        if (Number(tr.dataset.id) === pl.id) return; // 放回自己 = 原地不动
         const r = tr.getBoundingClientRect();
         const before = (e.clientY - r.top) < r.height / 2;
         const beatId = Number(tr.dataset.beatId);
@@ -104,6 +107,7 @@ export function bindDrag(container, ctx) {
       const sec = t.closest ? t.closest('section.beat') : null;
       if (!sec || !sec.dataset.beatId) return;
       const targetBeatId = Number(sec.dataset.beatId);
+      if (targetBeatId === pl.id) return; // 放回自己节拍 = 原地不动
       const r = sec.getBoundingClientRect();
       const before = (e.clientY - r.top) < r.height / 2;
       const beats = (ctx.data() && ctx.data().beats) || [];

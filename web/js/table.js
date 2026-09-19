@@ -100,6 +100,13 @@ function shotCell(s, f, groups, data) {
   if (f.type === 'toggle') {
     td.className = 'cell-toggle';
     td.appendChild(el('span', 'chev', '▸'));
+    const d = document.createElement('span');
+    d.className = 'drag-dots';
+    d.textContent = '⠿';
+    d.draggable = true;
+    d.title = '拖动重排';
+    d.addEventListener('click', (e) => e.stopPropagation());
+    td.appendChild(d);
     return td;
   }
 
@@ -157,15 +164,6 @@ function shotCell(s, f, groups, data) {
 export function renderShotField(td, s, f) {
   td.textContent = '';
   td.appendChild(cellContent(f.type, s[f.key], f.type === 'camera' ? { focal: s.focal } : null));
-  if (f.key === 'shot_no') {
-    const d = document.createElement('span');
-    d.className = 'drag-dots';
-    d.textContent = '⠿';
-    d.draggable = true;
-    d.title = '拖动重排';
-    d.addEventListener('click', (e) => e.stopPropagation());
-    td.appendChild(d);
-  }
 }
 
 export function refreshDetailValue(s, key) {

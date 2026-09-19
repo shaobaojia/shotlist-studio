@@ -109,7 +109,7 @@ tr.dim td { opacity: 0.45; }
 .table-wrap::-webkit-scrollbar-thumb, .prompt-text::-webkit-scrollbar-thumb { background: #444; border-radius: 5px; }
 
 /* ── M2 编辑层 ── */
-td.cell-toggle { cursor: pointer; color: var(--dim); text-align: center; user-select: none; }
+td.cell-toggle { cursor: pointer; color: var(--dim); text-align: center; user-select: none; position: relative; padding-left: 12px; }
 td.cell-toggle:hover .chev { color: var(--text); }
 td.cell-toggle .chev { display: inline-block; transition: transform .12s; }
 tr.shot.open td.cell-toggle .chev { color: var(--accent); transform: rotate(90deg); }
@@ -148,9 +148,10 @@ td.cell-prompt { cursor: pointer; }
 
 td.cell-shot_no { position: relative; }
 .drag-dots {
-  position: absolute; right: 0; top: 50%; transform: translateY(-50%);
-  color: var(--dim); font-size: 10px; line-height: 1; cursor: grab;
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  color: var(--dim); font-size: 12px; line-height: 1; cursor: grab;
   opacity: 0; transition: opacity .12s; user-select: none;
+  padding: 3px 2px;
 }
 tbody tr.shot:hover .drag-dots { opacity: .9; }
 tbody tr.shot.dragging td { opacity: .4; }
