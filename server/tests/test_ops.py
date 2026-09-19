@@ -395,5 +395,49 @@ class TestScenesStruct(unittest.TestCase):
         self.assertIsNotNone(bid)  # 外键重连
 
 
+class TestLockScene(unittest.TestCase):
+    """M2-7 锁定本场：场次版本快照（JSON 落盘 + snapshots 记录）+ 锁定标记；解锁只清标记。"""
+
+    def test_lock_writes_snapshot_row_and_flag(self):
+        import json
+        import tempfile
+        con = make_db()
+        with tempfile.TemporaryDirectory() as td:
+            res = ops.lock_scene(con, 1, True, snap_root=td)
+            self.assertEqual(res["scene"]["locked"], 1)
+            snap = res["snapshot"]
+            self.assertIsNotNone(snap)
+            path = Path(snap["path"])
+            self.assertTrue(path.exists())
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["scene"]["scene_no"], "s010")
+            self.assertEqual(len(data["shots"]), 3)
+            self.assertEqual(len(data["beats"]), 1)
+        row = con.execute("SELECT * FROM snapshots").fetchone()
+        self.assertEqual(row["scope"], "scene")
+        self.assertEqual(row["kind"], "locked")
+        self.assertEqual(row["label"], "s010")
+        h = ops.history_of(con, scene_id=1)
+        self.assertEqual(h[0]["entity"], "scenes")
+        self.assertEqual(h[0]["field"], "locked")
+        self.assertEqual(h[0]["new_value"], "1")
+
+    def test_unlock_clears_flag_without_snapshot(self):
+        import tempfile
+        con = make_db()
+        with tempfile.TemporaryDirectory() as td:
+            ops.lock_scene(con, 1, True, snap_root=td)
+            res2 = ops.lock_scene(con, 1, False, snap_root=td)
+        self.assertEqual(res2["scene"]["locked"], 0)
+        self.assertIsNone(res2["snapshot"])
+        c = con.execute("SELECT COUNT(*) c FROM snapshots").fetchone()["c"]
+        self.assertEqual(c, 1)
+
+    def test_lock_missing_scene_raises(self):
+        con = make_db()
+        with self.assertRaises(ValueError):
+            ops.lock_scene(con, 999, True, snap_root="/tmp")
+
+
 if __name__ == "__main__":
-    unittest.main()
+    unittest.main(verbosity=2)

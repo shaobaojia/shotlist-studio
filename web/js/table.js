@@ -13,8 +13,50 @@ function isMultiline(f) {
   return MULTILINE_TYPES.has(f.type) || MULTILINE_KEYS.has(f.key);
 }
 
+const tableCols = new WeakMap();   // table 元素 → 列定义（列宽跨表同步用）
+
+function allShotTables() {
+  return Array.from(document.querySelectorAll('table.shots'));
+}
+
+function applyColWidth(key, w) {
+  for (const t of allShotTables()) {
+    const cols = tableCols.get(t);
+    const cg = t.querySelector('colgroup');
+    if (!cols || !cg) continue;
+    const idx = cols.findIndex((c) => c.key === key);
+    if (idx === -1 || !cg.children[idx]) continue;
+    cg.children[idx].style.width = w + 'px';
+    let sum = 0;
+    for (const cc of cg.children) sum += parseFloat(cc.style.width) || 0;
+    t.style.minWidth = sum + 'px';
+  }
+}
+
+function startColResize(e, f, opts) {
+  const prefs = opts.prefs || {};
+  if (!prefs.widths) prefs.widths = {};
+  const startX = e.clientX;
+  const startW = prefs.widths[f.key] || f.w;
+  let last = startW;
+  document.body.classList.add('col-resizing');
+  const onMove = (ev) => {
+    last = Math.max(36, Math.min(620, startW + ev.clientX - startX));
+    applyColWidth(f.key, last);
+  };
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove, true);
+    document.removeEventListener('mouseup', onUp, true);
+    document.body.classList.remove('col-resizing');
+    prefs.widths[f.key] = Math.round(last);
+    if (opts.savePrefs) opts.savePrefs();
+  };
+  document.addEventListener('mousemove', onMove, true);
+  document.addEventListener('mouseup', onUp, true);
+}
+
 function tableColumns(beatCol, prefs) {
-  const fields = state.meta.shot_fields.filter((f) => f.in_table && (f.type !== 'prompt' || prefs.prompt));
+  const fields = state.meta.shot_fields.filter((f) => f.in_table && !(prefs.hidden && prefs.hidden[f.key]));
   const cols = [{ key: '__toggle', label: '', type: 'toggle', w: 26 }].concat(fields);
   if (beatCol) {
     const i = cols.findIndex((c) => c.key === 'shot_no');
@@ -33,12 +75,14 @@ export function buildTable(shots, opts) {
   const t = el('table', 'shots');
   const cg = document.createElement('colgroup');
   let sum = 0;
+  const widths = (opts.prefs && opts.prefs.widths) || {};
   for (const f of cols) {
     const c = document.createElement('col');
-    c.style.width = f.w + 'px';
+    c.style.width = (widths[f.key] || f.w) + 'px';
     cg.appendChild(c);
-    sum += f.w;
+    sum += parseFloat(c.style.width) || f.w;
   }
+  tableCols.set(t, cols);
   t.appendChild(cg);
   t.style.minWidth = sum + 'px';
 
@@ -53,6 +97,26 @@ export function buildTable(shots, opts) {
         th.appendChild(el('span', 'arrow', opts.sortState.dir === 1 ? '▲' : '▼'));
       }
       th.addEventListener('click', () => opts.onSort(f.key));
+    }
+    if (f.key !== '__toggle') {
+      th.classList.add('col-resizable');
+      const grip = document.createElement('div');
+      grip.className = 'col-resize';
+      grip.title = '拖动调列宽 · 双击恢复默认';
+      grip.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        startColResize(e, f, opts);
+      });
+      grip.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); });
+      grip.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if (opts.prefs && opts.prefs.widths) delete opts.prefs.widths[f.key];
+        if (opts.savePrefs) opts.savePrefs();
+        applyColWidth(f.key, f.w);
+      });
+      th.appendChild(grip);
     }
     htr.appendChild(th);
   }
@@ -310,21 +374,29 @@ export function beatSection(b, data, opts) {
   } else {
     sec.appendChild(el('div', 'space-label', '▸ ' + (b.name || '未归节拍') + ' (' + b.shots.length + ' 镜)'));
   }
-  if (b.beat_action) {
+  if (b.id != null) {
     const act = el('div', 'beat-action');
+    if (!b.beat_action) act.classList.add('empty');
     renderBeatAction(act, b);
     attachEditable(act, {
-      table: 'beats', id: b.id, field: 'beat_action', label: '节拍动作', multiline: true,
+      table: 'beats', id: b.id, field: 'beat_action', label: '节拍概述', multiline: true,
       getValue: () => b.beat_action,
       onLocal: (v) => { b.beat_action = v; },
-      renderCell: () => renderBeatAction(act, b),
+      renderCell: () => {
+        act.classList.toggle('empty', !b.beat_action);
+        renderBeatAction(act, b);
+      },
     });
+    sec.appendChild(act);
+  } else if (b.beat_action) {
+    const act = el('div', 'beat-action');
+    renderBeatAction(act, b);
     sec.appendChild(act);
   }
   if (b.shots.length) {
     sec.appendChild(buildTable(b.shots, {
       data: data, prefs: opts.prefs, sortable: true,
-      sortState: opts.sortState, onSort: opts.onSort,
+      sortState: opts.sortState, onSort: opts.onSort, savePrefs: opts.savePrefs,
     }));
   } else {
     sec.appendChild(el('div', 'empty small', '（暂无镜头）'));
@@ -395,7 +467,12 @@ function beatTitle(b) {
 
 function renderBeatAction(act, b) {
   act.textContent = '';
-  String(b.beat_action || '').split('\n').forEach((line, i) => {
+  const text = String(b.beat_action || '');
+  if (!text.trim()) {
+    act.appendChild(el('span', 'beat-action-hint', '＋ 填写节拍概述（外界动作 / 人物反应 / 闭环…）'));
+    return;
+  }
+  text.split('\n').forEach((line, i) => {
     if (i) act.appendChild(document.createElement('br'));
     act.appendChild(document.createTextNode(line));
   });

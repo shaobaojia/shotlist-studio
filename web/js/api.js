@@ -34,5 +34,6 @@ export const api = {
   del: (payload) => post('/api/delete', payload),
   create: (payload) => post('/api/create', payload),
   restore: (payload) => post('/api/restore', payload),
+  lock: (id, lock) => post('/api/lock', { id: id, lock: lock }),
   history: (sceneId, limit) => get('/api/history?scene_id=' + sceneId + '&limit=' + (limit || 100)),
 };

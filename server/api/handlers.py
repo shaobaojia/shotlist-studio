@@ -276,3 +276,18 @@ def restore(m, body, q):
     finally:
         con.close()
 
+
+def lock(m, body, q):
+    """M2-7 锁定本场：场次版本快照（落盘 + snapshots 记录）+ 锁定标记（锁定 ≠ 禁止编辑）。"""
+    rid = (body or {}).get("id")
+    lock_flag = bool((body or {}).get("lock", True))
+    if not isinstance(rid, int):
+        return {"error": "参数不完整（id）"}, 400
+    ops.ensure_daily_snapshot()
+    con = db.connect(rw=True)
+    try:
+        return {"ok": True, **ops.lock_scene(con, rid, lock_flag)}, 200
+    except ValueError as e:
+        return {"error": str(e)}, 400
+    finally:
+        con.close()

@@ -32,6 +32,7 @@ POST_ROUTES = [
     (re.compile(r"^/api/delete$"), handlers.delete_row),
     (re.compile(r"^/api/create$"), handlers.create),
     (re.compile(r"^/api/restore$"), handlers.restore),
+    (re.compile(r"^/api/lock$"), handlers.lock),
 ]
 
 CONTENT_TYPES = {

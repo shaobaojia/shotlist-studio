@@ -1,9 +1,10 @@
 """领域操作（写路径的唯一实现）：字段更新 / 批量更新 / 整理镜号 / 痕迹 / 每日快照。
 逻辑为主、可单测（tests/test_ops.py）。改动维护：写白名单从 fields.py 派生，不另写一份。"""
+import json
 import re
 import shutil
 import string
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from core import db, fields
@@ -42,6 +43,43 @@ def ensure_daily_snapshot(db_path=None, snap_root=None):
     root.mkdir(parents=True, exist_ok=True)
     shutil.copy(src, dest)
     return str(dest)
+
+
+def lock_scene(con, scene_id, lock=True, snap_root=None):
+    """锁定本场（M2-7）：留底 = 场次版本快照（JSON 落盘 + snapshots 记录）+ 锁定标记。
+    锁定 ≠ 禁止编辑（设计稿 §128）；解锁只清标记，不动已留底文件。"""
+    sc = con.execute("SELECT * FROM scenes WHERE id=?", (scene_id,)).fetchone()
+    if not sc:
+        raise ValueError("场景不存在：%s" % scene_id)
+    snap = None
+    if lock:
+        payload = {
+            "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "scene": dict(sc),
+            "beats": [dict(b) for b in _scene_beats(con, scene_id)],
+            "shots": [dict(s) for s in _scene_shots(con, scene_id)],
+            "groups": [dict(g) for g in con.execute(
+                "SELECT * FROM prompt_groups WHERE scene_id=? ORDER BY position, id", (scene_id,))],
+        }
+        root = Path(snap_root) if snap_root else db.DB_PATH.parent / "snapshots" / "scenes"
+        root.mkdir(parents=True, exist_ok=True)
+        fname = "%s-%s.json" % (sc["scene_no"] or ("scene%d" % scene_id),
+                                datetime.now().strftime("%Y%m%d-%H%M%S"))
+        fpath = root / fname
+        fpath.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+        rel = str(fpath) if snap_root else str(fpath.relative_to(db.DB_PATH.parent.parent))
+        con.execute("INSERT INTO snapshots (scope, kind, label, path) VALUES ('scene','locked',?,?)",
+                    (sc["scene_no"], rel))
+        snap = {"path": rel, "at": payload["saved_at"]}
+    con.execute("UPDATE scenes SET locked=? WHERE id=?", (1 if lock else 0, scene_id))
+    con.execute(
+        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (scene_id, "scenes", scene_id, "locked",
+         "1" if sc["locked"] else "0", "1" if lock else "0", "manual"))
+    con.commit()
+    return {"scene": dict(con.execute("SELECT * FROM scenes WHERE id=?", (scene_id,)).fetchone()),
+            "snapshot": snap}
 
 
 def _apply_field(con, table, row_id, field, value, source="manual"):

@@ -233,3 +233,30 @@ body.no-select { user-select: none; }
 .add-shot-bar { padding: 2px 0 10px 12px; }
 .add-shot-bar .link-btn { background: none; border: none; color: var(--dim); font-size: 12px; cursor: pointer; padding: 2px 7px; border-radius: 4px; font-family: inherit; }
 .add-shot-bar .link-btn:hover { color: var(--accent); background: rgba(244, 63, 94, 0.08); }
+
+
+/* ── M2-7：锁定标记 / 列宽拖拽 / 节拍概述空态 / 痕迹面板 ── */
+.kv.lock { color: var(--accent); }
+.tool-btn.locked { border-color: var(--accent); color: var(--accent); }
+.tool-btn.small { padding: 2px 8px; font-size: 12px; line-height: 1.4; }
+th.col-resizable { position: relative; }
+th .col-resize { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 3; }
+th .col-resize:hover, th .col-resize.active { background: var(--accent); opacity: .35; }
+body.col-resizing { cursor: col-resize; user-select: none; }
+.beat-action.empty { color: var(--dim); border-left-color: transparent; }
+.beat-action.empty:hover { border-left-color: var(--accent); color: var(--text); }
+.beat-action-hint { font-size: 12px; }
+#hist-panel { position: fixed; right: 14px; top: 56px; width: 430px; max-height: 76vh; background: var(--card); border: 1px solid var(--line); border-radius: 10px; z-index: 40; display: flex; flex-direction: column; box-shadow: 0 14px 44px rgba(0, 0, 0, .55); }
+#hist-panel[hidden] { display: none; }
+.hist-head { display: flex; gap: 6px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.hist-search { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 3px 8px; font-size: 12px; }
+.hist-list { overflow: auto; padding: 4px 0; }
+.hist-row { display: flex; gap: 6px; font-size: 12px; padding: 3px 10px; align-items: baseline; }
+.hist-row:nth-child(odd) { background: rgba(255, 255, 255, .025); }
+.hist-time { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+.hist-entity { color: var(--accent); font-size: 11px; }
+.hist-field { color: var(--dim); min-width: 52px; }
+.hist-val { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hist-old { color: var(--dim); }
+.hist-new { color: var(--text); }
+.hist-empty { color: var(--dim); padding: 14px; text-align: center; font-size: 12px; }

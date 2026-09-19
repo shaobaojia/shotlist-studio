@@ -11,9 +11,11 @@ import { initSelBar } from './selbar.js';
 import { attachEditable, recordUndo } from './edit.js';
 import { bindDrag } from './drag.js';
 import { filterActive, resetFilter, buildFilterTools, applyFilter } from './filter.js';
+import { openMenu } from './menu.js';
+import { toggleHistory, closeHistory, refreshHistoryIfOpen } from './history.js';
 
 const PREFS_KEY = 'shotlist_prefs_v1';
-let prefs = loadPrefs();   // { wrap: true, prompt: true }
+let prefs = loadPrefs();   // { wrap, hidden:{key:true=隐藏}, widths:{key:px} }
 let sortState = null;      // { key, dir: 1|-1 } | null —— 仅视图，不改行序
 let currentData = null;
 
@@ -30,9 +32,11 @@ initSelBar();
 function loadPrefs() {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
-    return { wrap: p.wrap !== false, prompt: p.prompt !== false };
+    const hidden = Object.assign({}, p.hidden || {});
+    if (p.prompt === false && hidden.prompt == null) hidden.prompt = true; // 旧「显示提示词」开关迁移
+    return { wrap: p.wrap !== false, hidden: hidden, widths: p.widths || {} };
   } catch (e) {
-    return { wrap: true, prompt: true };
+    return { wrap: true, hidden: {}, widths: {} };
   }
 }
 function savePrefs() {
@@ -56,6 +60,7 @@ export async function renderScene(view, sceneNo) {
   if (curD !== '#/' + sceneNo) return;
   sortState = null;
   resetFilter();
+  closeHistory();
   currentData = data;
   bindDragOnce(view);
   bindCellMenu(view, {
@@ -144,11 +149,12 @@ function paintScene(view) {
     return;
   }
   view.appendChild(viewTools());
-  const topts = { prefs: prefs, sortState: sortState, onSort: cycleSort, refresh: refreshCurrentView };
+  const topts = { prefs: prefs, sortState: sortState, onSort: cycleSort, refresh: refreshCurrentView, savePrefs: savePrefs };
   if (sortState) {
     view.appendChild(buildTable(sortedShots(shots), {
       beatCol: true, sortable: true, data: data,
       prefs: topts.prefs, sortState: topts.sortState, onSort: topts.onSort,
+      savePrefs: topts.savePrefs,
     }));
   } else {
     for (const b of data.beats) view.appendChild(beatSection(b, data, topts));
@@ -161,6 +167,7 @@ function paintScene(view) {
   if (!sortState) view.appendChild(addBeatBar());
   applyFilter(fctx);
   scheduleWarm(view);
+  refreshHistoryIfOpen();
 }
 
 function allShots(data) {
@@ -288,6 +295,12 @@ function sceneHead(sc, data) {
   s1.appendChild(el('b', null, '规模'));
   s1.appendChild(document.createTextNode(shots.length + ' 镜 / ' + data.beats.length + ' 节拍 / 总时长 ' + fmtDur(total)));
   meta.appendChild(s1);
+  if (sc.locked) {
+    const lk = el('span', 'kv lock');
+    lk.appendChild(el('b', null, '状态'));
+    lk.appendChild(document.createTextNode('🔒 已锁定（版本快照留底）'));
+    meta.appendChild(lk);
+  }
 
   const legend = el('span', 'kv legend');
   legend.appendChild(el('b', null, '机位'));
@@ -324,6 +337,23 @@ function viewTools() {
   });
   bar.appendChild(rn);
 
+  const lockBtn = el('button', 'tool-btn' + (currentData.scene.locked ? ' locked' : ''),
+    currentData.scene.locked ? '已锁定 · 解锁' : '锁定本场');
+  lockBtn.title = '留底 + 标记：拍一张场次版本快照（锁定 ≠ 禁止编辑）';
+  lockBtn.addEventListener('click', async () => {
+    const want = !currentData.scene.locked;
+    try {
+      const res = await api.lock(currentData.scene.id, want);
+      currentData.scene.locked = res.scene ? res.scene.locked : (want ? 1 : 0);
+      if (want && res.snapshot) toast('已锁定并留底：' + res.snapshot.path);
+      else toast(want ? '已锁定本场' : '已解锁本场');
+      paintScene(document.getElementById('view'));
+    } catch (err) {
+      toast((want ? '锁定' : '解锁') + '失败：' + err.message, 'err');
+    }
+  });
+  bar.appendChild(lockBtn);
+
   const mkBox = (labelText, checked, onChange) => {
     const lab = el('label', 'tool');
     const cb = document.createElement('input');
@@ -339,11 +369,27 @@ function viewTools() {
     savePrefs();
     document.getElementById('view').classList.toggle('wrap-off', !prefs.wrap);
   }));
-  bar.appendChild(mkBox('显示提示词', prefs.prompt, (e) => {
-    prefs.prompt = e.target.checked;
-    savePrefs();
-    paintScene(document.getElementById('view'));
-  }));
+  const cs = el('button', 'tool-btn', '列设置');
+  cs.title = '列的显示 / 隐藏（本地记住）';
+  cs.addEventListener('click', () => {
+    const items = state.meta.shot_fields.filter((f) => f.in_table).map((f) => (
+      { key: f.key, label: f.label || f.key, current: !prefs.hidden[f.key] }
+    ));
+    items.push({ sep: true }, { key: '__all', label: '全部显示' });
+    openMenu(cs, items, (k) => {
+      if (k === '__all') prefs.hidden = {};
+      else if (prefs.hidden[k]) delete prefs.hidden[k];
+      else prefs.hidden[k] = true;
+      savePrefs();
+      paintScene(document.getElementById('view'));
+    });
+  });
+  bar.appendChild(cs);
+
+  const hs = el('button', 'tool-btn', '痕迹');
+  hs.title = '回看本场操作痕迹（旧值 → 新值）';
+  hs.addEventListener('click', () => toggleHistory(currentData.scene));
+  bar.appendChild(hs);
 
   buildFilterTools(bar, fctx);
 
