@@ -3,6 +3,7 @@
 // 交互口径：Ctrl+Enter 保存并下一镜 · Esc 收起（不保存）· 点编辑面外回读视图（自动保存）。
 import { api } from './api.js';
 import { el, toast } from './ui.js';
+import { openMenu } from './menu.js';
 import { recordUndo } from './edit.js';
 import { buildShelf, storeAsBlock } from './blocks.js';
 import { openManager } from './blockman.js';
@@ -114,10 +115,13 @@ function activateBox(pb) {
   const hint = el('span', 'hotbox-hint', 'Ctrl+Enter 保存并下一镜 · Esc 收起');
   const saveBtn = el('button', 'tool-btn small', '存 → 下一镜');
   saveBtn.title = '保存并跳到下一镜的提示词（Ctrl+Enter）';
+  const copyBtn = el('button', 'tool-btn small', '拷上组 ▾');
+  copyBtn.title = '从上一条提示词组拷贝：人物/场景声明段 或 全文';
   const blockBtn = el('button', 'tool-btn small', '存为块');
   blockBtn.title = '把编辑面里选中的文字存进块库（先选中文字）';
   foot.appendChild(hint);
   foot.appendChild(saveBtn);
+  foot.appendChild(copyBtn);
   foot.appendChild(blockBtn);
 
   const shelf = el('div', 'hotbox-shelf');
@@ -158,6 +162,8 @@ function activateBox(pb) {
   });
   saveBtn.addEventListener('mousedown', (e) => e.preventDefault());
   saveBtn.addEventListener('click', () => saveAndNext(pb));
+  copyBtn.addEventListener('mousedown', (e) => e.preventDefault());
+  copyBtn.addEventListener('click', () => copyFromAbove(pb, copyBtn, ta, s, data));
   blockBtn.addEventListener('mousedown', (e) => e.preventDefault());
   blockBtn.addEventListener('click', () => {
     const sel = ta.value.slice(ta.selectionStart || 0, ta.selectionEnd || 0).trim();
@@ -177,7 +183,7 @@ function focusEditor(pb) {
   setTimeout(() => { try { pb.scrollIntoView({ block: 'nearest' }); } catch (e) { /* ignore */ } }, 0);
 }
 
-// ── 收起（回只读视图）；commit=true 时先保存 ──
+// ── 收起（回只读视图）；commit=true 时先保存；保存失败则编辑面留着（内容不丢） ──
 function collapseBox(pb, commit) {
   const st = pb._state;
   if (!st || st.collapsed) return;
@@ -185,36 +191,45 @@ function collapseBox(pb, commit) {
   if (activeBox === pb) activeBox = null;
   if (st.unsub) { try { st.unsub(); } catch (e) { /* ignore */ } }
   const text = st.ta ? st.ta.value : '';
-  const done = commit ? saveText(pb, text) : Promise.resolve();
-  done.then(() => {
+  const done = commit ? saveText(pb, text) : Promise.resolve({ ok: true });
+  done.then((r) => {
+    if (!r || !r.ok) {
+      const stx = pb._state;
+      if (stx) stx.collapsed = false;
+      if (!activeBox) activeBox = pb;
+      return;
+    }
     const stx = pb._state;
     if (stx && !stx.collapsed) return;   // 已重新激活：别动
     renderBox(pb);
   });
 }
 
-// ── 保存正文（未组镜头自动建组） ──
+// ── 保存正文（未组镜头自动建组）；返回 {ok, changed} ──
 async function saveText(pb, text) {
   const st = pb._state;
   const { s, groups, data } = pb._ctx;
   let g = groupOf(s, groups);
-  if (text === st.original && (g || !String(text).trim())) return;
+  if (text === st.original && (g || !String(text).trim())) return { ok: true, changed: false };
   try {
     if (!g) {
-      if (!String(text).trim()) { st.original = text; return; }
+      if (!String(text).trim()) { st.original = text; return { ok: true, changed: false }; }
       const res = await api.promptOp('merge', { shot_ids: [s.id] });
       applyGroups(data, groups, res.groups);
-      g = groupOf(s, groups);
-      if (g) {
-        s.prompt_group_id = g.id;
+      const hit = (res.groups || []).find((x) => (x.member_ids || []).indexOf(s.id) !== -1);
+      if (hit) {
+        s.prompt_group_id = hit.id;
+        g = hit;
         updatePromptCell(s);
       }
-      if (!g) return;
+      if (!g) return { ok: false, changed: false };
     }
     const original = st.original;
     const res = await api.promptOp('set_text', { group_id: g.id, text: text });
     st.original = text;
+    let changed = false;
     if (res.changed) {
+      changed = true;
       const gid = g.id;
       g.text = text;
       recordUndo({
@@ -230,8 +245,10 @@ async function saveText(pb, text) {
         },
       });
     }
+    return { ok: true, changed: changed };
   } catch (err) {
     toast('提示词保存失败：' + err.message, 'err');
+    return { ok: false, changed: false };
   }
 }
 
@@ -277,7 +294,8 @@ async function saveAndNext(pb) {
   const st = pb._state;
   if (!st || st.collapsed) return;
   const { s, groups, data } = pb._ctx;
-  await saveText(pb, st.ta.value);
+  const r = await saveText(pb, st.ta.value);
+  if (!r.ok) return;   // 失败：留在编辑面重试（错误已 toast）
   const g = groupOf(s, groups);
   const gid = g ? g.id : null;
   const nextId = nextTargetShotId(s, gid, data);
@@ -387,6 +405,55 @@ export async function detachShotsByIds(ids) {
   if (!ids || !ids.length) return;
   const ok = await runPromptOp('detach', { shot_ids: ids }, ids[0], '独立成组');
   if (ok) toast('已独立成组');
+}
+
+// ── 拷上组：从「上一条提示词组」拷声明段 / 全文 ──
+function prevGroupOf(s, groups, data) {
+  const list = (data.prompt_groups || []).slice()
+    .sort((a, b) => (a.position || 0) - (b.position || 0) || a.id - b.id);
+  const g = groupOf(s, groups);
+  if (g) {
+    const i = list.findIndex((x) => x.id === g.id);
+    return i > 0 ? list[i - 1] : null;
+  }
+  const shots = allShots(data);
+  const mine = shots.findIndex((x) => x.id === s.id);
+  let prev = null;
+  for (const x of list) {
+    let first = -1;
+    for (let j = 0; j < shots.length; j++) {
+      if (shots[j].prompt_group_id === x.id) { first = j; break; }
+    }
+    if (first >= 0 && first < mine) prev = x;
+  }
+  return prev;
+}
+
+// 声明段 = 正文里「第一个镜头标题/风格块」之前的部分
+function declOf(text) {
+  const out = [];
+  for (const line of String(text || '').split('\n')) {
+    const t = line.trim();
+    if (/^镜头[一二三四五六七八九十\d]/.test(t) || t.startsWith('风格块')) break;
+    out.push(line);
+  }
+  return out.join('\n').replace(/\s+$/, '');
+}
+
+function copyFromAbove(pb, anchor, ta, s, data) {
+  const prev = prevGroupOf(s, pb._ctx.groups, data);
+  if (!prev || !String(prev.text || '').trim()) { toast('上一组还没有提示词可拷'); return; }
+  const items = [
+    { key: 'decl', label: '拷「人物 / 场景」声明段' },
+    { key: 'all', label: '拷上组全文' },
+  ];
+  openMenu(anchor, items, (k) => {
+    let text = k === 'decl' ? declOf(prev.text) : String(prev.text);
+    text = substitute(text, s, data);
+    if (!String(text).trim()) { toast('上组没有声明段可拷'); return; }
+    insertInto(ta, text);
+    toast(k === 'decl' ? '已拷入上组声明段' : '已拷入上组全文');
+  });
 }
 
 // ── 光标处插入（保住光标 · 自动长高） ──
