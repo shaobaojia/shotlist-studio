@@ -3,7 +3,10 @@
 import { el, toast } from './ui.js';
 import { openMenu } from './menu.js';
 import { recordUndo } from './edit.js';
-import { ensureBlocks, blocksData, blockOp, onBlocksChange, moveBlockTo, siblingList } from './blocks.js';
+import {
+  ensureBlocks, blocksData, blockOp, onBlocksChange, moveBlockTo, siblingList,
+  byPosition, blockMatch, moveMenu, togglePin, deleteBlockWithUndo, PLACEHOLDERS,
+} from './blocks.js';
 
 let panel = null;
 let bodyEl = null;
@@ -11,7 +14,9 @@ let headEl = null;
 let pendingFocus = null;
 let offChange = null;
 let searchQ = '';
+let searchTimer = null;   // 搜索防抖
 let dragging = null;
+let markedEl = null;      // 拖放指示当前标记的元素（O(1) 清除，替代每次 dragover 全文档扫描）
 
 export function openManager(focusBlockId) {
   pendingFocus = focusBlockId || null;
@@ -37,7 +42,14 @@ function build() {
   const qin = document.createElement('input');
   qin.className = 'bm-search';
   qin.placeholder = '搜块…';
-  qin.addEventListener('input', () => { searchQ = qin.value.trim().toLowerCase(); render(); });
+  qin.addEventListener('input', () => {                 // 防抖：每键整面板重建 → 停止输入 120ms 后一次
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      searchTimer = null;
+      searchQ = qin.value.trim().toLowerCase();
+      render();
+    }, 120);
+  });
   headEl.appendChild(qin);
   const addCat = el('button', 'tool-btn small', '＋ 新分类');
   addCat.addEventListener('click', () => startNewCat());
@@ -61,17 +73,23 @@ function render() {
   bodyEl.textContent = '';
   bodyEl.appendChild(el('div', 'bm-note',
     '块 = 一段可直接插入提示词的积木文字。插入即固化（之后改库不影响已写入的）。'
-    + '占位符插入时自动代入：{镜号} {景别} {焦段} {运镜} {机位} {时长} {台词} {场景}'));
-  const cats = d.categories.slice().sort((a, b) => (a.position || 0) - (b.position || 0) || a.id - b.id);
-  const hit = (b) => !searchQ || String(b.text).toLowerCase().indexOf(searchQ) !== -1;
+    + '占位符插入时自动代入：' + PLACEHOLDERS.map((k) => '{' + k + '}').join(' ')));
+  const cats = d.categories.slice().sort(byPosition);
+  const buckets = new Map();                       // 单趟分桶（避免 分类数×块数 逐类扫描）
+  for (const b of d.blocks) {
+    const k = b.category_id;
+    if (!buckets.has(k)) buckets.set(k, []);
+    buckets.get(k).push(b);
+  }
+  const hit = (b) => blockMatch(b, searchQ);       // 搜索口径单点（正文 + 分类名）
   let total = 0;
   for (const c of cats) {
-    const list = d.blocks.filter((b) => b.category_id === c.id && hit(b));
+    const list = (buckets.get(c.id) || []).filter(hit);
     total += list.length;
     if (searchQ && !list.length) continue;
     bodyEl.appendChild(catSection(c, list));
   }
-  const uncat = d.blocks.filter((b) => b.category_id == null && hit(b));
+  const uncat = (buckets.get(null) || []).filter(hit);
   total += uncat.length;
   if (!searchQ || uncat.length) bodyEl.appendChild(catSection(null, uncat));
   if (searchQ && !total) bodyEl.appendChild(el('div', 'bm-note', '没有匹配的块'));
@@ -82,10 +100,8 @@ function render() {
       row.scrollIntoView({ block: 'center' });
       const t = row.querySelector('.bm-text');
       if (t) t.click();
-      pendingFocus = null;
-    } else {
-      pendingFocus = null;
     }
+    pendingFocus = null;
   }
 }
 
@@ -102,7 +118,7 @@ function catSection(cat, blocks) {
 
   const addB = el('button', 'tool-btn small', '＋ 块');
   addB.title = '在本类末尾加一个新块';
-  addB.addEventListener('click', () => startDraftBlock(sec, cat, null));
+  addB.addEventListener('click', () => startDraftBlock(sec, cat));
   head.appendChild(addB);
   if (cat) {
     const up = el('button', 'tool-btn small', '↑');
@@ -121,19 +137,15 @@ function catSection(cat, blocks) {
   sec.appendChild(head);
 
   const rows = el('div', 'bm-rows');
-  blocks.sort((a, b) => (a.position || 0) - (b.position || 0) || a.id - b.id);
+  blocks.sort(byPosition);
   for (const b of blocks) rows.appendChild(blockRow(b, sec, cat));
   rows.addEventListener('dragover', (ev) => {
-    if (!dragging) return;
+    if (!dragging || ev.target !== rows) return;   // 行内指示由行自己管
     ev.preventDefault();
-    if (ev.target === rows || ev.target.classList.contains('bm-rows')) {
-      clearDropMarks();
-      rows.classList.add('drop-end');
-    }
+    setDropMark(rows, 'drop-end');
   });
   rows.addEventListener('drop', (ev) => {
-    if (!dragging) return;
-    if (ev.target !== rows && !ev.target.classList.contains('bm-rows')) return;
+    if (!dragging || ev.target !== rows) return;
     ev.preventDefault();
     clearDropMarks();
     const tgt = dragging;
@@ -163,17 +175,19 @@ function blockRow(b, sec, cat) {
     row.classList.remove('bm-dragging');
     dragging = null;
     clearDropMarks();
+    document.querySelectorAll('#block-manager .drop-above, #block-manager .drop-below, #block-manager .drop-end')
+      .forEach((x) => x.classList.remove('drop-above', 'drop-below', 'drop-end'));   // 兜底全清（仅拖尾一次）
   });
   row.appendChild(grip);
 
   const star = el('span', 'bm-star' + (b.pinned ? ' on' : ''), b.pinned ? '★' : '☆');
   star.title = b.pinned ? '取消置顶' : '置顶（热盒里排最前）';
-  star.addEventListener('click', () => pinToggle(b));
+  star.addEventListener('click', () => togglePin(b));
   row.appendChild(star);
 
   const txt = el('span', 'bm-text', String(b.text));
   txt.title = '点击编辑';
-  txt.addEventListener('click', () => editRow(row, b, txt, sec, cat));
+  txt.addEventListener('click', () => editRow(row, b, txt));
   row.appendChild(txt);
 
   const ops = el('span', 'bm-ops');
@@ -186,8 +200,8 @@ function blockRow(b, sec, cat) {
   };
   mk('↑', '上移', () => moveBtn(b, -1));
   mk('↓', '下移', () => moveBtn(b, 1));
-  mk('⇄', '换分类', () => moveMenuTo(ops, b));
-  mk('✕', '删除块（可 Ctrl+Z）', () => deleteBlock(b));
+  mk('⇄', '换分类', () => moveMenu(ops, b));
+  mk('✕', '删除块（可 Ctrl+Z）', () => deleteBlockWithUndo(b));
   row.appendChild(ops);
 
   row.addEventListener('dragover', (ev) => {
@@ -195,11 +209,11 @@ function blockRow(b, sec, cat) {
     ev.preventDefault();
     ev.stopPropagation();
     const r = row.getBoundingClientRect();
-    clearDropMarks();
-    row.classList.add(ev.clientY < r.top + r.height / 2 ? 'drop-above' : 'drop-below');
+    setDropMark(row, ev.clientY < r.top + r.height / 2 ? 'drop-above' : 'drop-below');
   });
   row.addEventListener('dragleave', () => {
     row.classList.remove('drop-above', 'drop-below');
+    if (markedEl === row) markedEl = null;
   });
   row.addEventListener('drop', (ev) => {
     if (!dragging || dragging.id === b.id) return;
@@ -220,41 +234,6 @@ function blockRow(b, sec, cat) {
   return row;
 }
 
-function moveMenuTo(anchor, b) {
-  const d = blocksData() || { categories: [] };
-  const items = d.categories.map((c) => ({ key: String(c.id), label: c.name, current: b.category_id === c.id }));
-  items.push({ sep: true }, { key: 'none', label: '（未分类）', current: b.category_id == null });
-  openMenu(anchor, items, (k) => {
-    const cid = k === 'none' ? null : Number(k);
-    const oldCid = b.category_id;
-    const oldPos = b.position || 0;
-    blockOp({ action: 'update', id: b.id, category_id: cid })
-      .then(() => {
-        recordUndo({
-          type: 'custom', label: '块换分类',
-          undo: async () => { await blockOp({ action: 'update', id: b.id, category_id: oldCid, position: oldPos }); },
-        });
-      })
-      .catch((err) => toast('移动失败：' + err.message, 'err'));
-  });
-}
-
-async function deleteBlock(b) {
-  try {
-    await blockOp({ action: 'delete', id: b.id });
-    toast('已删除块（可 Ctrl+Z）');
-    recordUndo({
-      type: 'custom', label: '删除块',
-      undo: async () => {
-        const res = await blockOp({ action: 'create', text: b.text, category_id: b.category_id });
-        if (b.pinned && res.block) await blockOp({ action: 'pin', id: res.block.id, pinned: true });
-      },
-    });
-  } catch (err) {
-    toast('删除失败：' + err.message, 'err');
-  }
-}
-
 async function catOp(payload) {
   try {
     return await blockOp(payload);
@@ -268,6 +247,36 @@ function deleteCat(cat) {
   catOp({ action: 'cat_delete', id: cat.id }).then((res) => { if (res) toast('分类已删（块落「未分类」）'); });
 }
 
+// 行内提交协议（改名 / 新分类 / 改块 / 新块草稿共一份）：
+// Enter（单行）或 Ctrl+Enter（多行）提交 · Esc 取消 · 点外提交；
+// 提交失败调 unlock() 解锁并保留输入（内容不丢，可重试——与拼装台「保存失败留字」口径一致）。
+function inlineCommit(el0, opts) {
+  let done = false;
+  opts = opts || {};
+  const commit = (ok) => {
+    if (done) return;
+    if (!ok) {
+      done = true;
+      if (opts.onCancel) opts.onCancel();
+      return;
+    }
+    const v = el0.value.trim();
+    if (!v && opts.emptyAsCancel !== false) {
+      done = true;
+      if (opts.onCancel) opts.onCancel();
+      return;
+    }
+    done = true;
+    opts.onCommit(v, () => { done = false; });
+  };
+  el0.addEventListener('keydown', (e) => {
+    const enter = e.key === 'Enter' && (opts.multiline ? (e.ctrlKey || e.metaKey) : true);
+    if (enter) { e.preventDefault(); commit(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); commit(false); }
+  });
+  el0.addEventListener('blur', () => commit(true));
+}
+
 function renameCat(nameEl, cat) {
   const inp = document.createElement('input');
   inp.className = 'bm-input';
@@ -275,28 +284,24 @@ function renameCat(nameEl, cat) {
   nameEl.replaceWith(inp);
   inp.focus();
   inp.select();
-  let done = false;
-  const commit = (ok) => {
-    if (done) return;
-    done = true;
-    const v = inp.value.trim();
-    if (ok && v && v !== cat.name) {
+  inlineCommit(inp, {
+    onCancel: () => render(),
+    onCommit: (v, unlock) => {
+      if (v === cat.name) { render(); return; }
       const oldName = cat.name;
       catOp({ action: 'cat_update', id: cat.id, name: v }).then((res) => {
-        if (res) recordUndo({
-          type: 'custom', label: '改分类名',
-          undo: async () => { await blockOp({ action: 'cat_update', id: cat.id, name: oldName }); },
-        });
+        if (res) {
+          recordUndo({
+            type: 'custom', label: '改分类名',
+            undo: async () => { await blockOp({ action: 'cat_update', id: cat.id, name: oldName }); },
+          });
+        } else {
+          unlock();                        // 失败：输入保留可重试
+          inp.focus();
+        }
       });
-    } else {
-      render();
-    }
-  };
-  inp.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); commit(true); }
-    else if (e.key === 'Escape') { e.preventDefault(); commit(false); }
+    },
   });
-  inp.addEventListener('blur', () => commit(true));
 }
 
 function startNewCat() {
@@ -305,33 +310,28 @@ function startNewCat() {
   inp.placeholder = '新分类名…（Enter 建 · Esc 弃）';
   headEl.insertBefore(inp, headEl.children[1] || null);
   inp.focus();
-  let done = false;
-  const commit = (ok) => {
-    if (done) return;
-    done = true;
-    const v = inp.value.trim();
-    inp.remove();
-    if (ok && v) {
+  inlineCommit(inp, {
+    onCancel: () => inp.remove(),
+    onCommit: (v, unlock) => {
       catOp({ action: 'cat_create', name: v }).then((res) => {
         if (res && res.category) {
+          inp.remove();
           const cid = res.category.id;
           recordUndo({
             type: 'custom', label: '新分类',
             undo: async () => { await blockOp({ action: 'cat_delete', id: cid }); },
           });
+        } else {
+          unlock();                        // 失败：保留输入（分类名还在，可重试）
+          inp.focus();
         }
       });
-    }
-  };
-  inp.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); commit(true); }
-    else if (e.key === 'Escape') { e.preventDefault(); commit(false); }
+    },
   });
-  inp.addEventListener('blur', () => commit(true));
 }
 
-// 行内编辑：文本换 textarea；Ctrl+Enter / 点外保存 · Esc 取消
-function editRow(row, b, txtEl, sec, cat) {
+// 行内编辑：文本换 textarea；Ctrl+Enter / 点外保存 · Esc 取消；保存失败留字可重试
+function editRow(row, b, txtEl) {
   if (row.querySelector('.bm-edit-area')) return;
   const ta = document.createElement('textarea');
   ta.className = 'bm-edit-area';
@@ -339,12 +339,11 @@ function editRow(row, b, txtEl, sec, cat) {
   ta.rows = 3;
   txtEl.replaceWith(ta);
   ta.focus();
-  let done = false;
-  const commit = (ok) => {
-    if (done) return;
-    done = true;
-    const v = ta.value.trim();
-    if (ok && v && v !== String(b.text)) {
+  inlineCommit(ta, {
+    multiline: true,
+    onCancel: () => render(),
+    onCommit: (v, unlock) => {
+      if (v === String(b.text)) { render(); return; }
       const oldText = String(b.text);
       blockOp({ action: 'update', id: b.id, text: v })
         .then(() => {
@@ -353,39 +352,34 @@ function editRow(row, b, txtEl, sec, cat) {
             undo: async () => { await blockOp({ action: 'update', id: b.id, text: oldText }); },
           });
         })
-        .catch((err) => toast('保存失败：' + err.message, 'err'));
-    } else {
-      render();
-    }
-  };
-  ta.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); commit(true); }
-    else if (e.key === 'Escape') { e.preventDefault(); commit(false); }
+        .catch((err) => {
+          unlock();                        // 失败：草稿不删、文本不丢，可重试
+          ta.focus();
+          toast('保存失败：' + err.message + '（内容还在，可重试）', 'err');
+        });
+    },
   });
-  ta.addEventListener('blur', () => commit(true));
 }
 
-// 新块草稿行：保存后才入库（空=弃）
-function startDraftBlock(sec, cat, afterId) {
+// 新块草稿行：保存后才入库（空=弃；失败留字可重试）
+function startDraftBlock(sec, cat) {
   if (sec.querySelector('.bm-draft')) { sec.querySelector('.bm-draft textarea').focus(); return; }
   const row = el('div', 'bm-row bm-draft');
   const ta = document.createElement('textarea');
   ta.className = 'bm-edit-area';
-  ta.placeholder = '新块内容…（Ctrl+Enter 存 · 点外空内容=弃）';
+  ta.placeholder = '新块内容…（Ctrl+Enter 存 · Esc 弃）';
   ta.rows = 3;
   row.appendChild(ta);
   const rowsWrap = sec.querySelector('.bm-rows');
   rowsWrap.appendChild(row);
   ta.focus();
-  let done = false;
-  const commit = (ok) => {
-    if (done) return;
-    done = true;
-    const v = ta.value.trim();
-    row.remove();
-    if (ok && v) {
+  inlineCommit(ta, {
+    multiline: true,
+    onCancel: () => { row.remove(); render(); },
+    onCommit: (v, unlock) => {
       blockOp({ action: 'create', text: v, category_id: cat ? cat.id : null })
         .then((res) => {
+          row.remove();
           if (res && res.block) {
             const bid = res.block.id;
             recordUndo({
@@ -394,39 +388,36 @@ function startDraftBlock(sec, cat, afterId) {
             });
           }
         })
-        .catch((err) => toast('创建失败：' + err.message, 'err'));
-    } else {
-      render();
-    }
-  };
-  ta.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); commit(true); }
-    else if (e.key === 'Escape') { e.preventDefault(); commit(false); }
+        .catch((err) => {
+          unlock();                        // 失败：草稿行与文本保留，可重试
+          ta.focus();
+          toast('创建失败：' + err.message + '（内容还在，可重试）', 'err');
+        });
+    },
   });
-  ta.addEventListener('blur', () => commit(true));
 }
 
-// ── 块拖动（M3.5）：换类 + 行间定位；moveBlockTo / siblingList 收敛在 blocks.js（热盒条共用） ──
+// ── 拖放指示（M3.5）：换类 + 行间定位；moveBlockTo / siblingList 收敛在 blocks.js（热盒条共用） ──
 function clearDropMarks() {
-  document.querySelectorAll('#block-manager .drop-above, #block-manager .drop-below, #block-manager .drop-end')
-    .forEach((x) => x.classList.remove('drop-above', 'drop-below', 'drop-end'));
+  if (markedEl) {
+    markedEl.classList.remove('drop-above', 'drop-below', 'drop-end');
+    markedEl = null;
+  }
 }
 
-async function pinToggle(b) {
-  try {
-    await blockOp({ action: 'pin', id: b.id, pinned: !b.pinned });
-    recordUndo({
-      type: 'custom', label: b.pinned ? '取消置顶' : '置顶',
-      undo: async () => { await blockOp({ action: 'pin', id: b.id, pinned: !!b.pinned }); },
-    });
-  } catch (err) {
-    toast('失败：' + err.message, 'err');
-  }
+function setDropMark(el0, cls) {
+  clearDropMarks();
+  markedEl = el0;
+  el0.classList.add(cls);
 }
 
 async function moveBtn(b, dir) {
   try {
-    await blockOp({ action: 'move', id: b.id, dir });
+    const res = await blockOp({ action: 'move', id: b.id, dir });
+    if (res && res.moved === false) {          // 到头：良性边界，不再是错误
+      toast(dir === -1 ? '已经在最上面了' : '已经在最下面了');
+      return;
+    }
     const oldPos = b.position || 0;
     const oldCid = b.category_id;
     recordUndo({
@@ -440,11 +431,14 @@ async function moveBtn(b, dir) {
 
 function catMoveBtn(cat, dir) {
   catOp({ action: 'cat_move', id: cat.id, dir }).then((res) => {
-    if (res) {
-      recordUndo({
-        type: 'custom', label: dir === -1 ? '分类上移' : '分类下移',
-        undo: async () => { await blockOp({ action: 'cat_move', id: cat.id, dir: -dir }); },
-      });
+    if (!res) return;
+    if (res.moved === false) {
+      toast(dir === -1 ? '已经在最上面了' : '已经在最下面了');
+      return;
     }
+    recordUndo({
+      type: 'custom', label: dir === -1 ? '分类上移' : '分类下移',
+      undo: async () => { await blockOp({ action: 'cat_move', id: cat.id, dir: -dir }); },
+    });
   });
 }

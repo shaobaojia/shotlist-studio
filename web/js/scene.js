@@ -13,12 +13,13 @@ import { bindDrag } from './drag.js';
 import { filterActive, resetFilter, buildFilterTools, applyFilter } from './filter.js';
 import { openMenu } from './menu.js';
 import { toggleHistory, closeHistory, refreshHistoryIfOpen } from './history.js';
-import { initHotbox } from './hotbox.js';
+import { initHotbox, releaseComposer } from './hotbox.js';
 
 const PREFS_KEY = 'shotlist_prefs_v1';
 let prefs = loadPrefs();   // { wrap, hidden:{key:true=隐藏}, widths:{key:px} }
 let sortState = null;      // { key, dir: 1|-1 } | null —— 仅视图，不改行序
 let currentData = null;
+let promptGroupsMap = {};   // 本帧渲染共用的组映射（拼装台就地更新用；平铺/分组各表共此一份）
 
 const fctx = {
   getData: () => currentData,
@@ -71,7 +72,13 @@ export async function renderScene(view, sceneNo) {
     refresh: refreshCurrentView,
   });
   bindSelection(view, { getShot: (id) => (currentData ? allShots(currentData).find((s) => s.id === id) : null) });
-  initHotbox({ getData: () => currentData, refresh: refreshCurrentView });
+  initHotbox({
+    getData: () => currentData,
+    refresh: refreshCurrentView,
+    allShots: () => (currentData ? allShots(currentData) : []),
+    groupsMap: () => promptGroupsMap,
+    reapply: () => { clearSel(); applyFilter(fctx); },
+  });
   paintScene(view);
 }
 
@@ -146,6 +153,7 @@ window.addEventListener('resize', () => { if (document.querySelector('.scene-fre
 function paintScene(view) {
   const data = currentData;
   if (!data) return;
+  releaseComposer();               // 重绘前释放编辑面（防悬空 activeBox / 陈旧上下文写库；订阅与点外监听一并清）
   clearSel();
   view.textContent = '';
   view.classList.toggle('wrap-off', !prefs.wrap);
@@ -161,13 +169,15 @@ function paintScene(view) {
     return;
   }
   freeze.appendChild(viewTools());
-  const topts = { prefs: prefs, sortState: sortState, onSort: cycleSort, refresh: refreshCurrentView, savePrefs: savePrefs };
+  promptGroupsMap = {};
+  for (const g of data.prompt_groups) promptGroupsMap[g.id] = g;
+  const topts = { prefs: prefs, sortState: sortState, onSort: cycleSort, refresh: refreshCurrentView, savePrefs: savePrefs, groups: promptGroupsMap };
   const flat = !!sortState || prefs.viewMode === 'flat';
   if (flat) {
     const fwrap = buildTable(sortState ? sortedShots(shots) : shots, {
       beatCol: true, sortable: true, data: data,
       prefs: topts.prefs, sortState: topts.sortState, onSort: topts.onSort,
-      savePrefs: topts.savePrefs,
+      savePrefs: topts.savePrefs, groups: promptGroupsMap,
     });
     fwrap.classList.add('holdhead');
     view.appendChild(fwrap);
@@ -187,9 +197,9 @@ function paintScene(view) {
 }
 
 function allShots(data) {
-  let shots = [];
-  for (const b of data.beats) shots = shots.concat(b.shots);
-  if (data.orphan_shots) shots = shots.concat(data.orphan_shots);
+  const shots = [];                              // 单趟 push（镜头序单点；filter/cellmenu/hotbox 全走 ctx）
+  for (const b of data.beats) for (const sh of b.shots) shots.push(sh);
+  if (data.orphan_shots) for (const sh of data.orphan_shots) shots.push(sh);
   return shots;
 }
 

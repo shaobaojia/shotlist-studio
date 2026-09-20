@@ -1,6 +1,6 @@
 // 老库单元格渲染——规格移植自 storyboard-shotlist（buildRow / formatKongjian / JIWEI_SHORT）。
 // 全部 DOM 构建（数据不进 innerHTML），返回 DocumentFragment。
-import { el } from './ui.js';
+import { el, durText } from './ui.js';
 
 // 机位五色 → 单字缩写（原样搬自老库）
 export const JIWEI_SHORT = {
@@ -52,8 +52,7 @@ export function cellContent(type, value, extra) {
   }
 
   if (type === 'duration') {
-    const n = parseFloat(v);
-    txt(isNaN(n) ? (v || '—') : Math.round(n) + 's');
+    txt(durText(v) || '—');
     return frag;
   }
 

@@ -16,6 +16,12 @@ function isMultiline(f) {
 
 const tableCols = new WeakMap();   // table 元素 → 列定义（列宽跨表同步用）
 
+function buildGroupsMap(data) {
+  const m = {};
+  for (const g of data.prompt_groups) m[g.id] = g;
+  return m;
+}
+
 function allShotTables() {
   return Array.from(document.querySelectorAll('table.shots'));
 }
@@ -69,8 +75,7 @@ function tableColumns(beatCol, prefs) {
 export function buildTable(shots, opts) {
   const data = opts.data;
   const cols = tableColumns(!!opts.beatCol, opts.prefs);
-  const groups = {};
-  for (const g of data.prompt_groups) groups[g.id] = g;
+  const groups = opts.groups || buildGroupsMap(data);   // 单帧共用映射（scene 注入）；缺省退回本表一份
 
   const wrap = el('div', 'table-wrap');
   const t = el('table', 'shots');
@@ -393,6 +398,7 @@ export function beatSection(b, data, opts) {
     sec.appendChild(buildTable(b.shots, {
       data: data, prefs: opts.prefs, sortable: true,
       sortState: opts.sortState, onSort: opts.onSort, savePrefs: opts.savePrefs,
+      groups: opts.groups,
     }));
   } else {
     sec.appendChild(el('div', 'empty small', '（暂无镜头）'));

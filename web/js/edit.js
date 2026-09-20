@@ -3,7 +3,7 @@
 // 摄影机复合控件（景别×2 + 焦段）也在这里：改动即存，含旧格式归一化（内嵌焦段/景深迁入独立字段）。
 // 单选字段与复合控件走自绘浮动菜单（menu.js，非原生 select）：一次点击直达列表，拾取不关表单。
 import { api } from './api.js';
-import { toast } from './ui.js';
+import { toast, growTextarea } from './ui.js';
 import { openMenu, closeMenu, menuOpen, menuEl } from './menu.js';
 
 const undoStack = [];
@@ -159,11 +159,10 @@ function fitEditorOpen(ed, host) {
   });
 }
 
-// 输入中：按内容自动长高
+// 输入中：按内容自动长高（共享工具；rAF 合并）
 function fitEditorLive(ed) {
   if (ed.tagName !== 'TEXTAREA') return;
-  ed.style.height = 'auto';
-  ed.style.height = ed.scrollHeight + 'px';
+  growTextarea(ed, 0);
 }
 
 // ── 摄影机复合控件 ──

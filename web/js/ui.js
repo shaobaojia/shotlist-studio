@@ -35,3 +35,25 @@ export function kindChip(kind) {
   const text = s.replace(/^[^\u4e00-\u9fa5A-Za-z0-9]+/, '').trim() || s;
   return el('span', 'chip ' + cls, text);
 }
+
+
+// textarea 自增长（rAF 合并，避免每次按键强制回流）；min = 最小高度 px
+export function growTextarea(ta, min) {
+  if (ta.__grow) return;
+  ta.__grow = true;
+  requestAnimationFrame(() => {
+    ta.__grow = false;
+    if (!ta.isConnected) return;
+    ta.style.height = 'auto';
+    ta.style.height = Math.max(min || 0, ta.scrollHeight) + 'px';
+  });
+}
+
+// 时长显示口径（单点）：纯数字 → 取整加 s；带单位（s/秒）→ 原样；空 → ''
+export function durText(v) {
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return '';
+  if (/[a-z秒sS]$/.test(s)) return s;
+  const n = parseFloat(s);
+  return isNaN(n) ? s : Math.round(n) + 's';
+}
