@@ -185,6 +185,7 @@ function issueRow(i, data) {
     acts.appendChild(qb('豁免', () => doWaive(i)));
   } else if (i.status === 'waived') {
     acts.appendChild(qb('取消豁免', () => doUnwaive(i)));
+    acts.appendChild(qb(i.waive_note ? '改理由' : '加理由', () => editWaiveNote(i, row)));
   }
   row.appendChild(acts);
   return row;
@@ -285,6 +286,32 @@ async function doUnwaive(i) {
     applyIssues(res);
     toast('已取消豁免');
   } catch (err) { toast('操作失败：' + err.message, 'err'); }
+}
+
+function editWaiveNote(i, rowEl) {
+  const acts = rowEl.querySelector('.ac-acts');
+  acts.textContent = '';
+  const inp = document.createElement('input');
+  inp.className = 'ac-note-inp';
+  inp.placeholder = '豁免理由（选填）';
+  inp.value = i.waive_note || '';
+  const cancel = () => {
+    const d = getData();
+    if (d && openKey) openCard(openKey, d, true);
+  };
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok.click(); });
+  acts.appendChild(inp);
+  const ok = qb('确认', async () => {
+    if (!inp.value.trim()) { cancel(); return; }
+    try {
+      const res = await api.auditIssue({ id: i.id, action: 'waive', note: inp.value });
+      applyIssues(res);
+      toast('理由已留痕');
+    } catch (err) { toast('保存失败：' + err.message, 'err'); }
+  });
+  acts.appendChild(ok);
+  acts.appendChild(qb('✕', cancel));
+  inp.focus();
 }
 
 function applyIssues(res) {

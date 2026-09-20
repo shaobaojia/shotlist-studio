@@ -440,9 +440,14 @@ def waive_issue(con, issue_id, note=None):
     row = con.execute("SELECT * FROM audit_issues WHERE id=?", (issue_id,)).fetchone()
     if not row:
         raise ValueError("问题不存在")
-    if row["status"] == "waived":
-        return
     note = (note or "").strip()[:200] or None
+    if row["status"] == "waived":
+        # 已豁免：允许补/改理由（写了留痕，不写就没有——用户拍板口径）
+        if note and note != ((row["waive_note"] or "").strip() or None):
+            con.execute("UPDATE audit_issues SET waive_note=?,"
+                        " updated_at=datetime('now','localtime') WHERE id=?", (note, issue_id))
+            con.commit()
+        return
     con.execute("UPDATE audit_issues SET status='waived', waive_note=?,"
                 " updated_at=datetime('now','localtime') WHERE id=?", (note, issue_id))
     ops.record_history(con, row["scene_id"], "audit", issue_id, "status", row["status"], "waived")

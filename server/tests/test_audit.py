@@ -85,6 +85,16 @@ class TestProgramRules(unittest.TestCase):
         audit.unwaive_issue(self.con, issue["id"])
         self.assertEqual(_issues(self.con, self.sid, "戏点密度")[0]["status"], "open")
 
+    def test_waive_note_edit(self):
+        self.run_audit()
+        issue = _issues(self.con, self.sid, "戏点密度")[0]
+        audit.waive_issue(self.con, issue["id"])          # 一键豁免：不写理由
+        self.assertIsNone(_issues(self.con, self.sid, "戏点密度")[0]["waive_note"])
+        audit.waive_issue(self.con, issue["id"], "补一句理由")   # 已豁免 → 补理由
+        row = _issues(self.con, self.sid, "戏点密度")[0]
+        self.assertEqual(row["waive_note"], "补一句理由")
+        self.assertEqual(row["status"], "waived")
+
     def test_loop_rule(self):
         self.con.execute("UPDATE beats SET reaction='' WHERE beat_no='1'")
         self.con.commit()
