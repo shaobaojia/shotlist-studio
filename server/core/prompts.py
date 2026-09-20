@@ -329,7 +329,10 @@ def block_create(con, text, category_id=None):
 
 
 def block_update(con, block_id, fields):
-    """改文本 / 换分类 / 置顶（fields 可含 text、category_id、pinned；其余键忽略）。"""
+    """改文本 / 换分类 / 置顶 / 定位（text、category_id、pinned、position；其余键忽略）。
+
+    category_id 或 position 给出时：把块放进目标分类的指定位置——
+    position 缺省＝末尾（兼容旧行为）；索引按「去掉自身后的顺序」夹取到 [0, len]。"""
     b = con.execute("SELECT * FROM blocks WHERE id=?", (block_id,)).fetchone()
     if not b:
         raise ValueError("块不存在：#%s" % block_id)
@@ -338,13 +341,25 @@ def block_update(con, block_id, fields):
         con.execute("UPDATE blocks SET text=? WHERE id=?", (_check_text(fields["text"]), block_id))
     if "pinned" in fields:
         con.execute("UPDATE blocks SET pinned=? WHERE id=?", (1 if fields["pinned"] else 0, block_id))
-    if "category_id" in fields:
-        cid = fields["category_id"]
+    if "category_id" in fields or "position" in fields:
+        cid = fields.get("category_id", b["category_id"])
         _check_cat(con, cid)
-        if cid != b["category_id"]:
-            sib = _cat_blocks(con, cid)
-            pos = (sib[-1]["position"] + 1) if sib else 0
-            con.execute("UPDATE blocks SET category_id=?, position=? WHERE id=?", (cid, pos, block_id))
+        pos = fields.get("position", None)
+        if cid != b["category_id"] or pos is not None:
+            try:
+                pos = None if pos is None else int(pos)
+            except (TypeError, ValueError):
+                raise ValueError("position 参数错误")
+            tgt = [x for x in _cat_blocks(con, cid) if x["id"] != block_id]
+            idx = len(tgt) if pos is None else max(0, min(pos, len(tgt)))
+            tgt.insert(idx, {"id": block_id})
+            con.execute("UPDATE blocks SET category_id=? WHERE id=?", (cid, block_id))
+            for i, x in enumerate(tgt):
+                con.execute("UPDATE blocks SET position=? WHERE id=?", (i, x["id"]))
+            if b["category_id"] != cid:
+                src = [x for x in _cat_blocks(con, b["category_id"]) if x["id"] != block_id]
+                for i, x in enumerate(src):
+                    con.execute("UPDATE blocks SET position=? WHERE id=?", (i, x["id"]))
     con.commit()
     return dict(con.execute("SELECT * FROM blocks WHERE id=?", (block_id,)).fetchone())
 

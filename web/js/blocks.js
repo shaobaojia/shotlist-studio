@@ -103,6 +103,35 @@ export function buildShelf(host, opts) {
       const c = el('span', 'sc' + (cur ? ' on' : ''), label);
       c.addEventListener('mousedown', (e) => e.preventDefault());
       c.addEventListener('click', () => { filter = key; drawCats(); drawChips(); });
+      if (key !== 'all' && key !== 'pin') {          // 分类芯片：块的拖放目标
+        c.addEventListener('dragover', (ev) => {
+          ev.preventDefault();
+          ev.dataTransfer.dropEffect = 'move';
+          c.classList.add('drop-hover');
+        });
+        c.addEventListener('dragleave', () => c.classList.remove('drop-hover'));
+        c.addEventListener('drop', (ev) => {
+          ev.preventDefault();
+          c.classList.remove('drop-hover');
+          const raw = ev.dataTransfer.getData('text/plain') || '';
+          if (raw.indexOf('blk:') !== 0) return;
+          const blk = findBlock(Number(raw.slice(4)));
+          if (!blk) return;
+          const cid = key === 'none' ? null : key;
+          if (blk.category_id === cid) return;
+          const oldCid = blk.category_id;
+          const oldPos = blk.position || 0;
+          blockOp({ action: 'update', id: blk.id, category_id: cid })
+            .then(() => {
+              toast('已移到「' + (cid == null ? '未分类' : catName(cid)) + '」');
+              recordUndo({
+                type: 'custom', label: '块换分类',
+                undo: async () => { await blockOp({ action: 'update', id: blk.id, category_id: oldCid, position: oldPos }); },
+              });
+            })
+            .catch((err) => toast('移动失败：' + err.message, 'err'));
+        });
+      }
       return c;
     };
     catsWrap.appendChild(mk('all', '全部', filter === 'all'));
@@ -141,14 +170,29 @@ export function buildShelf(host, opts) {
     c.appendChild(el('span', 'bc-label', chipLabel(b.text)));
     c.title = catName(b.category_id) + '\n' + String(b.text).slice(0, 240)
       + (String(b.text).length > 240 ? '…' : '')
-      + '\n\n点击插入 · Shift+点击 攒套件 · 右键更多';
-    c.addEventListener('mousedown', (e) => e.preventDefault());  // 保住编辑面光标
+      + '\n\n点击插入 · Shift+点击 攒套件 · 右键更多 · 拖到上方分类芯片可换类';
+    // 拖拽源：不用 mousedown preventDefault（它会掐断原生拖拽）；tabindex 让按下时焦点落在 chip 自己身上，
+    // 拼装台「失焦且新焦点在 .hotbox 内 → 不收起」的守卫因此天然放行（光标保护由拼装台守卫兜底）
+    c.draggable = true;
+    c.tabIndex = -1;
+
+    c.addEventListener('dragstart', (ev) => {
+      ev.dataTransfer.setData('text/plain', 'blk:' + b.id);
+      ev.dataTransfer.effectAllowed = 'move';
+      c.classList.add('dragging');
+    });
+    c.addEventListener('dragend', () => {
+      c.classList.remove('dragging');
+      document.querySelectorAll('.sc.drop-hover').forEach((x) => x.classList.remove('drop-hover'));
+      backToEditor();                       // 拖完把焦点还给编辑面（Esc 随手可用）
+    });
     c.addEventListener('click', (ev) => {
       if (ev.shiftKey) {
         const i = staged.indexOf(b.id);
         if (i === -1) staged.push(b.id); else staged.splice(i, 1);
         drawStage();
         drawChips();
+        backToEditor();                     // 重绘后把焦点还给编辑面
         return;
       }
       if (opts.onInsert) opts.onInsert(String(b.text), b);
@@ -276,10 +320,24 @@ export async function storeAsBlock(anchor, text) {
   items.push({ sep: true }, { key: 'none', label: '（未分类）' });
   openMenu(anchor, items, async (k) => {
     try {
-      await blockOp({ action: 'create', text: text, category_id: k === 'none' ? null : Number(k) });
-      toast('已存为块' + (k === 'none' ? '' : '（' + catName(Number(k)) + '）'));
+      const res = await blockOp({ action: 'create', text: text, category_id: k === 'none' ? null : Number(k) });
+      toast('已添加到提示词块' + (k === 'none' ? '' : '（' + catName(Number(k)) + '）') + '· Ctrl+Z 可撤');
+      if (res && res.block) {
+        const bid = res.block.id;
+        recordUndo({
+          type: 'custom', label: '添加块',
+          undo: async () => { await blockOp({ action: 'delete', id: bid }); },
+        });
+      }
     } catch (err) {
       toast('存块失败：' + err.message, 'err');
     }
   });
+}
+
+// 把焦点还给拼装台编辑面（无则不动；不滚动视口）
+function backToEditor() {
+  const ta = document.querySelector('.hotbox-editor');
+  if (!ta || ta.offsetParent === null) return;
+  try { ta.focus({ preventScroll: true }); } catch (err) { ta.focus(); }
 }

@@ -273,6 +273,39 @@ class TestBlocks(unittest.TestCase):
         self.assertEqual(con.execute(
             "SELECT name FROM block_categories WHERE id=?", (c2["id"],)).fetchone()["name"], "风格改")
 
+    def test_update_position_and_drag_semantics(self):
+        con = make_db()
+        c1 = prompts.cat_create(con, "A")
+        c2 = prompts.cat_create(con, "B")
+        a1 = prompts.block_create(con, "a1", c1["id"])
+        a2 = prompts.block_create(con, "a2", c1["id"])
+        a3 = prompts.block_create(con, "a3", c1["id"])
+        # 同分类重排：a3 移到最前
+        prompts.block_update(con, a3["id"], {"position": 0})
+        order = [x["text"] for x in prompts.blocks_state(con)["blocks"] if x["category_id"] == c1["id"]]
+        self.assertEqual(order, ["a3", "a1", "a2"])
+        # 跨分类带位置：a1 插到 B 类 idx0
+        b0 = prompts.block_create(con, "b0", c2["id"])
+        prompts.block_update(con, a1["id"], {"category_id": c2["id"], "position": 0})
+        o2 = [x["text"] for x in prompts.blocks_state(con)["blocks"] if x["category_id"] == c2["id"]]
+        self.assertEqual(o2, ["a1", "b0"])
+        # 源分类重排连续
+        src = [x["text"] for x in prompts.blocks_state(con)["blocks"] if x["category_id"] == c1["id"]]
+        self.assertEqual(src, ["a3", "a2"])
+        # 越界夹取到末尾
+        prompts.block_update(con, a2["id"], {"category_id": c2["id"], "position": 99})
+        o3 = [x["text"] for x in prompts.blocks_state(con)["blocks"] if x["category_id"] == c2["id"]]
+        self.assertEqual(o3, ["a1", "b0", "a2"])
+        # 缺省 position：仍为末尾（兼容旧行为）
+        prompts.block_update(con, a3["id"], {"category_id": c2["id"]})
+        o4 = [x["text"] for x in prompts.blocks_state(con)["blocks"] if x["category_id"] == c2["id"]]
+        self.assertEqual(o4, ["a1", "b0", "a2", "a3"])
+        # 换回未分类 + 位置无效参数
+        prompts.block_update(con, b0["id"], {"category_id": None, "position": 0})
+        self.assertIsNone(con.execute("SELECT category_id FROM blocks WHERE id=?", (b0["id"],)).fetchone()[0])
+        with self.assertRaises(ValueError):
+            prompts.block_update(con, b0["id"], {"position": "x"})
+
     def test_cat_move_and_errors(self):
         con = make_db()
         c1 = prompts.cat_create(con, "A")

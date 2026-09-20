@@ -5,7 +5,7 @@ import { api } from './api.js';
 import { el, toast } from './ui.js';
 import { openMenu } from './menu.js';
 import { recordUndo } from './edit.js';
-import { buildShelf, storeAsBlock } from './blocks.js';
+import { buildShelf, storeAsBlock, blocksData } from './blocks.js';
 import { openManager } from './blockman.js';
 
 let ctx = { getData: () => null, refresh: async () => {} };
@@ -143,8 +143,34 @@ function activateBox(pb) {
   });
   pb._state.unsub = shelfCtl ? shelfCtl.off : null;
 
-  ta.addEventListener('input', () => autoGrow(ta));
+  hbReset(ta);
+
+  ta.addEventListener('input', () => {
+    const hb = hbState(ta);
+    if (Date.now() - hb.t > 600) {           // 新一段输入：段前状态入栈（打字按段撤销）
+      const prev = hb.last || hbSnap(ta);
+      const top = hb.undo[hb.undo.length - 1];
+      if (!hbSame(top, prev)) {
+        hb.undo.push(prev);
+        hbCap(hb);
+        hb.redo.length = 0;
+      }
+    }
+    hb.last = hbSnap(ta);
+    hb.t = Date.now();
+    autoGrow(ta);
+  });
   ta.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      if (e.shiftKey) hbRedo(ta); else hbUndo(ta);
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'y' || e.key === 'Y')) {
+      e.preventDefault();
+      hbRedo(ta);
+      return;
+    }
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
@@ -173,6 +199,56 @@ function activateBox(pb) {
     const sel = ta.value.slice(ta.selectionStart || 0, ta.selectionEnd || 0).trim();
     if (!sel) { toast('先在编辑面里选中要存成块的文字'); return; }
     storeAsBlock(blockBtn, sel);
+  });
+
+  // 编辑面内右键：独立菜单（选中文字 → 添加块 / 插入块 / 拷上组 / 复制剪切全选）
+  ta.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const selText = ta.value.slice(ta.selectionStart || 0, ta.selectionEnd || 0);
+    const hasSel = selText.trim().length > 0;
+    const pt = { x: e.clientX, y: e.clientY };
+    openMenu(pt, [
+      { key: 'mk', label: '添加到提示词块…', disabled: !hasSel },
+      { key: 'ins', label: '插入提示词块…' },
+      { sep: true },
+      { key: 'decl', label: '拷上组声明段（人物 / 场景）' },
+      { key: 'all', label: '拷上组全文' },
+      { sep: true },
+      { key: 'copy', label: '复制', disabled: !hasSel },
+      { key: 'cut', label: '剪切', disabled: !hasSel },
+      { key: 'selall', label: '全选' },
+    ], (k) => {
+      if (k === 'mk') {
+        if (!hasSel) { toast('先选中要添加的文字'); return; }
+        storeAsBlock(pt, selText.trim());
+      } else if (k === 'ins') {
+        insertBlockMenu(pt, ta, s, data);
+      } else if (k === 'decl' || k === 'all') {
+        copyPrevInto(pb, ta, s, data, k);
+      } else if (k === 'copy') {
+        ta.focus();
+        const ok = document.execCommand('copy');
+        toast(ok ? '已复制选中文字' : '复制失败：浏览器限制，请用 Ctrl+C');
+      } else if (k === 'cut') {
+        hbPush(ta);
+        ta.focus();
+        const ok = document.execCommand('cut');
+        autoGrow(ta);
+        hbMark(ta);
+        if (!ok) {
+          const hb = hbState(ta);
+          const top = hb.undo[hb.undo.length - 1];
+          if (hbSame(top, hbSnap(ta))) hb.undo.pop();   // 剪切失败：撤掉空占位
+          toast('剪切失败：浏览器限制，请用 Ctrl+X');
+        } else {
+          toast('已剪切选中文字（Ctrl+Z 可撤）');
+        }
+      } else if (k === 'selall') {
+        ta.focus();
+        ta.select();
+      }
+    });
   });
 
   autoGrow(ta);
@@ -452,18 +528,116 @@ function copyFromAbove(pb, anchor, ta, s, data) {
     { key: 'decl', label: '拷「人物 / 场景」声明段' },
     { key: 'all', label: '拷上组全文' },
   ];
-  openMenu(anchor, items, (k) => {
-    let text = k === 'decl' ? declOf(prev.text) : String(prev.text);
-    text = substitute(text, s, data);
-    if (!String(text).trim()) { toast('上组没有声明段可拷'); return; }
-    insertInto(ta, text);
-    toast(k === 'decl' ? '已拷入上组声明段' : '已拷入上组全文');
+  openMenu(anchor, items, (k) => copyPrevInto(pb, ta, s, data, k));
+}
+
+// 拷上组（右键直选版）
+function copyPrevInto(pb, ta, s, data, which) {
+  const prev = prevGroupOf(s, pb._ctx.groups, data);
+  if (!prev || !String(prev.text || '').trim()) { toast('上一组还没有提示词可拷'); return; }
+  let text = which === 'decl' ? declOf(prev.text) : String(prev.text);
+  text = substitute(text, s, data);
+  if (!String(text).trim()) { toast('上组没有声明段可拷'); return; }
+  insertInto(ta, text);
+  toast(which === 'decl' ? '已拷入上组声明段（Ctrl+Z 可撤）' : '已拷入上组全文（Ctrl+Z 可撤）');
+}
+
+// 右键「插入提示词块…」：分类 → 块 两级菜单，插入到光标处（插入即固化）
+function insertBlockMenu(pt, ta, s, data) {
+  const d = blocksData();
+  if (!d || !d.blocks.length) { toast('块库为空——去「管理块库」加块，或选中文字「添加到提示词块」'); return; }
+  const cats = d.categories.slice().sort((a, b) => (a.position || 0) - (b.position || 0) || a.id - b.id);
+  const items = cats.map((c) => ({ key: String(c.id), label: c.name }));
+  if (d.blocks.some((b) => b.category_id == null)) items.push({ sep: true }, { key: 'none', label: '（未分类）' });
+  openMenu(pt, items, (k) => {
+    const cid = k === 'none' ? null : Number(k);
+    const list = d.blocks.filter((b) => b.category_id === cid)
+      .sort((a, b) => (a.position || 0) - (b.position || 0) || a.id - b.id);
+    if (!list.length) { toast('这个分类还没有块'); return; }
+    const bl = list.map((b) => ({ key: String(b.id), label: (b.pinned ? '★ ' : '') + shortLabel(b.text, 30) }));
+    openMenu(pt, bl, (k2) => {
+      const b = list.find((x) => String(x.id) === k2);
+      if (!b) return;
+      insertInto(ta, substitute(String(b.text), s, data));
+      toast('已插入块（Ctrl+Z 可撤）');
+    });
   });
+}
+
+function shortLabel(t, n) {
+  const v = String(t == null ? '' : t).replace(/\s+/g, ' ').trim();
+  return v.length > n ? v.slice(0, n) + '…' : (v || '（空）');
+}
+
+// ── 编辑面撤销栈（插入块 / 剪切 / 打字片段都进栈；Ctrl+Z 撤 · Ctrl+Shift+Z / Ctrl+Y 重做） ──
+function hbState(ta) {
+  if (!ta.__hb) ta.__hb = { undo: [], redo: [], last: null, t: 0 };
+  return ta.__hb;
+}
+function hbSnap(ta) {
+  return {
+    v: ta.value,
+    s0: ta.selectionStart == null ? 0 : ta.selectionStart,
+    s1: ta.selectionEnd == null ? 0 : ta.selectionEnd,
+  };
+}
+function hbSame(a, b) {
+  return !!(a && b) && a.v === b.v && a.s0 === b.s0 && a.s1 === b.s1;
+}
+function hbCap(hb) {
+  if (hb.undo.length > 200) hb.undo.shift();
+  if (hb.redo.length > 200) hb.redo.shift();
+}
+function hbReset(ta) {
+  const hb = hbState(ta);
+  hb.undo.length = 0;
+  hb.redo.length = 0;
+  hb.last = hbSnap(ta);
+  hb.t = Date.now();
+}
+function hbPush(ta) {
+  const hb = hbState(ta);
+  const cur = hbSnap(ta);
+  const top = hb.undo[hb.undo.length - 1];
+  if (!hbSame(top, cur)) {
+    hb.undo.push(cur);
+    hbCap(hb);
+  }
+  hb.redo.length = 0;
+  hb.last = cur;
+  hb.t = Date.now();
+}
+function hbMark(ta) {
+  const hb = hbState(ta);
+  hb.last = hbSnap(ta);
+  hb.t = Date.now();
+}
+function hbApply(ta, st) {
+  ta.value = st.v;
+  ta.focus();
+  ta.setSelectionRange(st.s0, st.s1);
+  autoGrow(ta);
+  hbMark(ta);
+}
+function hbUndo(ta) {
+  const hb = hbState(ta);
+  if (!hb.undo.length) return;
+  hb.redo.push(hbSnap(ta));
+  hbCap(hb);
+  hbApply(ta, hb.undo.pop());
+}
+function hbRedo(ta) {
+  const hb = hbState(ta);
+  if (!hb.redo.length) return;
+  hb.undo.push(hbSnap(ta));
+  hbCap(hb);
+  hbApply(ta, hb.redo.pop());
 }
 
 // ── 光标处插入（保住光标 · 自动长高） ──
 function insertInto(ta, text) {
   if (text == null || text === '') return;
+  hbPush(ta);                                        // 插入也进撤销栈（Ctrl+Z 能把刚插的撤掉）
   const s0 = ta.selectionStart == null ? ta.value.length : ta.selectionStart;
   const s1 = ta.selectionEnd == null ? ta.value.length : ta.selectionEnd;
   const before = ta.value.slice(0, s0);
@@ -474,6 +648,7 @@ function insertInto(ta, text) {
   ta.focus();
   ta.setSelectionRange(pos, pos);
   autoGrow(ta);
+  hbMark(ta);
 }
 
 function autoGrow(ta) {

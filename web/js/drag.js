@@ -29,20 +29,19 @@ export function bindDrag(container, ctx) {
   };
 
   container.addEventListener('dragstart', (e) => {
-    if (!ctx.enabled()) { e.preventDefault(); return; }
     const dots = e.target.closest ? e.target.closest('.drag-dots') : null;
     const sec = e.target.closest ? e.target.closest('section.beat') : null;
+    const beatHead = !!(e.target.closest && e.target.closest('.beat-head') && sec && sec.dataset.beatId);
+    if (!dots && !beatHead) return;   // 非行拖动系统（拼装台积木块 / 热盒条等）：放行，不干预、不连坐取消
+    if (!ctx.enabled()) { e.preventDefault(); return; }
     if (dots) {
       const tr = dots.closest('tr.shot');
       payload = { kind: 'shot', id: Number(tr.dataset.id) };
       tr.classList.add('dragging');
       try { e.dataTransfer.setDragImage(tr, 24, 12); } catch (err) { /* ignore */ }
-    } else if (e.target.closest && e.target.closest('.beat-head') && sec && sec.dataset.beatId) {
+    } else {
       payload = { kind: 'beat', id: Number(sec.dataset.beatId) };
       sec.classList.add('dragging');
-    } else {
-      e.preventDefault();
-      return;
     }
     e.dataTransfer.effectAllowed = 'move';
     try { e.dataTransfer.setData('text/plain', String(payload.id)); } catch (err) { /* ignore */ }
