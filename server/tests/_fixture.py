@@ -7,8 +7,8 @@ SERVER = Path(__file__).resolve().parents[1]
 SCHEMA = (SERVER / "schema.sql").read_text(encoding="utf-8")
 
 
-def _conn():
-    con = sqlite3.connect(":memory:")
+def _conn(db_path=None):
+    con = sqlite3.connect(db_path or ":memory:")
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys=ON")  # 与生产 rw 连接一致（删场级联依赖它）
     con.executescript(SCHEMA)
@@ -52,5 +52,25 @@ def make_prompts_db():
     con.execute("UPDATE shots SET prompt_group_id=1 WHERE id IN (1,2)")
     con.execute("UPDATE shots SET prompt_group_id=2 WHERE id IN (3,4)")
     con.execute("UPDATE shots SET prompt_group_id=3 WHERE id=5")
+    con.commit()
+    return con
+
+
+def make_audit_db(db_path=None):
+    """审计域基准库：1 场 2 节拍 4 镜。
+    基线问题：景别空×1（镜02）、声音空带台词×1（镜02）、戏点密度×1、戏点缺特写×1。"""
+    con = _conn(db_path)
+    con.execute("INSERT INTO films (title) VALUES ('t')")
+    con.execute("INSERT INTO scenes (film_id, scene_no, title, value, pole_start, pole_end)"
+                " VALUES (1, 's010', '第一场', '控制', '维持', '失控')")
+    con.execute("INSERT INTO beats (scene_id, beat_no, kind, name, outside_action, reaction, closed_loop)"
+                " VALUES (1, '1', '⚪ 填充', '被领导打压', '领导来电话吼骂', '男人僵住', '是')")
+    con.execute("INSERT INTO beats (scene_id, beat_no, kind, name, outside_action, reaction, closed_loop)"
+                " VALUES (1, '2', '🔴 戏点', '误发消息', '消息误发', '男人瞳孔收缩', '是')")
+    rows = [("01", 1, "中景", "—", ""), ("02", 1, "", "", "「喂？」"),
+            ("03", 2, "近景", "—", ""), ("04", 2, "近景", "—", "")]
+    for i, (no, bid, size, audio, dlg) in enumerate(rows, start=1):
+        con.execute("INSERT INTO shots (scene_id, beat_id, position, shot_no, shot_size, audio, dialogue)"
+                    " VALUES (1,?,?,?,?,?,?)", (bid, i, no, size, audio, dlg))
     con.commit()
     return con

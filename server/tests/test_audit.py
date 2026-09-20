@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""审计引擎单测（M4a）：程序规则 / 对账状态机 / 开关 / LLM 注入（内存库，零网络）。"""
+import sys
+import unittest
+from pathlib import Path
+
+SERVER = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SERVER))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from core import audit  # noqa: E402
+from _fixture import make_audit_db  # noqa: E402
+
+
+def stub_empty(cfg, messages):
+    return '{"findings": []}'
+
+
+def _stub_axis(msg=None):
+    def stub(cfg, messages):
+        if "越轴" in messages[0]["content"]:
+            if msg is None:
+                return '{"findings": []}'
+            return '{"findings":[{"carrier":"seam","ref":"01->02","message":"%s"}]}' % msg
+        return '{"findings": []}'
+    return stub
+
+
+def _issues(con, sid, title=None):
+    rows = audit.issues_state(con, sid)["issues"]
+    return [r for r in rows if r["rule_title"] == title] if title else rows
+
+
+class TestProgramRules(unittest.TestCase):
+    def setUp(self):
+        self.con = make_audit_db()
+        audit.seed_default_rules(self.con)
+        self.sid = 1
+
+    def tearDown(self):
+        self.con.close()
+
+    def run_audit(self, stub=None):
+        return audit.run_scene(self.con, self.sid, ai_chat=(stub or stub_empty))
+
+    def test_baseline_findings(self):
+        _, state = self.run_audit()
+        self.assertEqual(state["counts"]["open"], 4)  # 景别×1 声音×1 密度×1 特写×1
+        titles = sorted(r["rule_title"] for r in state["issues"])
+        self.assertEqual(titles, ["声音完整性", "戏点密度", "戏点特写", "景别完整"])
+        by_title = {r["rule_title"]: r for r in state["issues"]}
+        self.assertEqual(by_title["景别完整"]["message"], "景别为空")
+        self.assertIn("台词", by_title["声音完整性"]["message"])
+        self.assertEqual(by_title["戏点密度"]["carrier"], "beat")
+
+    def test_rerun_idempotent(self):
+        self.run_audit()
+        self.run_audit()
+        state = audit.issues_state(self.con, self.sid)
+        self.assertEqual(state["counts"]["open"], 4)
+        self.assertEqual(len(state["issues"]), 4)
+
+    def test_fix_and_reopen(self):
+        self.run_audit()
+        self.con.execute("UPDATE shots SET shot_size='中景', audio='—' WHERE shot_no='02'")
+        self.con.commit()
+        _, state = self.run_audit()
+        self.assertEqual(state["counts"]["open"], 2)
+        self.assertEqual(state["counts"]["fixed"], 2)
+        self.con.execute("UPDATE shots SET shot_size='', audio='' WHERE shot_no='02'")
+        self.con.commit()
+        _, state = self.run_audit()
+        self.assertEqual(state["counts"]["open"], 4)
+        self.assertEqual(state["counts"]["fixed"], 0)
+
+    def test_waive_stays_waived(self):
+        self.run_audit()
+        issue = _issues(self.con, self.sid, "戏点密度")[0]
+        audit.waive_issue(self.con, issue["id"], "刻意压缩")
+        self.assertEqual(_issues(self.con, self.sid, "戏点密度")[0]["status"], "waived")
+        self.run_audit()  # 再次命中 → 不重开
+        row = _issues(self.con, self.sid, "戏点密度")[0]
+        self.assertEqual(row["status"], "waived")
+        self.assertEqual(row["waive_note"], "刻意压缩")
+        audit.unwaive_issue(self.con, issue["id"])
+        self.assertEqual(_issues(self.con, self.sid, "戏点密度")[0]["status"], "open")
+
+    def test_loop_rule(self):
+        self.con.execute("UPDATE beats SET reaction='' WHERE beat_no='1'")
+        self.con.commit()
+        self.run_audit()
+        loop = _issues(self.con, self.sid, "闭环")
+        self.assertEqual(len(loop), 1)
+        self.assertEqual(loop[0]["carrier"], "beat")
+        self.con.execute("UPDATE beats SET reaction='男人僵住' WHERE beat_no='1'")
+        self.con.commit()
+        self.run_audit()
+        self.assertEqual(_issues(self.con, self.sid, "闭环")[0]["status"], "fixed")
+
+    def test_rule_toggle(self):
+        self.run_audit()
+        rid = [r for r in audit.rules_state(self.con) if r["title"] == "声音完整性"][0]["id"]
+        audit.update_rule(self.con, rid, enabled=False)
+        summary, _ = self.run_audit()
+        self.assertNotIn("声音完整性", [x["title"] for x in summary["rules"]])
+        # 关掉的规则不跑：旧 open 保持不动、不自动收敛
+        self.assertEqual(_issues(self.con, self.sid, "声音完整性")[0]["status"], "open")
+        audit.update_rule(self.con, rid, enabled=True)
+
+    def test_seed_idempotent(self):
+        self.assertEqual(audit.seed_default_rules(self.con), 0)
+        self.assertEqual(len(audit.rules_state(self.con)), 10)
+
+
+class TestLlmRules(unittest.TestCase):
+    def setUp(self):
+        self.con = make_audit_db()
+        audit.seed_default_rules(self.con)
+        self.sid = 1
+
+    def tearDown(self):
+        self.con.close()
+
+    def test_llm_seam_finding_and_message_update(self):
+        audit.run_scene(self.con, self.sid, ai_chat=_stub_axis("视线反向，疑越轴"))
+        rows = _issues(self.con, self.sid, "轴线")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["carrier"], "seam")
+        self.assertEqual(rows[0]["target_id"], "1>2")  # 镜01→02 的 id 对
+        # 同键重跑 + 消息漂移 → 就地更新，不重复
+        audit.run_scene(self.con, self.sid, ai_chat=_stub_axis("视线反向（更新版），建议加过渡镜"))
+        rows = _issues(self.con, self.sid, "轴线")
+        self.assertEqual(len(rows), 1)
+        self.assertIn("更新版", rows[0]["message"])
+
+    def test_llm_garbage_and_bad_ref(self):
+        def garbage(cfg, messages):
+            return "抱歉，我无法完成。not json"
+        audit.run_scene(self.con, self.sid, ai_chat=garbage)
+        self.assertEqual(len(_issues(self.con, self.sid, "轴线")), 0)
+
+        def bad_ref(cfg, messages):
+            if "越轴" in messages[0]["content"]:
+                return '{"findings":[{"carrier":"seam","ref":"99->01","message":"x"}]}'
+            return '{"findings": []}'
+        audit.run_scene(self.con, self.sid, ai_chat=bad_ref)
+        self.assertEqual(len(_issues(self.con, self.sid, "轴线")), 0)
+
+    def test_llm_error_records_summary(self):
+        def broken(cfg, messages):
+            raise RuntimeError("boom")
+        summary, _ = audit.run_scene(self.con, self.sid, ai_chat=broken)
+        axis = [x for x in summary["rules"] if x["title"] == "轴线"][0]
+        self.assertFalse(axis["ran"])
+        self.assertIn("boom", axis["error"])
+        prog = ("闭环", "戏点密度", "戏点特写", "景别完整", "声音完整性")
+        self.assertTrue(all(x["ran"] for x in summary["rules"] if x["title"] in prog))
+
+
+class TestJobManager(unittest.TestCase):
+    def test_job_runs_and_reports(self):
+        import os
+        import sqlite3
+        import tempfile
+        import time as _t
+
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "audit.db")
+            seed = make_audit_db(path)
+            audit.seed_default_rules(seed)
+            seed.close()
+
+            def factory():
+                c = sqlite3.connect(path, timeout=10)
+                c.execute("PRAGMA foreign_keys=ON")
+                c.row_factory = sqlite3.Row
+                return c
+
+            def slow_stub(cfg, messages):
+                _t.sleep(0.15)
+                return '{"findings": []}'
+
+            m = audit.JobManager()
+            job = m.start(1, chat=slow_stub, connect_factory=factory)
+            self.assertTrue(job["running"])
+            self.assertEqual(len(job["rules"]), 10)
+            # 进行中再次 start → 加入同一任务
+            again = m.start(1, chat=slow_stub, connect_factory=factory)
+            self.assertEqual(again["started_at"], job["started_at"])
+            deadline = _t.time() + 15
+            while _t.time() < deadline:
+                j = m.status(1)
+                if not j["running"]:
+                    break
+                _t.sleep(0.1)
+            j = m.status(1)
+            self.assertFalse(j["running"], "job 未在限时内完成")
+            states = {x["title"]: x["state"] for x in j["rules"]}
+            self.assertTrue(all(s == "done" for s in states.values()), states)
+            self.assertEqual(j["found_total"], 4)
+            con = factory()
+            try:
+                self.assertEqual(audit.issues_state(con, 1)["counts"]["open"], 4)
+            finally:
+                con.close()
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
