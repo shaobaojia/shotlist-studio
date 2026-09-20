@@ -117,6 +117,7 @@ function render() {
     listEl.appendChild(el('div', 'ap-empty', q ? '（没有匹配的问题）' : '暂无问题——点「跑审计」开跑'));
     return;
   }
+  listEl.appendChild(el('div', 'ap-hint', '点条目 → 跳到该处并展开问题卡（去改 · 重检 · 豁免）'));
   const groups = [['open', '未处理'], ['fixed', '已修'], ['waived', '豁免']];
   for (const pair of groups) {
     const items = shown.filter((i) => i.status === pair[0]);

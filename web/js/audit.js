@@ -356,8 +356,8 @@ async function tick() {
 
 function onDone(job) {
   if (job && job.error) { toast('审计失败：' + job.error, 'err'); return; }
-  const c = cur && cur.counts;
-  toast('审计完成：未处理 ' + ((c && c.open) || 0) + ' 处');
+  const n = (cur && cur.counts && cur.counts.open) || 0;
+  toast(n > 0 ? ('审计完成：' + n + ' 处问题已亮灯（点灯处理）') : '审计完成：没有未处理的问题');
 }
 
 // ── 共用小工具 ──
