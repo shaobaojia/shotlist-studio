@@ -39,4 +39,13 @@ export const api = {
   blockOp: (payload) => post('/api/blocks', payload),
   promptOp: (action, payload) => post('/api/prompt/' + action, payload || {}),
   history: (sceneId, limit) => get('/api/history?scene_id=' + sceneId + '&limit=' + (limit || 100)),
+  audit: (sceneId) => get('/api/audit?scene_id=' + sceneId),
+  auditSummary: () => get('/api/audit/summary'),
+  auditRun: (sceneId) => post('/api/audit/run', { scene_id: sceneId }),
+  auditIssue: (payload) => post('/api/audit/issue', payload),
+  auditRules: (payload) => post('/api/audit/rules', payload),
+  auditRulesGet: () => get('/api/audit/rules'),
+  aiSettings: () => get('/api/ai/settings'),
+  aiSave: (payload) => post('/api/ai/settings', payload),
+  aiTest: () => post('/api/ai/test', {}),
 };

@@ -432,3 +432,131 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 /* 热盒条：块↔块拖拽换位指示（前/后插半） */
 .block-chip.drop-before { box-shadow: inset 3px 0 0 0 var(--accent); }
 .block-chip.drop-after { box-shadow: inset -3px 0 0 0 var(--accent); }
+
+/* ══ M4a-2（2026-09-20）：审计灯 / 问题卡 / 问题清单 / 审计设置 ══ */
+:root { --amber: #c9821f; --amber-deep: #8f5c10; }
+
+/* 灯：绝对定位钉在载体左缘（不占列、不改列宽、不参与排序与框选） */
+.audit-lamp {
+  position: absolute; left: 1px; top: 50%; transform: translateY(-50%);
+  width: 9px; height: 9px; border-radius: 50%; cursor: pointer; z-index: 2;
+  background: radial-gradient(circle at 35% 30%, #f0b25a, var(--amber) 60%, var(--amber-deep));
+  box-shadow: 0 0 0 2px rgba(201, 130, 31, 0.18);
+}
+.audit-lamp:hover { box-shadow: 0 0 0 3px rgba(201, 130, 31, 0.32); }
+.audit-lamp::before { content: ""; position: absolute; inset: -4px; border-radius: 50%; }
+.audit-lamp .lamp-n {
+  position: absolute; right: -7px; bottom: -7px; font-style: normal;
+  font-size: 9.5px; line-height: 1; color: #fff; background: var(--amber);
+  border-radius: 6px; padding: 1.5px 4px; font-weight: 600;
+}
+td.cell-toggle { position: relative; }
+tr.shot.has-lamp .drag-dots { left: 10px; top: 24px; }
+.audit-lamp.seam { top: 100%; transform: none; }
+.beat-head { position: relative; }
+.beat-head > .audit-lamp { left: -11px; }
+.scene-head { position: relative; }
+.scene-freeze .scene-head > .audit-lamp { left: 26px; top: 22px; transform: none; }
+tr.shot.flash td, .beat.flash, .scene-head.flash { animation: rowFlash 1.5s ease-out; }
+
+/* 问题卡：行下就地展开（tr）/ 节拍头下 / 场头下 */
+tr.audit-card-tr td { background: transparent; border: 0; border-radius: 0; padding: 1px 0 7px; }
+#view.wrap-off tr.audit-card-tr td { white-space: normal; overflow: visible; text-overflow: clip; }
+.audit-card {
+  background: #fffdf4; border: 1px solid rgba(201, 130, 31, 0.40); border-left: 3px solid var(--amber);
+  border-radius: 8px; padding: 8px 12px 7px; box-shadow: var(--shadow-mini);
+}
+section.beat > .audit-card { margin: 2px 0 8px; }
+.scene-freeze .audit-card { margin: 2px 22px 8px 45px; }
+.ac-head { display: flex; align-items: center; gap: 8px; }
+.ac-head b { font-size: 12.5px; color: var(--amber-deep); }
+.ac-head .sp { flex: 1; }
+.ac-item { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; border-bottom: 1px dashed rgba(60, 50, 30, 0.12); }
+.ac-item:last-of-type { border-bottom: 0; }
+.rule-chip { flex: none; font-size: 11px; color: #fff; background: var(--dlg); border-radius: 5px; padding: 1px 7px; margin-top: 2px; white-space: nowrap; }
+.rule-chip.llm { background: #6b5a8e; }
+.ac-txt { flex: 1; font-size: 12.5px; color: var(--text); line-height: 1.65; }
+.ac-note { color: var(--dim); margin-left: 6px; font-size: 12px; }
+.ac-acts { display: flex; gap: 6px; flex: none; align-items: center; }
+.qbtn {
+  font: inherit; font-size: 11.5px; color: var(--ink2); border: 1px solid rgba(60, 50, 30, 0.22);
+  background: var(--card); border-radius: 6px; padding: 1px 9px; cursor: pointer;
+}
+.qbtn:hover { border-color: var(--accent); color: var(--accent); }
+.qbtn.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
+.ac-item.done .ac-txt, .ac-item.waived .ac-txt { color: var(--dim); }
+.ac-foot { padding-top: 5px; font-size: 11px; color: var(--dim); }
+
+/* 问题清单浮卡（做派对「痕迹回看」） */
+#audit-panel {
+  position: fixed; right: 14px; top: 56px; width: 460px; max-height: 76vh;
+  background: var(--card); border: 1px solid rgba(90, 78, 55, 0.30); border-radius: 10px;
+  z-index: 42; display: flex; flex-direction: column; box-shadow: var(--shadow-float);
+}
+#audit-panel[hidden] { display: none; }
+.ap-head { display: flex; gap: 6px; align-items: center; padding: 8px 10px; border-bottom: 1px solid rgba(60, 50, 30, 0.14); background: var(--paper); border-radius: 10px 10px 0 0; }
+.ap-head b { font-size: 13px; color: var(--head); white-space: nowrap; }
+.ap-search { flex: 1; min-width: 0; background: #fffdf6; border: 1px solid rgba(60, 50, 30, 0.22); color: var(--text); border-radius: 6px; padding: 3px 8px; font-size: 12px; }
+.ap-search:focus { outline: none; border-color: var(--accent); }
+.ap-stat { padding: 6px 11px; font-size: 11.5px; color: var(--dim); border-bottom: 1px solid rgba(60, 50, 30, 0.08); }
+.ap-stat.busy { color: var(--amber-deep); }
+.ap-err { padding: 5px 11px; font-size: 11.5px; color: #b3402f; border-bottom: 1px solid rgba(60, 50, 30, 0.08); }
+.ap-err[hidden] { display: none; }
+.ap-list { overflow: auto; padding: 2px 0 6px; }
+.ap-grp { padding: 7px 11px 3px; font-size: 11px; color: var(--dim); letter-spacing: 0.08em; }
+.ap-item { display: flex; gap: 8px; align-items: flex-start; padding: 7px 11px; border-bottom: 1px solid rgba(60, 50, 30, 0.07); cursor: pointer; }
+.ap-item:hover { background: rgba(60, 50, 30, 0.035); }
+.ap-item.active { background: rgba(201, 130, 31, 0.10); }
+.ap-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; background: var(--dlg); }
+.ap-dot.llm { background: #6b5a8e; }
+.ap-item.done .ap-dot { background: var(--dim); opacity: 0.5; }
+.ap-tag { flex: none; font-size: 11px; color: var(--dlg); border: 1px solid rgba(149, 96, 31, 0.35); border-radius: 5px; padding: 0 6px; margin-top: 1px; }
+.ap-t { flex: 1; font-size: 12.5px; color: var(--text); line-height: 1.6; }
+.ap-item.done .ap-t { color: var(--dim); }
+.ap-rule { color: var(--head); font-weight: 600; }
+.ap-note { display: block; color: var(--dim); font-size: 11.5px; }
+.ap-time { flex: none; font-size: 10.5px; color: var(--dim); font-variant-numeric: tabular-nums; margin-top: 2px; }
+.ap-empty { color: var(--dim); padding: 16px; text-align: center; font-size: 12px; }
+
+/* 工具排「审计」按钮 + 场次徽标记数 */
+.view-tools .audit-btn { border: 1px solid rgba(105, 88, 58, 0.28); background: var(--card); border-radius: 7px; padding: 2px 10px; color: var(--head); font-weight: 600; box-shadow: 0 2px 8px rgba(92, 74, 46, 0.14); }
+.view-tools .audit-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--card); }
+.view-tools .audit-btn .ab-num { display: inline-block; margin-left: 5px; background: var(--amber); color: #fff; font-size: 10.5px; border-radius: 8px; padding: 0 5px; font-weight: 600; vertical-align: 1px; }
+.view-tools .audit-btn.busy { color: var(--amber-deep); border-color: rgba(201, 130, 31, 0.5); }
+.nav .chip .nb { display: inline-block; margin-left: 5px; background: var(--amber); color: #fff; font-size: 10px; line-height: 1.5; padding: 0 5px; border-radius: 8px; font-weight: 600; vertical-align: 1px; }
+
+/* 审计设置浮卡（规则开关 / 参数 / AI 通道） */
+#audit-set {
+  position: fixed; right: 14px; top: 56px; width: 480px; max-height: 78vh;
+  background: var(--card); border: 1px solid rgba(90, 78, 55, 0.30); border-radius: 10px;
+  z-index: 46; display: flex; flex-direction: column; box-shadow: var(--shadow-float);
+}
+#audit-set[hidden] { display: none; }
+.as-head { display: flex; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--rule); background: var(--paper); border-radius: 10px 10px 0 0; }
+.as-head b { font-size: 13px; color: var(--head); margin-right: auto; }
+.as-body { overflow: auto; padding: 10px 12px 14px; }
+.as-sec { margin-bottom: 16px; }
+.as-sec-t { font-size: 11.5px; color: var(--dim); margin-bottom: 7px; line-height: 1.6; }
+.as-rule { border: 1px solid var(--rule); border-radius: 8px; padding: 7px 9px; margin-bottom: 6px; background: #fffefa; }
+.as-rule.off { opacity: 0.6; }
+.as-line { display: flex; align-items: center; gap: 8px; }
+.as-title { font-size: 12.5px; color: var(--head); font-weight: 600; margin-right: auto; }
+.eng { display: inline-block; font-size: 10px; border-radius: 5px; padding: 1px 6px; color: #fff; white-space: nowrap; }
+.eng.p { background: var(--green); }
+.eng.l { background: #6b5a8e; }
+.as-desc { font-size: 11px; color: var(--dim); margin-top: 3px; line-height: 1.6; }
+.as-params { margin-top: 6px; display: flex; flex-direction: column; gap: 5px; }
+.as-p { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink2); }
+.as-p-k { flex: 0 0 96px; color: var(--dim); font-size: 11px; }
+.as-input { flex: 1; min-width: 0; background: #fffdf6; border: 1px solid rgba(60, 50, 30, 0.22); border-radius: 6px; padding: 3px 8px; font: inherit; font-size: 12px; color: var(--text); }
+.as-input:focus { outline: none; border-color: var(--accent); }
+.as-area { resize: vertical; font-family: var(--mono); font-size: 11.5px; line-height: 1.6; }
+.as-num { width: 80px; flex: none; }
+.as-switch { position: relative; width: 30px; height: 16px; flex: none; cursor: pointer; }
+.as-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.as-slider { position: absolute; inset: 0; background: rgba(60, 50, 30, 0.25); border-radius: 9px; transition: background 0.15s; }
+.as-slider::after { content: ""; position: absolute; left: 2px; top: 2px; width: 12px; height: 12px; background: #fff; border-radius: 50%; transition: transform 0.15s; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); }
+.as-switch input:checked + .as-slider { background: var(--green); }
+.as-switch input:checked + .as-slider::after { transform: translateX(14px); }
+.as-bar { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.as-test-result { font-size: 11.5px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

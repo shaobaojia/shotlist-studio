@@ -26,6 +26,8 @@ ROUTES = [
     (re.compile(r"^/api/history$"), handlers.history),
     (re.compile(r"^/api/blocks$"), prompts_api.blocks),
     (re.compile(r"^/api/audit$"), audit_api.audit_get),
+    (re.compile(r"^/api/audit/rules$"), audit_api.rules_get),
+    (re.compile(r"^/api/audit/summary$"), audit_api.summary),
     (re.compile(r"^/api/ai/settings$"), ai_api.settings_get),
 ]
 

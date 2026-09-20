@@ -14,6 +14,8 @@ import { filterActive, resetFilter, buildFilterTools, applyFilter } from './filt
 import { openMenu } from './menu.js';
 import { toggleHistory, closeHistory, refreshHistoryIfOpen } from './history.js';
 import { initHotbox, releaseComposer } from './hotbox.js';
+import { initAudit, onPainted as auditOnPainted } from './audit.js';
+import { bindAuditBtn, toggleAuditPanel, closeAuditPanel } from './auditpanel.js';
 
 const PREFS_KEY = 'shotlist_prefs_v1';
 let prefs = loadPrefs();   // { wrap, hidden:{key:true=隐藏}, widths:{key:px} }
@@ -63,6 +65,7 @@ export async function renderScene(view, sceneNo) {
   sortState = null;
   resetFilter();
   closeHistory();
+  closeAuditPanel();
   currentData = data;
   bindDragOnce(view);
   bindCellMenu(view, {
@@ -78,6 +81,10 @@ export async function renderScene(view, sceneNo) {
     allShots: () => (currentData ? allShots(currentData) : []),
     groupsMap: () => promptGroupsMap,
     reapply: () => { clearSel(); applyFilter(fctx); },
+  });
+  initAudit({
+    getData: () => currentData,
+    refresh: refreshCurrentView,
   });
   paintScene(view);
 }
@@ -193,6 +200,7 @@ function paintScene(view) {
   applyFilter(fctx);
   scheduleWarm(view);
   refreshHistoryIfOpen();
+  auditOnPainted(data);
   syncFreezeH();
 }
 
@@ -422,6 +430,12 @@ function viewTools() {
       paintScene(document.getElementById('view'));
     });
   };
+  const ab = el('button', 'tool-btn audit-btn', '审计');
+  ab.title = '审计问题清单（灯＝待处理；每次按设置跑）';
+  ab.addEventListener('click', toggleAuditPanel);
+  bindAuditBtn(ab);
+  bar.appendChild(ab);
+
   const drawer = el('button', 'tool-btn vt-drawer', '场务 ⋯');
   drawer.title = '场务：整理镜号 / 锁定本场 / 自动换行 / 列设置 / 痕迹';
   drawer.addEventListener('click', () => {

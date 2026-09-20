@@ -4,9 +4,10 @@ import { api } from './api.js';
 import { state } from './state.js';
 import { el } from './ui.js';
 
-const ENTITY_LABEL = { shots: '镜头', beats: '节拍', scenes: '场次', prompt_groups: '提示词组' };
+const ENTITY_LABEL = { shots: '镜头', beats: '节拍', scenes: '场次', prompt_groups: '提示词组', audit: '审计' };
 const SPECIAL_FIELD = { create: '新增', delete: '删除', drag: '拖动', locked: '锁定',
-  text: '正文', merge: '并组', merge_in: '并入', split: '拆组', detach: '独立成组', restore: '还原' };
+  text: '正文', merge: '并组', merge_in: '并入', split: '拆组', detach: '独立成组', restore: '还原',
+  status: '状态' };
 
 let panel = null;
 let listEl = null;

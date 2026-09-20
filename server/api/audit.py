@@ -26,6 +26,26 @@ def _scene_of_issue(con, iid):
     return row["scene_id"]
 
 
+def rules_get(m, q):
+    """规则清单（设置面板用；与场景无关）。"""
+    con = db.connect()
+    try:
+        return {"ok": True, "rules": audit.rules_state(con)}, 200
+    finally:
+        con.close()
+
+
+def summary(m, q):
+    """全片未处理计数（场次导航徽标用）。"""
+    con = db.connect()
+    try:
+        rows = con.execute("SELECT scene_id, COUNT(*) AS n FROM audit_issues"
+                           " WHERE status='open' GROUP BY scene_id").fetchall()
+        return {"ok": True, "open_by_scene": {str(r["scene_id"]): r["n"] for r in rows}}, 200
+    finally:
+        con.close()
+
+
 def audit_get(m, q):
     sid = _int_q(q or {})
     if sid is None:

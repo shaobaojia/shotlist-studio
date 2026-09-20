@@ -200,6 +200,7 @@ async function reloadFilm() {
     state.film = fd.film;
     state.scenes = fd.scenes || [];
     buildNav();
+    refreshNavBadges();
     const cur = decHash(currentHash());
     const m = cur.match(/^#\/(.+)$/);
     if (m && !state.scenes.some((x) => x.scene_no === m[1])) {
@@ -235,6 +236,7 @@ async function boot() {
     state.film = filmData.film;
     state.scenes = filmData.scenes || [];
     buildNav();
+    refreshNavBadges();
     syncTopbarVar();
     if (window.ResizeObserver) { try { new ResizeObserver(syncTopbarVar).observe(document.getElementById('topbar')); } catch (e) { /* ignore */ } }
     window.addEventListener('hashchange', route);
@@ -245,6 +247,27 @@ async function boot() {
     view.appendChild(el('div', 'empty err', '加载失败：' + err.message));
   }
 }
+
+// 场次徽标同步记数（审计未处理数；事件节流）
+let navbTimer = null;
+function scheduleNavBadges() {
+  if (navbTimer) clearTimeout(navbTimer);
+  navbTimer = setTimeout(() => { navbTimer = null; refreshNavBadges(); }, 900);
+}
+async function refreshNavBadges() {
+  try {
+    const res = await api.auditSummary();
+    const map = res.open_by_scene || {};
+    document.querySelectorAll('#scene-nav .chip[data-scene-id]').forEach((chip) => {
+      const n = map[String(chip.dataset.sceneId)] || 0;
+      let b = chip.querySelector('.nb');
+      if (!n) { if (b) b.remove(); return; }
+      if (!b) { b = el('span', 'nb'); chip.appendChild(b); }
+      b.textContent = String(n);
+    });
+  } catch (err) { /* 忽略 */ }
+}
+window.addEventListener('shotlist:audit-changed', scheduleNavBadges);
 
 document.addEventListener('keydown', async (e) => {
   if (!(e.ctrlKey || e.metaKey) || String(e.key).toLowerCase() !== 'z') return;
