@@ -1,5 +1,5 @@
 """提示词与块库接口层（M3）：GET /api/blocks；POST /api/blocks（action 分发）；POST /api/prompt/<action>。"""
-from core import db, ops, prompts
+from core import db, prompts
 
 
 def blocks(m, q):
@@ -14,7 +14,6 @@ def blocks_op(m, body, q):
     """块库写操作：create / update / delete / move / pin / cat_create / cat_update / cat_delete / cat_move。"""
     body = body or {}
     action = body.get("action")
-    ops.ensure_daily_snapshot()
     con = db.connect(rw=True)
     try:
         if action == "create":
@@ -50,7 +49,6 @@ def prompt_op(m, body, q):
     """提示词组写操作：set_text / merge / detach / split / restore。"""
     action = m.group(1)
     body = body or {}
-    ops.ensure_daily_snapshot()
     con = db.connect(rw=True)
     try:
         if action == "set_text":

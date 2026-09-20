@@ -7,11 +7,14 @@ DB_PATH = ROOT / "data" / "studio.db"
 
 
 def connect(db_path=None, rw=False):
-    """默认只读（GET 路径）；rw=True 给写路径（M2 编辑），开外键约束。"""
+    """默认只读（GET 路径）；rw=True 给写路径（M2 编辑），开外键约束。
+    写连接统一先过每日快照（写保护下沉到写边界，脚本/新写者天然覆盖）。"""
     p = Path(db_path) if db_path else DB_PATH
     if rw:
         if not p.exists():
             raise FileNotFoundError("数据库不存在：%s" % p)
+        from core import ops  # 延迟导入：ops 顶层 import db，避免循环
+        ops.ensure_daily_snapshot(db_path=str(p))
         con = sqlite3.connect(str(p), timeout=10)
         con.execute("PRAGMA foreign_keys=ON")
     else:
@@ -45,14 +48,14 @@ def scene_by_no(con, film_id, scene_no):
 
 def beats(con, scene_id):
     return _dicts(con.execute(
-        "SELECT * FROM beats WHERE scene_id=? ORDER BY position", (scene_id,)))
+        "SELECT * FROM beats WHERE scene_id=? ORDER BY position, id", (scene_id,)))
 
 
 def shots(con, scene_id):
     return _dicts(con.execute(
-        "SELECT * FROM shots WHERE scene_id=? ORDER BY position", (scene_id,)))
+        "SELECT * FROM shots WHERE scene_id=? ORDER BY position, id", (scene_id,)))
 
 
 def prompt_groups(con, scene_id):
     return _dicts(con.execute(
-        "SELECT * FROM prompt_groups WHERE scene_id=? ORDER BY position", (scene_id,)))
+        "SELECT * FROM prompt_groups WHERE scene_id=? ORDER BY position, id", (scene_id,)))

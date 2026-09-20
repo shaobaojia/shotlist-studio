@@ -1,8 +1,9 @@
 """领域操作（写路径的唯一实现）：字段更新 / 批量更新 / 整理镜号 / 痕迹 / 每日快照。
 逻辑为主、可单测（tests/test_ops.py）。改动维护：写白名单从 fields.py 派生，不另写一份。"""
 import json
+import os
 import re
-import shutil
+import sqlite3
 import string
 from datetime import date, datetime
 from pathlib import Path
@@ -24,6 +25,14 @@ def write_keys(table):
     return [f["key"] for f in t["spec"] if f["type"] not in t["skip_types"]]
 
 
+def record_history(con, scene_id, entity, entity_id, field, old_value, new_value, source="manual"):
+    """写一条痕迹（写保护唯一入口；不 commit）。列序只在这里定义。"""
+    con.execute(
+        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (scene_id, entity, entity_id, field, old_value, new_value, source))
+
+
 def _scene_of(con, table, row_id):
     if table == "scenes":
         return row_id
@@ -31,18 +40,53 @@ def _scene_of(con, table, row_id):
     return row["scene_id"] if row else None
 
 
+SNAPSHOT_RETAIN_DAYS = 30
+
+
 def ensure_daily_snapshot(db_path=None, snap_root=None):
-    """每日快照：当天首次写操作前整库拷贝一份（幂等，已存在则跳过）。"""
+    """每日快照：当天首次写操作前整库备份一份（幂等，已存在则跳过）。
+    用 SQLite 备份接口落 .tmp 再原子改名——不裸拷 live 文件（避免拷到事务半写态），
+    中断只留 .tmp、不留半截正式备份；顺带清理超过 SNAPSHOT_RETAIN_DAYS 天的旧档。"""
     src = Path(db_path) if db_path else db.DB_PATH
     root = Path(snap_root) if snap_root else src.parent / "snapshots" / "daily"
     if not src.exists():
         return None
-    dest = root / ("studio-%s.db" % date.today().strftime("%Y%m%d"))
-    if dest.exists():
-        return None
     root.mkdir(parents=True, exist_ok=True)
-    shutil.copy(src, dest)
-    return str(dest)
+    dest = root / ("studio-%s.db" % date.today().strftime("%Y%m%d"))
+    made = None
+    if not dest.exists():
+        tmp = root / (dest.name + ".tmp")
+        src_con = sqlite3.connect("file:%s?mode=ro" % src, uri=True)
+        try:
+            dst_con = sqlite3.connect(str(tmp))
+            try:
+                src_con.backup(dst_con)
+            finally:
+                dst_con.close()
+        finally:
+            src_con.close()
+        os.replace(tmp, dest)
+        made = str(dest)
+    _prune_snapshots(root)
+    return made
+
+
+def _prune_snapshots(root):
+    """保留最近 SNAPSHOT_RETAIN_DAYS 天的每日快照，过期删除（失败静默）。"""
+    cutoff = date.today().toordinal() - SNAPSHOT_RETAIN_DAYS
+    try:
+        for f in root.glob("studio-*.db"):
+            m = re.match(r"^studio-(\d{8})\.db$", f.name)
+            if not m:
+                continue
+            try:
+                old = datetime.strptime(m.group(1), "%Y%m%d").date().toordinal() < cutoff
+            except ValueError:
+                continue
+            if old:
+                f.unlink()
+    except OSError:
+        pass
 
 
 def lock_scene(con, scene_id, lock=True, snap_root=None):
@@ -72,11 +116,8 @@ def lock_scene(con, scene_id, lock=True, snap_root=None):
                     (sc["scene_no"], rel))
         snap = {"path": rel, "at": payload["saved_at"]}
     con.execute("UPDATE scenes SET locked=? WHERE id=?", (1 if lock else 0, scene_id))
-    con.execute(
-        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (scene_id, "scenes", scene_id, "locked",
-         "1" if sc["locked"] else "0", "1" if lock else "0", "manual"))
+    record_history(con, scene_id, "scenes", scene_id, "locked",
+                   "1" if sc["locked"] else "0", "1" if lock else "0")
     con.commit()
     return {"scene": dict(con.execute("SELECT * FROM scenes WHERE id=?", (scene_id,)).fetchone()),
             "snapshot": snap}
@@ -95,10 +136,7 @@ def _apply_field(con, table, row_id, field, value, source="manual"):
     con.execute(
         "UPDATE %s SET %s=?, updated_at=datetime('now','localtime') WHERE id=?" % (table, field),
         (value, row_id))
-    con.execute(
-        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (_scene_of(con, table, row_id), table, row_id, field, old, value, source))
+    record_history(con, _scene_of(con, table, row_id), table, row_id, field, old, value, source)
     fresh = con.execute("SELECT * FROM %s WHERE id=?" % table, (row_id,)).fetchone()
     return dict(fresh), True
 
@@ -146,10 +184,8 @@ def renumber_scene(con, scene_id):
             con.execute(
                 "UPDATE shots SET shot_no=?, updated_at=datetime('now','localtime') WHERE id=?",
                 (new_no, r["id"]))
-            con.execute(
-                "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-                " VALUES (?,?,?,?,?,?,?)",
-                (scene_id, "shots", r["id"], "shot_no", r["shot_no"], new_no, "system"))
+            record_history(con, scene_id, "shots", r["id"], "shot_no",
+                           r["shot_no"], new_no, "system")
             changes.append({"id": r["id"], "old": r["shot_no"], "new": new_no})
     con.commit()
     return changes
@@ -161,6 +197,14 @@ def _scene_beats(con, scene_id):
 
 def _scene_shots(con, scene_id):
     return list(con.execute("SELECT * FROM shots WHERE scene_id=? ORDER BY position, id", (scene_id,)))
+
+
+def reseq(con, table, ids, touch=False):
+    """把 ids 按列表顺序重写为 0 基致密 position（仅变更行落库，不 commit）。
+    touch=True 时同步更新 updated_at（beats 等既有口径）。"""
+    set_cols = "position=?, updated_at=datetime('now','localtime')" if touch else "position=?"
+    for i, _id in enumerate(ids):
+        con.execute("UPDATE %s SET %s WHERE id=? AND position!=?" % (table, set_cols), (i, _id, i))
 
 
 def move_shot(con, shot_id, target_beat_id, index):
@@ -192,17 +236,12 @@ def move_shot(con, shot_id, target_beat_id, index):
     if [r["id"] for r in order] == before and shot["beat_id"] == target_beat_id:
         return {"changed": False, "id": shot_id}
     old_beat_no = next((b["beat_no"] for b in beats if b["id"] == shot["beat_id"]), "?")
-    for i, r in enumerate(order):
-        if r["id"] == shot_id:
-            con.execute("UPDATE shots SET position=?, beat_id=?, updated_at=datetime('now','localtime') WHERE id=?",
-                        (i, target_beat_id, shot_id))
-        elif r["position"] != i:
-            con.execute("UPDATE shots SET position=? WHERE id=?", (i, r["id"]))
-    con.execute(
-        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (scene_id, "shots", shot_id, "drag", "beat%s#%s" % (old_beat_no, shot["position"]),
-         "beat%s#%s" % (tgt["beat_no"], idx), "manual"))
+    con.execute("UPDATE shots SET beat_id=?, updated_at=datetime('now','localtime') WHERE id=?",
+                (target_beat_id, shot_id))
+    reseq(con, "shots", [r["id"] for r in order])
+    record_history(con, scene_id, "shots", shot_id, "drag",
+                   "beat%s#%s" % (old_beat_no, shot["position"]),
+                   "beat%s#%s" % (tgt["beat_no"], idx))
     con.commit()
     return {"changed": True, "id": shot_id, "beat_id": target_beat_id, "index": idx,
             "old_beat_id": shot["beat_id"], "old_index": shot["position"]}
@@ -221,10 +260,7 @@ def move_beat(con, beat_id, index):
     new_beats = others[:idx] + [beat] + others[idx:]
     if [b["id"] for b in new_beats] == [b["id"] for b in beats]:
         return {"changed": False, "id": beat_id}
-    for i, b in enumerate(new_beats):
-        if b["position"] != i:
-            con.execute("UPDATE beats SET position=?, updated_at=datetime('now','localtime') WHERE id=?",
-                        (i, b["id"]))
+    reseq(con, "beats", [b["id"] for b in new_beats], touch=True)
     shots = _scene_shots(con, scene_id)
     by_beat = {}
     for r in shots:
@@ -234,14 +270,9 @@ def move_beat(con, beat_id, index):
         flat.extend(by_beat.get(b["id"], []))
     known = {b["id"] for b in new_beats}
     flat.extend(r for r in shots if r["beat_id"] not in known)
-    for i, r in enumerate(flat):
-        if r["position"] != i:
-            con.execute("UPDATE shots SET position=? WHERE id=?", (i, r["id"]))
+    reseq(con, "shots", [r["id"] for r in flat])
     old_i = [b["id"] for b in beats].index(beat_id)
-    con.execute(
-        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (scene_id, "beats", beat_id, "drag", "#%s" % old_i, "#%s" % idx, "manual"))
+    record_history(con, scene_id, "beats", beat_id, "drag", "#%s" % old_i, "#%s" % idx)
     con.commit()
     return {"changed": True, "id": beat_id, "index": idx, "old_index": old_i}
 
@@ -283,10 +314,7 @@ def duplicate_shot(con, shot_id):
         % (cols, qs),
         [scene_id, src["beat_id"], pos, new_no] + [src[c] for c in COPY_COLS])
     new_id = cur.lastrowid
-    con.execute(
-        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (scene_id, "shots", new_id, "create", src["shot_no"], new_no, "manual"))
+    record_history(con, scene_id, "shots", new_id, "create", src["shot_no"], new_no)
     con.commit()
     return dict(con.execute("SELECT * FROM shots WHERE id=?", (new_id,)).fetchone())
 
@@ -300,10 +328,7 @@ def delete_shot(con, shot_id):
     con.execute("DELETE FROM shots WHERE id=?", (shot_id,))
     con.execute("UPDATE shots SET position=position-1 WHERE scene_id=? AND position>?",
                 (scene_id, row["position"]))
-    con.execute(
-        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (scene_id, "shots", shot_id, "delete", row["shot_no"], None, "manual"))
+    record_history(con, scene_id, "shots", shot_id, "delete", row["shot_no"], None)
     con.commit()
     return {"id": shot_id, "shot_no": row["shot_no"]}
 
@@ -400,11 +425,8 @@ def create_blank_shot(con, scene_id, beat_id, index):
         "INSERT INTO shots (scene_id, beat_id, position, shot_no) VALUES (?,?,?,?)",
         (scene_id, beat_id, idx, new_no))
     new_id = cur.lastrowid
-    con.execute(
-        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (scene_id, "shots", new_id, "create",
-         (rows[idx - 1]["shot_no"] if idx > 0 and rows else None), new_no, "manual"))
+    record_history(con, scene_id, "shots", new_id, "create",
+                   (rows[idx - 1]["shot_no"] if idx > 0 and rows else None), new_no)
     con.commit()
     return dict(con.execute("SELECT * FROM shots WHERE id=?", (new_id,)).fetchone())
 
@@ -424,14 +446,10 @@ def delete_shots(con, ids):
     rows.sort(key=lambda r: (r["position"], r["id"]))
     for r in rows:
         con.execute("DELETE FROM shots WHERE id=?", (r["id"],))
-        con.execute(
-            "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-            " VALUES (?,?,?,?,?,?,?)",
-            (scene_id, "shots", r["id"], "delete", r["shot_no"], None, "manual"))
-    surv = list(con.execute("SELECT id, position FROM shots WHERE scene_id=? ORDER BY position, id", (scene_id,)))
-    for i, r in enumerate(surv):
-        if r["position"] != i:
-            con.execute("UPDATE shots SET position=? WHERE id=?", (i, r["id"]))
+        record_history(con, scene_id, "shots", r["id"], "delete", r["shot_no"], None)
+    surv = [r["id"] for r in con.execute(
+        "SELECT id FROM shots WHERE scene_id=? ORDER BY position, id", (scene_id,))]
+    reseq(con, "shots", surv)
     con.commit()
     return [dict(r) for r in rows]
 
@@ -449,10 +467,7 @@ def restore_shots(con, rows_):
         idx = max(0, min(int(r.get("position") or 0), cnt))
         con.execute("UPDATE shots SET position=position+1 WHERE scene_id=? AND position>=?", (scene_id, idx))
         new_id = _insert_restore(con, "shots", r, {"position": idx})
-        con.execute(
-            "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-            " VALUES (?,?,?,?,?,?,?)",
-            (scene_id, "shots", new_id, "create", None, r.get("shot_no"), "manual"))
+        record_history(con, scene_id, "shots", new_id, "create", None, r.get("shot_no"))
         out.append(dict(con.execute("SELECT * FROM shots WHERE id=?", (new_id,)).fetchone()))
     con.commit()
     return out
@@ -473,10 +488,7 @@ def create_beat(con, scene_id):
         "INSERT INTO beats (scene_id, position, beat_no, name, kind) VALUES (?,?,?,?,?)",
         (scene_id, len(beats), str(mx + 1), "新节拍", "\u26aa 填充"))
     new_id = cur.lastrowid
-    con.execute(
-        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (scene_id, "beats", new_id, "create", None, str(mx + 1), "manual"))
+    record_history(con, scene_id, "beats", new_id, "create", None, str(mx + 1))
     con.commit()
     return dict(con.execute("SELECT * FROM beats WHERE id=?", (new_id,)).fetchone())
 
@@ -513,11 +525,8 @@ def duplicate_beat(con, beat_id):
                 % (cols, ", ".join(["?"] * len(COPY_COLS))),
                 [scene_id, new_bid, cursor, new_s_no] + [src_s[c] for c in COPY_COLS])
             cursor += 1
-    con.execute(
-        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (scene_id, "beats", new_bid, "create", src["beat_no"],
-         "%s（含 %d 镜）" % (new_no, len(block)), "manual"))
+    record_history(con, scene_id, "beats", new_bid, "create", src["beat_no"],
+                   "%s（含 %d 镜）" % (new_no, len(block)))
     con.commit()
     return dict(con.execute("SELECT * FROM beats WHERE id=?", (new_bid,)).fetchone())
 
@@ -532,26 +541,18 @@ def delete_beat(con, beat_id, with_shots=False):
     if with_shots:
         for s in block:
             con.execute("DELETE FROM shots WHERE id=?", (s["id"],))
-            con.execute(
-                "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-                " VALUES (?,?,?,?,?,?,?)",
-                (scene_id, "shots", s["id"], "delete", s["shot_no"], None, "manual"))
-        surv = list(con.execute("SELECT id, position FROM shots WHERE scene_id=? ORDER BY position, id", (scene_id,)))
-        for i, r in enumerate(surv):
-            if r["position"] != i:
-                con.execute("UPDATE shots SET position=? WHERE id=?", (i, r["id"]))
+            record_history(con, scene_id, "shots", s["id"], "delete", s["shot_no"], None)
+        surv = [r["id"] for r in con.execute(
+            "SELECT id FROM shots WHERE scene_id=? ORDER BY position, id", (scene_id,))]
+        reseq(con, "shots", surv)
     else:
         for s in block:
             con.execute("UPDATE shots SET beat_id=NULL WHERE id=?", (s["id"],))
     con.execute("DELETE FROM beats WHERE id=?", (beat_id,))
-    bsurv = list(con.execute("SELECT id, position FROM beats WHERE scene_id=? ORDER BY position, id", (scene_id,)))
-    for i, b in enumerate(bsurv):
-        if b["position"] != i:
-            con.execute("UPDATE beats SET position=? WHERE id=?", (i, b["id"]))
-    con.execute(
-        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (scene_id, "beats", beat_id, "delete", beat["beat_no"], None, "manual"))
+    bsurv = [r["id"] for r in con.execute(
+        "SELECT id FROM beats WHERE scene_id=? ORDER BY position, id", (scene_id,))]
+    reseq(con, "beats", bsurv)
+    record_history(con, scene_id, "beats", beat_id, "delete", beat["beat_no"], None)
     con.commit()
     return {"beat": dict(beat), "shot_ids": [s["id"] for s in block]}
 
@@ -568,10 +569,7 @@ def restore_beat(con, beat_row, shot_ids):
     for sid in (shot_ids or []):
         if isinstance(sid, int):
             con.execute("UPDATE shots SET beat_id=? WHERE id=?", (new_id, sid))
-    con.execute(
-        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (scene_id, "beats", new_id, "create", None, beat_row.get("beat_no"), "manual"))
+    record_history(con, scene_id, "beats", new_id, "create", None, beat_row.get("beat_no"))
     con.commit()
     return dict(con.execute("SELECT * FROM beats WHERE id=?", (new_id,)).fetchone())
 
@@ -587,10 +585,7 @@ def create_scene(con):
         "INSERT INTO scenes (film_id, position, scene_no, title) VALUES (?,?,?,?)",
         (f["id"], len(scenes), no, "新场"))
     new_id = cur.lastrowid
-    con.execute(
-        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (new_id, "scenes", new_id, "create", None, no, "manual"))
+    record_history(con, new_id, "scenes", new_id, "create", None, no)
     con.commit()
     return dict(con.execute("SELECT * FROM scenes WHERE id=?", (new_id,)).fetchone())
 
@@ -607,13 +602,8 @@ def move_scene(con, scene_id, index):
     if [s["id"] for s in new_order] == [s["id"] for s in scenes]:
         return {"changed": False, "id": scene_id}
     old_i = [s["id"] for s in scenes].index(scene_id)
-    for i, s in enumerate(new_order):
-        if s["position"] != i:
-            con.execute("UPDATE scenes SET position=? WHERE id=?", (i, s["id"]))
-    con.execute(
-        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (scene_id, "scenes", scene_id, "drag", "#%s" % old_i, "#%s" % idx, "manual"))
+    reseq(con, "scenes", [s["id"] for s in new_order])
+    record_history(con, scene_id, "scenes", scene_id, "drag", "#%s" % old_i, "#%s" % idx)
     con.commit()
     return {"changed": True, "id": scene_id, "index": idx, "old_index": old_i}
 
@@ -658,11 +648,8 @@ def duplicate_scene(con, scene_id):
             % (", ".join(COPY_COLS), ", ".join(["?"] * len(COPY_COLS))),
             [new_sid, bid, shot["position"], shot["shot_no"], gid] + [shot[c] for c in COPY_COLS])
     nbeats = len(bmap)
-    con.execute(
-        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (new_sid, "scenes", new_sid, "create", src["scene_no"],
-         "%s（%d 节拍 / %d 镜）" % (new_no, nbeats, len(s2)), "manual"))
+    record_history(con, new_sid, "scenes", new_sid, "create", src["scene_no"],
+                   "%s（%d 节拍 / %d 镜）" % (new_no, nbeats, len(s2)))
     con.commit()
     return {"id": new_sid, "scene_no": new_no, "beats": nbeats, "shots": len(s2)}
 
@@ -680,14 +667,10 @@ def delete_scene(con, scene_id):
         "groups": [dict(g) for g in con.execute("SELECT * FROM prompt_groups WHERE scene_id=? ORDER BY position, id", (scene_id,))],
     }
     con.execute("DELETE FROM scenes WHERE id=?", (scene_id,))
-    surv = list(con.execute("SELECT id, position FROM scenes WHERE film_id=? ORDER BY position, id", (film_id,)))
-    for i, r in enumerate(surv):
-        if r["position"] != i:
-            con.execute("UPDATE scenes SET position=? WHERE id=?", (i, r["id"]))
-    con.execute(
-        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (scene_id, "scenes", scene_id, "delete", sc["scene_no"], None, "manual"))
+    surv = [r["id"] for r in con.execute(
+        "SELECT id FROM scenes WHERE film_id=? ORDER BY position, id", (film_id,))]
+    reseq(con, "scenes", surv)
+    record_history(con, scene_id, "scenes", scene_id, "delete", sc["scene_no"], None)
     con.commit()
     return payload
 
@@ -713,9 +696,6 @@ def restore_scene_full(con, payload):
         gid = gmap.get(shot.get("prompt_group_id")) if shot.get("prompt_group_id") is not None else None
         _insert_restore(con, "shots", shot,
                         {"scene_id": new_sid, "beat_id": bid, "prompt_group_id": gid})
-    con.execute(
-        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (new_sid, "scenes", new_sid, "create", None, sc.get("scene_no"), "manual"))
+    record_history(con, new_sid, "scenes", new_sid, "create", None, sc.get("scene_no"))
     con.commit()
     return {"id": new_sid, "scene_no": sc.get("scene_no")}

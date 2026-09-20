@@ -97,7 +97,6 @@ def update(m, body, q):
         value = ("" if value is None else str(value)).strip()
         if not value:
             return {"error": "场号不能为空"}, 400
-    ops.ensure_daily_snapshot()
     con = db.connect(rw=True)
     try:
         if table == "scenes" and field == "scene_no":
@@ -121,7 +120,6 @@ def batch(m, body, q):
         return {"error": "参数不完整（ops）"}, 400
     if len(items) > 400:
         return {"error": "一次最多 400 项"}, 400
-    ops.ensure_daily_snapshot()
     con = db.connect(rw=True)
     try:
         res = ops.batch_update(con, items)
@@ -136,7 +134,6 @@ def move(m, body, q):
     index = (body or {}).get("index", 0)
     if table not in ("shots", "beats", "scenes") or not isinstance(rid, int):
         return {"error": "参数不完整（table/id/index）"}, 400
-    ops.ensure_daily_snapshot()
     con = db.connect(rw=True)
     try:
         if table == "shots":
@@ -166,7 +163,6 @@ def renumber(m, body, q):
         sc = db.scene_by_no(con, f["id"], scene_no)
         if not sc:
             return {"error": "场景不存在：%s" % scene_no}, 404
-        ops.ensure_daily_snapshot()
         return {"ok": True, "changes": ops.renumber_scene(con, sc["id"])}, 200
     finally:
         con.close()
@@ -178,7 +174,6 @@ def duplicate(m, body, q):
     rid = (body or {}).get("id")
     if table not in ("shots", "beats", "scenes") or not isinstance(rid, int):
         return {"error": "参数不完整（table/id）"}, 400
-    ops.ensure_daily_snapshot()
     con = db.connect(rw=True)
     try:
         if table == "shots":
@@ -203,7 +198,6 @@ def delete_row(m, body, q):
         return {"error": "参数不完整（table + id/ids）"}, 400
     if len(ids) > 200:
         return {"error": "一次最多 200 行"}, 400
-    ops.ensure_daily_snapshot()
     con = db.connect(rw=True)
     try:
         if table == "shots":
@@ -223,7 +217,6 @@ def delete_row(m, body, q):
 def create(m, body, q):
     """M2-6 创建：空镜头（可指定插入位）/ 空节拍（末尾）/ 空场（末尾）。"""
     kind = (body or {}).get("kind")
-    ops.ensure_daily_snapshot()
     con = db.connect(rw=True)
     try:
         if kind == "shot":
@@ -251,7 +244,6 @@ def create(m, body, q):
 def restore(m, body, q):
     """M2-6 撤销专用还原：删行 / 删节拍 / 删场 的完整回插。"""
     kind = (body or {}).get("kind")
-    ops.ensure_daily_snapshot()
     con = db.connect(rw=True)
     try:
         if kind == "shots":
@@ -283,7 +275,6 @@ def lock(m, body, q):
     lock_flag = bool((body or {}).get("lock", True))
     if not isinstance(rid, int):
         return {"error": "参数不完整（id）"}, 400
-    ops.ensure_daily_snapshot()
     con = db.connect(rw=True)
     try:
         return {"ok": True, **ops.lock_scene(con, rid, lock_flag)}, 200
