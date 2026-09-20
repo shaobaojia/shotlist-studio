@@ -428,3 +428,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .block-chip.dragging { opacity: 0.45; }
 .block-chip { user-select: none; }
 .block-chip:focus { outline: none; }
+
+/* 热盒条：块↔块拖拽换位指示（前/后插半） */
+.block-chip.drop-before { box-shadow: inset 3px 0 0 0 var(--accent); }
+.block-chip.drop-after { box-shadow: inset -3px 0 0 0 var(--accent); }

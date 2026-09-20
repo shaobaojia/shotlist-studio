@@ -4,7 +4,7 @@
 import { api } from './api.js';
 import { el, toast } from './ui.js';
 import { openMenu } from './menu.js';
-import { recordUndo } from './edit.js';
+import { recordUndo, undo as globalUndo, peekUndo } from './edit.js';
 import { buildShelf, storeAsBlock, blocksData } from './blocks.js';
 import { openManager } from './blockman.js';
 
@@ -119,7 +119,7 @@ function activateBox(pb) {
   const hint = el('span', 'hotbox-hint', 'Ctrl+Enter 保存并下一镜 · Esc 收起');
   const saveBtn = el('button', 'tool-btn small', '存 → 下一镜');
   saveBtn.title = '保存并跳到下一镜的提示词（Ctrl+Enter）';
-  const copyBtn = el('button', 'tool-btn small', '拷上组 ▾');
+  const copyBtn = el('button', 'tool-btn small', '拷上组');
   copyBtn.title = '从上一条提示词组拷贝：人物/场景声明段 或 全文';
   const blockBtn = el('button', 'tool-btn small', '存为块');
   blockBtn.title = '把编辑面里选中的文字存进块库（先选中文字）';
@@ -162,6 +162,17 @@ function activateBox(pb) {
   });
   ta.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'z' || e.key === 'Z')) {
+      const st0 = hbState(ta);
+      if (!e.shiftKey && !st0.undo.length) {
+        // 编辑面栈空 → 让位给全局撤销（块移动 / 字段 / 整理镜号等），撤销后刷新视图
+        e.preventDefault();
+        const top0 = peekUndo();
+        globalUndo().then((ok) => {
+          // custom（块移动 / 组操作）的 undo 体内自带刷新；字段 / 整理镜号才需要刷视图
+          if (ok && top0 && top0.type !== 'custom') ctx.refresh();
+        });
+        return;
+      }
       e.preventDefault();
       if (e.shiftKey) hbRedo(ta); else hbUndo(ta);
       return;
@@ -193,7 +204,7 @@ function activateBox(pb) {
   saveBtn.addEventListener('mousedown', (e) => e.preventDefault());
   saveBtn.addEventListener('click', () => saveAndNext(pb));
   copyBtn.addEventListener('mousedown', (e) => e.preventDefault());
-  copyBtn.addEventListener('click', () => copyFromAbove(pb, copyBtn, ta, s, data));
+  copyBtn.addEventListener('click', () => copyPrevInto(pb, ta, s, data));
   blockBtn.addEventListener('mousedown', (e) => e.preventDefault());
   blockBtn.addEventListener('click', () => {
     const sel = ta.value.slice(ta.selectionStart || 0, ta.selectionEnd || 0).trim();
@@ -201,7 +212,7 @@ function activateBox(pb) {
     storeAsBlock(blockBtn, sel);
   });
 
-  // 编辑面内右键：独立菜单（选中文字 → 添加块 / 插入块 / 拷上组 / 复制剪切全选）
+  // 编辑面内右键：独立菜单（选中文字 → 添加块 / 拷上组全文 / 复制剪切全选）
   ta.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -210,9 +221,7 @@ function activateBox(pb) {
     const pt = { x: e.clientX, y: e.clientY };
     openMenu(pt, [
       { key: 'mk', label: '添加到提示词块…', disabled: !hasSel },
-      { key: 'ins', label: '插入提示词块…' },
       { sep: true },
-      { key: 'decl', label: '拷上组声明段（人物 / 场景）' },
       { key: 'all', label: '拷上组全文' },
       { sep: true },
       { key: 'copy', label: '复制', disabled: !hasSel },
@@ -222,10 +231,8 @@ function activateBox(pb) {
       if (k === 'mk') {
         if (!hasSel) { toast('先选中要添加的文字'); return; }
         storeAsBlock(pt, selText.trim());
-      } else if (k === 'ins') {
-        insertBlockMenu(pt, ta, s, data);
-      } else if (k === 'decl' || k === 'all') {
-        copyPrevInto(pb, ta, s, data, k);
+      } else if (k === 'all') {
+        copyPrevInto(pb, ta, s, data);
       } else if (k === 'copy') {
         ta.focus();
         const ok = document.execCommand('copy');
@@ -488,7 +495,7 @@ export async function detachShotsByIds(ids) {
   if (ok) toast('已独立成组');
 }
 
-// ── 拷上组：从「上一条提示词组」拷声明段 / 全文 ──
+// ── 拷上组：整组拷「上一条提示词组」全文（提示词单一概念，不拆声明段） ──
 function prevGroupOf(s, groups, data) {
   const list = (data.prompt_groups || []).slice()
     .sort((a, b) => (a.position || 0) - (b.position || 0) || a.id - b.id);
@@ -510,63 +517,12 @@ function prevGroupOf(s, groups, data) {
   return prev;
 }
 
-// 声明段 = 正文里「第一个镜头标题/风格块」之前的部分
-function declOf(text) {
-  const out = [];
-  for (const line of String(text || '').split('\n')) {
-    const t = line.trim();
-    if (/^镜头[一二三四五六七八九十\d]/.test(t) || t.startsWith('风格块')) break;
-    out.push(line);
-  }
-  return out.join('\n').replace(/\s+$/, '');
-}
-
-function copyFromAbove(pb, anchor, ta, s, data) {
+// 拷上组全文（脚部按钮 / 右键；整段插入到光标处，Ctrl+Z 可撤）
+function copyPrevInto(pb, ta, s, data) {
   const prev = prevGroupOf(s, pb._ctx.groups, data);
   if (!prev || !String(prev.text || '').trim()) { toast('上一组还没有提示词可拷'); return; }
-  const items = [
-    { key: 'decl', label: '拷「人物 / 场景」声明段' },
-    { key: 'all', label: '拷上组全文' },
-  ];
-  openMenu(anchor, items, (k) => copyPrevInto(pb, ta, s, data, k));
-}
-
-// 拷上组（右键直选版）
-function copyPrevInto(pb, ta, s, data, which) {
-  const prev = prevGroupOf(s, pb._ctx.groups, data);
-  if (!prev || !String(prev.text || '').trim()) { toast('上一组还没有提示词可拷'); return; }
-  let text = which === 'decl' ? declOf(prev.text) : String(prev.text);
-  text = substitute(text, s, data);
-  if (!String(text).trim()) { toast('上组没有声明段可拷'); return; }
-  insertInto(ta, text);
-  toast(which === 'decl' ? '已拷入上组声明段（Ctrl+Z 可撤）' : '已拷入上组全文（Ctrl+Z 可撤）');
-}
-
-// 右键「插入提示词块…」：分类 → 块 两级菜单，插入到光标处（插入即固化）
-function insertBlockMenu(pt, ta, s, data) {
-  const d = blocksData();
-  if (!d || !d.blocks.length) { toast('块库为空——去「管理块库」加块，或选中文字「添加到提示词块」'); return; }
-  const cats = d.categories.slice().sort((a, b) => (a.position || 0) - (b.position || 0) || a.id - b.id);
-  const items = cats.map((c) => ({ key: String(c.id), label: c.name }));
-  if (d.blocks.some((b) => b.category_id == null)) items.push({ sep: true }, { key: 'none', label: '（未分类）' });
-  openMenu(pt, items, (k) => {
-    const cid = k === 'none' ? null : Number(k);
-    const list = d.blocks.filter((b) => b.category_id === cid)
-      .sort((a, b) => (a.position || 0) - (b.position || 0) || a.id - b.id);
-    if (!list.length) { toast('这个分类还没有块'); return; }
-    const bl = list.map((b) => ({ key: String(b.id), label: (b.pinned ? '★ ' : '') + shortLabel(b.text, 30) }));
-    openMenu(pt, bl, (k2) => {
-      const b = list.find((x) => String(x.id) === k2);
-      if (!b) return;
-      insertInto(ta, substitute(String(b.text), s, data));
-      toast('已插入块（Ctrl+Z 可撤）');
-    });
-  });
-}
-
-function shortLabel(t, n) {
-  const v = String(t == null ? '' : t).replace(/\s+/g, ' ').trim();
-  return v.length > n ? v.slice(0, n) + '…' : (v || '（空）');
+  insertInto(ta, substitute(String(prev.text), s, data));
+  toast('已拷入上组全文（Ctrl+Z 可撤）');
 }
 
 // ── 编辑面撤销栈（插入块 / 剪切 / 打字片段都进栈；Ctrl+Z 撤 · Ctrl+Shift+Z / Ctrl+Y 重做） ──

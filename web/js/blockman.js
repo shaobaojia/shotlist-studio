@@ -3,7 +3,7 @@
 import { el, toast } from './ui.js';
 import { openMenu } from './menu.js';
 import { recordUndo } from './edit.js';
-import { ensureBlocks, blocksData, blockOp, onBlocksChange, catName } from './blocks.js';
+import { ensureBlocks, blocksData, blockOp, onBlocksChange, moveBlockTo, siblingList } from './blocks.js';
 
 let panel = null;
 let bodyEl = null;
@@ -406,36 +406,10 @@ function startDraftBlock(sec, cat, afterId) {
   ta.addEventListener('blur', () => commit(true));
 }
 
-// ── 块拖动（M3.5）：换类 + 行间定位；撤销记录 ──
+// ── 块拖动（M3.5）：换类 + 行间定位；moveBlockTo / siblingList 收敛在 blocks.js（热盒条共用） ──
 function clearDropMarks() {
   document.querySelectorAll('#block-manager .drop-above, #block-manager .drop-below, #block-manager .drop-end')
     .forEach((x) => x.classList.remove('drop-above', 'drop-below', 'drop-end'));
-}
-
-function siblingList(catId) {
-  const d = blocksData() || { blocks: [] };
-  const list = d.blocks.filter((b) => (catId == null ? b.category_id == null : b.category_id === catId));
-  list.sort((a, b) => (a.position || 0) - (b.position || 0) || a.id - b.id);
-  return list;
-}
-
-async function moveBlockTo(target, catId, idx) {
-  const d = blocksData() || { blocks: [] };
-  const b = d.blocks.find((x) => x.id === target.id);
-  if (!b) return;
-  const oldCid = b.category_id;
-  const oldPos = b.position || 0;
-  if (oldCid === catId && oldPos === idx) return;
-  try {
-    await blockOp({ action: 'update', id: b.id, category_id: catId, position: idx });
-    toast('已移动到「' + (catId == null ? '未分类' : catName(catId)) + '」');
-    recordUndo({
-      type: 'custom', label: '块移动',
-      undo: async () => { await blockOp({ action: 'update', id: b.id, category_id: oldCid, position: oldPos }); },
-    });
-  } catch (err) {
-    toast('移动失败：' + err.message, 'err');
-  }
 }
 
 async function pinToggle(b) {

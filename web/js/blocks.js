@@ -7,6 +7,7 @@ import { recordUndo } from './edit.js';
 
 let cache = null;              // { categories:[], blocks:[] }
 const listeners = [];
+let shelfDragId = null;        // 热盒条拖拽中的块 id（块↔块换位）
 
 export async function ensureBlocks(force) {
   if (cache && !force) return cache;
@@ -21,6 +22,33 @@ export function catName(catId) {
   if (catId == null) return '未分类';
   const c = (cache ? cache.categories : []).find((x) => x.id === catId);
   return c ? c.name : '未分类';
+}
+
+// ── 块移动（管理器 / 热盒条共用）：换类 + 定位 → 后端 position 支持 ──
+export function siblingList(catId) {
+  const d = blocksData() || { blocks: [] };
+  const list = d.blocks.filter((b) => (catId == null ? b.category_id == null : b.category_id === catId));
+  list.sort((a, b) => (a.position || 0) - (b.position || 0) || a.id - b.id);
+  return list;
+}
+
+export async function moveBlockTo(target, catId, idx) {
+  const d = blocksData() || { blocks: [] };
+  const b = d.blocks.find((x) => x.id === target.id);
+  if (!b) return;
+  const oldCid = b.category_id;
+  const oldPos = b.position || 0;
+  if (oldCid === catId && oldPos === idx) return;
+  try {
+    await blockOp({ action: 'update', id: b.id, category_id: catId, position: idx });
+    toast('已移到「' + (catId == null ? '未分类' : catName(catId)) + '」（Ctrl+Z 可撤）');
+    recordUndo({
+      type: 'custom', label: '块移动',
+      undo: async () => { await blockOp({ action: 'update', id: b.id, category_id: oldCid, position: oldPos }); },
+    });
+  } catch (err) {
+    toast('移动失败：' + err.message, 'err');
+  }
 }
 
 // 数据变化订阅；返回退订函数
@@ -119,17 +147,7 @@ export function buildShelf(host, opts) {
           if (!blk) return;
           const cid = key === 'none' ? null : key;
           if (blk.category_id === cid) return;
-          const oldCid = blk.category_id;
-          const oldPos = blk.position || 0;
-          blockOp({ action: 'update', id: blk.id, category_id: cid })
-            .then(() => {
-              toast('已移到「' + (cid == null ? '未分类' : catName(cid)) + '」');
-              recordUndo({
-                type: 'custom', label: '块换分类',
-                undo: async () => { await blockOp({ action: 'update', id: blk.id, category_id: oldCid, position: oldPos }); },
-              });
-            })
-            .catch((err) => toast('移动失败：' + err.message, 'err'));
+          moveBlockTo(blk, cid, siblingList(cid).filter((x) => x.id !== blk.id).length);   // 落到分类末尾
         });
       }
       return c;
@@ -170,7 +188,7 @@ export function buildShelf(host, opts) {
     c.appendChild(el('span', 'bc-label', chipLabel(b.text)));
     c.title = catName(b.category_id) + '\n' + String(b.text).slice(0, 240)
       + (String(b.text).length > 240 ? '…' : '')
-      + '\n\n点击插入 · Shift+点击 攒套件 · 右键更多 · 拖到上方分类芯片可换类';
+      + '\n\n点击插入 · Shift+点击 攒套件 · 右键更多 · 拖到别的块上换位 · 拖到上方分类芯片换类';
     // 拖拽源：不用 mousedown preventDefault（它会掐断原生拖拽）；tabindex 让按下时焦点落在 chip 自己身上，
     // 拼装台「失焦且新焦点在 .hotbox 内 → 不收起」的守卫因此天然放行（光标保护由拼装台守卫兜底）
     c.draggable = true;
@@ -180,11 +198,42 @@ export function buildShelf(host, opts) {
       ev.dataTransfer.setData('text/plain', 'blk:' + b.id);
       ev.dataTransfer.effectAllowed = 'move';
       c.classList.add('dragging');
+      shelfDragId = b.id;
     });
     c.addEventListener('dragend', () => {
       c.classList.remove('dragging');
+      shelfDragId = null;
+      c.classList.remove('drop-before', 'drop-after');
       document.querySelectorAll('.sc.drop-hover').forEach((x) => x.classList.remove('drop-hover'));
+      document.querySelectorAll('.block-chip.drop-before, .block-chip.drop-after')
+        .forEach((x) => x.classList.remove('drop-before', 'drop-after'));
       backToEditor();                       // 拖完把焦点还给编辑面（Esc 随手可用）
+    });
+    // 块↔块：拖到另一个块上 → 插到它前/后（同分类=换位；跨分类=连类一起搬）
+    c.addEventListener('dragover', (ev) => {
+      if (shelfDragId == null || shelfDragId === b.id) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'move';
+      const r = c.getBoundingClientRect();
+      const before = ev.clientX < r.left + r.width / 2;
+      c.classList.toggle('drop-before', before);
+      c.classList.toggle('drop-after', !before);
+    });
+    c.addEventListener('dragleave', () => c.classList.remove('drop-before', 'drop-after'));
+    c.addEventListener('drop', (ev) => {
+      if (shelfDragId == null || shelfDragId === b.id) return;
+      ev.preventDefault();
+      const r = c.getBoundingClientRect();
+      const before = ev.clientX < r.left + r.width / 2;
+      c.classList.remove('drop-before', 'drop-after');
+      const src = findBlock(shelfDragId);
+      if (!src) return;
+      const cid = b.category_id;
+      const list = siblingList(cid).filter((x) => x.id !== src.id);
+      let idx = list.findIndex((x) => x.id === b.id);
+      if (idx === -1) idx = list.length;
+      else if (!before) idx += 1;
+      moveBlockTo(src, cid, idx);
     });
     c.addEventListener('click', (ev) => {
       if (ev.shiftKey) {

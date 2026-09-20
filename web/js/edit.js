@@ -9,6 +9,10 @@ import { openMenu, closeMenu, menuOpen, menuEl } from './menu.js';
 const undoStack = [];
 const UNDO_MAX = 100;
 
+export function peekUndo() {
+  return undoStack.length ? undoStack[undoStack.length - 1] : null;
+}
+
 export function recordUndo(op) {
   undoStack.push(op);
   if (undoStack.length > UNDO_MAX) undoStack.shift();
