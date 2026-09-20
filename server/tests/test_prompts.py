@@ -2,38 +2,17 @@
 """core/prompts.py 无头回归（stdlib unittest，直跑：python3 server/tests/test_prompts.py -v）。"""
 import copy
 import json
-import sqlite3
 import sys
+import time
 import unittest
 from pathlib import Path
 
 SERVER = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVER))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from core import ops, prompts  # noqa: E402
-
-SCHEMA = (SERVER / "schema.sql").read_text(encoding="utf-8")
-
-
-def make_db():
-    """1 场：镜 01–07（位 1–7）；组 g1=01/02、g2=03/04、g3=05；06/07 无组。"""
-    con = sqlite3.connect(":memory:")
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA foreign_keys=ON")
-    con.executescript(SCHEMA)
-    con.execute("INSERT INTO films (title) VALUES ('t')")
-    con.execute("INSERT INTO scenes (film_id, scene_no, title) VALUES (1, 's010', '第一场')")
-    con.execute("INSERT INTO beats (scene_id, beat_no, name) VALUES (1, '1', 'b1')")
-    for i, no in enumerate(["01", "02", "03", "04", "05", "06", "07"], start=1):
-        con.execute("INSERT INTO shots (scene_id, beat_id, position, shot_no) VALUES (1, 1, ?, ?)", (i, no))
-    con.execute("INSERT INTO prompt_groups (id, scene_id, position, text) VALUES (1, 1, 0, '组一文本')")
-    con.execute("INSERT INTO prompt_groups (id, scene_id, position, text) VALUES (2, 1, 1, '组二文本')")
-    con.execute("INSERT INTO prompt_groups (id, scene_id, position, text) VALUES (3, 1, 2, '组五文本')")
-    con.execute("UPDATE shots SET prompt_group_id=1 WHERE id IN (1,2)")
-    con.execute("UPDATE shots SET prompt_group_id=2 WHERE id IN (3,4)")
-    con.execute("UPDATE shots SET prompt_group_id=3 WHERE id=5")
-    con.commit()
-    return con
+from core import prompts  # noqa: E402
+from _fixture import make_prompts_db as make_db  # noqa: E402
 
 
 def gmap(con):
@@ -91,11 +70,10 @@ class TestMerge(unittest.TestCase):
         m = hist_of(con, 3, "merge")
         self.assertEqual(len(m), 1)
         self.assertEqual(m[0]["old_value"], "组五文本")  # 文本可找回
-        self.assertIn("已并入", m[0]["new_value"])
+        self.assertEqual(m[0]["new_value"], "已并入：镜05（原 镜05）")
         mi = hist_of(con, 2, "merge_in")
         self.assertEqual(len(mi), 1)
-        self.assertIn("＋", mi[0]["new_value"])
-        self.assertIn("05", mi[0]["new_value"])
+        self.assertEqual(mi[0]["new_value"], "＋镜05")
 
     def test_merge_with_ungrouped(self):
         con = make_db()
@@ -123,8 +101,9 @@ class TestMerge(unittest.TestCase):
         self.assertEqual(len(newg), 1)
         self.assertIsNone(newg[0]["text"])
         mi = [h for h in con.execute(
-            "SELECT * FROM history WHERE entity='prompt_groups' AND field='merge_in'")]
-        self.assertIn("新建组", mi[0]["new_value"])
+            "SELECT * FROM history WHERE entity='prompt_groups' AND field='merge_in' ORDER BY id")]
+        self.assertEqual(len(mi), 1)
+        self.assertEqual(mi[0]["new_value"], "新建组 · ＋镜06 / 07")
 
     def test_single_ungrouped_creates_group(self):
         con = make_db()
@@ -133,8 +112,9 @@ class TestMerge(unittest.TestCase):
         holder = [x for x in g.values() if x["member_shots"] == ["06"]]
         self.assertEqual(len(holder), 1)
         self.assertIsNone(holder[0]["text"])
-        h = list(con.execute("SELECT * FROM history WHERE field='create'"))
+        h = list(con.execute("SELECT * FROM history WHERE field='create' ORDER BY id"))
         self.assertEqual(len(h), 1)
+        self.assertEqual(h[0]["new_value"], "新建组 · 镜06")
         before = con.execute("SELECT COUNT(*) AS n FROM prompt_groups").fetchone()["n"]
         prompts.merge_shots(con, [1])  # 已组单镜：无操作
         self.assertEqual(con.execute("SELECT COUNT(*) AS n FROM prompt_groups").fetchone()["n"], before)
@@ -159,7 +139,7 @@ class TestDetach(unittest.TestCase):
         self.assertIsNone(con.execute("SELECT text FROM prompt_groups WHERE id=?", (shot4,)).fetchone()["text"])
         h = hist_of(con, 2, "detach")
         self.assertEqual(h[0]["old_value"], "镜03 / 04")
-        self.assertIn("拆出 04", h[0]["new_value"])
+        self.assertEqual(h[0]["new_value"], "现 镜03 · 拆出 04")
 
     def test_alone_and_ungrouped_noop(self):
         con = make_db()
@@ -178,8 +158,7 @@ class TestDetach(unittest.TestCase):
         self.assertEqual(len(holder), 1)
         self.assertEqual(holder[0]["member_shots"], ["03"])  # 文本随首镜
         h = hist_of(con, 2, "detach")
-        self.assertIn("全部拆出", h[0]["new_value"])
-        self.assertIn("文本随镜03保留", h[0]["new_value"])
+        self.assertEqual(h[0]["new_value"], "全部拆出 · 文本随镜03保留")
 
 
 class TestSplit(unittest.TestCase):
@@ -237,6 +216,26 @@ class TestRestore(unittest.TestCase):
         left6 = con.execute("SELECT prompt_group_id FROM shots WHERE id=6").fetchone()["prompt_group_id"]
         self.assertIsNone(left6)
 
+    def test_restore_id_fallback_when_occupied(self):
+        """原 id 被别场占用 → 换号回插，别场行不动（审计 F11：id 回退分支）。"""
+        con = make_db()
+        # 模拟「原组已删、id 被别场占用」：先腾出 3 号，再让 s020 占住
+        con.execute("UPDATE shots SET prompt_group_id=NULL WHERE id=5")
+        con.execute("DELETE FROM prompt_groups WHERE id=3")
+        con.execute("INSERT INTO scenes (film_id, scene_no, title) VALUES (1, 's020', '二')")
+        con.execute("INSERT INTO prompt_groups (id, scene_id, position, text) VALUES (3, 2, 0, '别场组')")
+        con.commit()
+        st = [{"id": 1, "text": "组一文本", "shot_ids": [1, 2]},
+              {"id": 2, "text": "组二文本", "shot_ids": [3, 4]},
+              {"id": 3, "text": "要回来的组", "shot_ids": [5]}]
+        prompts.restore_state(con, 1, st)
+        other = con.execute("SELECT scene_id, text FROM prompt_groups WHERE id=3").fetchone()
+        self.assertEqual((other["scene_id"], other["text"]), (2, "别场组"))  # 别场行不动
+        g = gmap(con)
+        self.assertEqual(sorted(g.keys()), [1, 2, 4])  # 换号回插（3 被占 → 自增到 4）
+        self.assertEqual(g[4]["text"], "要回来的组")
+        self.assertEqual(g[4]["member_shots"], ["05"])
+
     def test_errors(self):
         con = make_db()
         with self.assertRaises(ValueError):
@@ -264,11 +263,11 @@ class TestBlocks(unittest.TestCase):
         self.assertEqual(b1["pinned"], 1)
         self.assertEqual(b1["text"], "块A改")
         prompts.block_update(con, b3["id"], {"category_id": c2["id"]})
-        self.assertEqual(con.execute("SELECT category_id FROM blocks WHERE id=?", (b3["id"],)).fetchone()[0], c2["id"])
+        self.assertEqual(con.execute("SELECT category_id FROM blocks WHERE id=?", (b3["id"],)).fetchone()["category_id"], c2["id"])
         deleted = prompts.block_delete(con, b2["id"])
         self.assertEqual(deleted["text"], "块B")
         prompts.cat_delete(con, c1["id"])
-        self.assertIsNone(con.execute("SELECT category_id FROM blocks WHERE id=?", (b1["id"],)).fetchone()[0])
+        self.assertIsNone(con.execute("SELECT category_id FROM blocks WHERE id=?", (b1["id"],)).fetchone()["category_id"])
         prompts.cat_update(con, c2["id"], "风格改")
         self.assertEqual(con.execute(
             "SELECT name FROM block_categories WHERE id=?", (c2["id"],)).fetchone()["name"], "风格改")
@@ -302,7 +301,7 @@ class TestBlocks(unittest.TestCase):
         self.assertEqual(o4, ["a1", "b0", "a2", "a3"])
         # 换回未分类 + 位置无效参数
         prompts.block_update(con, b0["id"], {"category_id": None, "position": 0})
-        self.assertIsNone(con.execute("SELECT category_id FROM blocks WHERE id=?", (b0["id"],)).fetchone()[0])
+        self.assertIsNone(con.execute("SELECT category_id FROM blocks WHERE id=?", (b0["id"],)).fetchone()["category_id"])
         with self.assertRaises(ValueError):
             prompts.block_update(con, b0["id"], {"position": "x"})
 
@@ -330,6 +329,62 @@ class TestBlocks(unittest.TestCase):
             prompts.block_update(con, a1["id"], {"positon": 1})
         with self.assertRaises(ValueError):
             prompts.block_update(con, True, {"pinned": True})
+
+
+class TestInvariants(unittest.TestCase):
+    """位置不变量（审计 F11）：组 / 镜的 position 恒为 0..n-1 致密。"""
+
+    def check(self, con, tag, spos0):
+        pos = [r["position"] for r in con.execute(
+            "SELECT position FROM prompt_groups WHERE scene_id=1 ORDER BY position, id")]
+        self.assertEqual(pos, list(range(len(pos))), "组位置不密：" + tag)
+        spos = [r["position"] for r in con.execute(
+            "SELECT position FROM shots WHERE scene_id=1 ORDER BY position, id")]
+        self.assertEqual(spos, spos0, "提示词组操作不应动镜位置：" + tag)
+
+    def test_positions_stay_dense(self):
+        con = make_db()
+        spos0 = [r["position"] for r in con.execute(
+            "SELECT position FROM shots WHERE scene_id=1 ORDER BY position, id")]
+        self.check(con, "fixture", spos0)
+        prompts.merge_shots(con, [3, 4, 5])
+        self.check(con, "merge", spos0)
+        snap = json.loads(json.dumps(snap_of(con)))
+        prompts.detach_shots(con, [3])
+        self.check(con, "detach", spos0)
+        prompts.split_group(con, 1)
+        self.check(con, "split", spos0)
+        prompts.restore_state(con, 1, snap)
+        self.check(con, "restore", spos0)
+
+
+class TestScaleSmoke(unittest.TestCase):
+    """规模冒烟（审计 §三-3）：查询预算与耗时上限——防「预取」修复被回归。"""
+
+    def test_merge_query_budget(self):
+        con = make_db()
+        for gid in range(4, 34):  # 30 组 × 2 镜（手写 SQL 搭规模）
+            con.execute("INSERT INTO prompt_groups (id, scene_id, position, text) VALUES (?, 1, ?, ?)",
+                        (gid, gid - 1, "规模组%d" % gid))
+        n = 0
+        for gid in range(4, 34):
+            for _ in range(2):
+                n += 1
+                con.execute("INSERT INTO shots (scene_id, beat_id, position, shot_no, prompt_group_id)"
+                            " VALUES (1, 1, ?, ?, ?)", (7 + n, "S%02d" % n, gid))
+        con.commit()
+        ids = [r["id"] for r in con.execute("SELECT id FROM shots ORDER BY id")]
+        stmts = []
+        con.set_trace_callback(stmts.append)
+        t0 = time.perf_counter()
+        try:
+            prompts.merge_shots(con, ids)
+        finally:
+            con.set_trace_callback(None)
+        dt = time.perf_counter() - t0
+        selects = [s for s in stmts if s.strip().upper().startswith("SELECT")]
+        self.assertLessEqual(len(selects), 8, "组查询应预取：SELECT 次数 %d" % len(selects))
+        self.assertLess(dt, 1.0, "merge %d 镜耗时 %.3fs" % (len(ids), dt))
 
 
 if __name__ == "__main__":

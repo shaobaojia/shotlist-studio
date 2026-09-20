@@ -1,31 +1,15 @@
 #!/usr/bin/env python3
 """core/ops.py 无头回归（stdlib unittest，直跑：python3 server/tests/test_ops.py -v）。"""
-import sqlite3
 import sys
 import unittest
 from pathlib import Path
 
 SERVER = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVER))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from core import fields, ops  # noqa: E402
-
-SCHEMA = (SERVER / "schema.sql").read_text(encoding="utf-8")
-
-
-def make_db():
-    con = sqlite3.connect(":memory:")
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA foreign_keys=ON")  # 与生产 rw 连接一致（删场级联依赖它）
-    con.executescript(SCHEMA)
-    con.execute("INSERT INTO films (title) VALUES ('t')")
-    con.execute("INSERT INTO scenes (film_id, scene_no, title, value) VALUES (1, 's010', '第一场', '控制')")
-    con.execute("INSERT INTO beats (scene_id, beat_no, name, kind) VALUES (1, '1', '被领导打压', '⚪ 填充')")
-    for i, no in enumerate(["03", "01", "17A"], start=1):
-        con.execute("INSERT INTO shots (scene_id, beat_id, position, shot_no, blocking) VALUES (1, 1, ?, ?, ?)",
-                    (i, no, "动作%d" % i))
-    con.commit()
-    return con
+from _fixture import make_ops_db as make_db, make_ops_db0 as make_db0  # noqa: E402
 
 
 class TestWriteKeys(unittest.TestCase):
@@ -245,16 +229,6 @@ class TestDuplicateDelete(unittest.TestCase):
 
 # ══════════ M2-6 结构操作（三层增删插复移）══════════
 
-def make_db0():
-    """夹具 position 规整为 0 基（与迁移后真实数据一致；结构操作 index 语义 = 0 基场序）。"""
-    con = make_db()
-    ids = [r["id"] for r in con.execute("SELECT id FROM shots WHERE scene_id=1 ORDER BY position")]
-    for i, sid in enumerate(ids):
-        con.execute("UPDATE shots SET position=? WHERE id=?", (i, sid))
-    con.commit()
-    return con
-
-
 class TestBlankShot(unittest.TestCase):
     def test_insert_mid_suffix(self):
         con = make_db0()
@@ -307,6 +281,20 @@ class TestDeleteRestoreShots(unittest.TestCase):
         nos = [r["shot_no"] for r in con.execute("SELECT shot_no FROM shots WHERE scene_id=1 ORDER BY position")]
         self.assertEqual(nos, ["03", "01", "17A"])
         self.assertEqual(con.execute("SELECT blocking FROM shots WHERE id=3").fetchone()["blocking"], "动作3")
+
+    def test_delete_shot_keeps_empty_group(self):
+        """删镜不剪组：组成为空组（撤销载体，刻意保留），restore_shots 带组插回成功（审计 F11）。"""
+        con = make_db0()
+        con.execute("INSERT INTO prompt_groups (scene_id, position, text) VALUES (1, 0, '组文本')")
+        gid = con.execute("SELECT id FROM prompt_groups").fetchone()["id"]
+        con.execute("UPDATE shots SET prompt_group_id=? WHERE id=2", (gid,))
+        con.commit()
+        rows = ops.delete_shots(con, [2])
+        self.assertEqual(con.execute("SELECT COUNT(*) c FROM prompt_groups WHERE id=?", (gid,)).fetchone()["c"], 1)
+        back = ops.restore_shots(con, [dict(r) for r in rows])
+        self.assertEqual(back[0]["prompt_group_id"], gid)
+        self.assertEqual(
+            con.execute("SELECT prompt_group_id FROM shots WHERE id=2").fetchone()["prompt_group_id"], gid)
 
     def test_delete_missing_raises(self):
         con = make_db0()
