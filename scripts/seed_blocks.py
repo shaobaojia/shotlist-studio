@@ -2,9 +2,9 @@
 """M3 种子块库：从 s010 现有提示词 + 老库 M4 模板提炼的积木块。
 
 用法：
-  python3 scripts/seed_blocks.py            # 块库为空时载入种子（已有块则跳过；幂等）
-  python3 scripts/seed_blocks.py --reset    # 清空块库并重载种子
-  python3 scripts/seed_blocks.py --md OUT   # 生成「种子块库清单.md」到 OUT（过目用，不写库）
+  python3 scripts/seed_blocks.py            # 幂等载入：缺什么补什么（按正文查重，半载可续）
+  python3 scripts/seed_blocks.py --reset    # 清空块库并重载种子（连接时自动留当日快照）
+  python3 scripts/seed_blocks.py --md OUT   # 生成清单 Markdown 到 OUT（不写库；仓库根 种子块库.md 即此产物）
 
 块 = 一段可直接插入提示词的积木文字（插入即固化）；{占位符} 在插入时自动代入当前镜的值。
 块名仅用于本脚本与清单说明；块库里以正文识别（热盒 chip 显示正文前 18 字）。
@@ -95,26 +95,36 @@ SEED = [
 ]
 
 
+SEED_VERSION = "2026-09-19.1"  # 种子批号（写入 settings.seed_blocks_version）
+
+
 def load(reset=False):
-    con = db.connect(rw=True)
+    """内容级幂等：按正文查重、缺什么补什么（半载可续）；全程一个事务、末尾一次 commit。"""
+    con = db.connect(rw=True)  # 写边界自带每日快照（core/db.connect 下沉）
     try:
-        n = con.execute("SELECT COUNT(*) AS n FROM blocks").fetchone()["n"]
-        if n and not reset:
-            print("块库已有 %d 块 —— 跳过（要重载：--reset）" % n)
-            return
-        if reset and n:
+        if reset:
             con.execute("DELETE FROM blocks")
             con.execute("DELETE FROM block_categories")
-            con.commit()
-            print("已清空块库（%d 块）" % n)
+        have = {str(r["text"]).strip() for r in con.execute("SELECT text FROM blocks")}
+        cats = {r["name"]: r["id"] for r in con.execute("SELECT id, name FROM block_categories")}
         ncat = nblk = 0
         for cat, blocks in SEED:
-            c = prompts.cat_create(con, cat)
-            ncat += 1
+            cid = cats.get(cat)
+            if cid is None:
+                cid = prompts.cat_create(con, cat, commit=False)["id"]
+                ncat += 1
             for _name, text in blocks:
-                prompts.block_create(con, text, c["id"])
+                if str(text).strip() in have:
+                    continue
+                prompts.block_create(con, text, cid, commit=False)
                 nblk += 1
-        print("已载入种子：%d 分类 / %d 块" % (ncat, nblk))
+                have.add(str(text).strip())
+        con.execute(
+            "INSERT INTO settings (key, value) VALUES ('seed_blocks_version', ?)"
+            " ON CONFLICT(key) DO UPDATE SET value=excluded.value", (SEED_VERSION,))
+        con.commit()
+        total = con.execute("SELECT COUNT(*) AS n FROM blocks").fetchone()["n"]
+        print("种子载入：新增 %d 分类 / %d 块（库内共 %d 块）" % (ncat, nblk, total))
     finally:
         con.close()
 

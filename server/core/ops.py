@@ -350,7 +350,7 @@ def _table_cols(con, name):
     return {r[1] for r in con.execute("PRAGMA table_info(%s)" % name)}
 
 
-def _insert_restore(con, table, row, replace=None):
+def insert_restore(con, table, row, replace=None):
     """还原回插（撤销专用）：优先带原 id——撤销栈里更早的闭包都按原 id 记的，id 稳定才不悬空；
     id 已被占用时退回自增。replace 覆盖指定列（position / scene_id 等）。"""
     cols_all = _table_cols(con, table)
@@ -466,7 +466,7 @@ def restore_shots(con, rows_):
         cnt = con.execute("SELECT COUNT(*) c FROM shots WHERE scene_id=?", (scene_id,)).fetchone()["c"]
         idx = max(0, min(int(r.get("position") or 0), cnt))
         con.execute("UPDATE shots SET position=position+1 WHERE scene_id=? AND position>=?", (scene_id, idx))
-        new_id = _insert_restore(con, "shots", r, {"position": idx})
+        new_id = insert_restore(con, "shots", r, {"position": idx})
         record_history(con, scene_id, "shots", new_id, "create", None, r.get("shot_no"))
         out.append(dict(con.execute("SELECT * FROM shots WHERE id=?", (new_id,)).fetchone()))
     con.commit()
@@ -565,7 +565,7 @@ def restore_beat(con, beat_row, shot_ids):
     bs = _scene_beats(con, scene_id)
     idx = max(0, min(int(beat_row.get("position") or 0), len(bs)))
     con.execute("UPDATE beats SET position=position+1 WHERE scene_id=? AND position>=?", (scene_id, idx))
-    new_id = _insert_restore(con, "beats", beat_row, {"position": idx})
+    new_id = insert_restore(con, "beats", beat_row, {"position": idx})
     for sid in (shot_ids or []):
         if isinstance(sid, int):
             con.execute("UPDATE shots SET beat_id=? WHERE id=?", (new_id, sid))
@@ -684,17 +684,17 @@ def restore_scene_full(con, payload):
     scenes = list(con.execute("SELECT id, position FROM scenes WHERE film_id=? ORDER BY position, id", (film_id,)))
     idx = max(0, min(int(sc.get("position") or 0), len(scenes)))
     con.execute("UPDATE scenes SET position=position+1 WHERE film_id=? AND position>=?", (film_id, idx))
-    new_sid = _insert_restore(con, "scenes", sc, {"position": idx})
+    new_sid = insert_restore(con, "scenes", sc, {"position": idx})
     bmap = {}
     for b in payload.get("beats") or []:
-        bmap[b["id"]] = _insert_restore(con, "beats", b, {"scene_id": new_sid})
+        bmap[b["id"]] = insert_restore(con, "beats", b, {"scene_id": new_sid})
     gmap = {}
     for g in payload.get("groups") or []:
-        gmap[g["id"]] = _insert_restore(con, "prompt_groups", g, {"scene_id": new_sid})
+        gmap[g["id"]] = insert_restore(con, "prompt_groups", g, {"scene_id": new_sid})
     for shot in payload.get("shots") or []:
         bid = bmap.get(shot.get("beat_id")) if shot.get("beat_id") is not None else None
         gid = gmap.get(shot.get("prompt_group_id")) if shot.get("prompt_group_id") is not None else None
-        _insert_restore(con, "shots", shot,
+        insert_restore(con, "shots", shot,
                         {"scene_id": new_sid, "beat_id": bid, "prompt_group_id": gid})
     record_history(con, new_sid, "scenes", new_sid, "create", None, sc.get("scene_no"))
     con.commit()

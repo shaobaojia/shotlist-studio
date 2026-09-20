@@ -56,13 +56,7 @@ def scene(m, q):
             b["shots"] = by_beat.pop(b["id"], [])
         orphan = by_beat.pop(None, [])
 
-        gmap = {g["id"]: g for g in groups}
-        for g in groups:
-            g["member_shots"] = []
-        for s in shots:
-            gid = s.get("prompt_group_id")
-            if gid in gmap:
-                gmap[gid]["member_shots"].append(s["shot_no"])
+        db.attach_group_members(groups, shots)
 
         payload = {"scene": sc, "beats": beats, "prompt_groups": groups}
         if orphan:

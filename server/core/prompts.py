@@ -1,28 +1,33 @@
 """提示词域操作（M3）：提示词组（改文 / 并组 / 独立成组 / 拆组 / 状态还原）+ 块库（积木块与分类）。
 
-规则与 core/ops.py 一致：写路径带痕迹（history）、提交在函数内、逻辑为主可单测（tests/test_prompts.py）。
+规则与 core/ops.py 一致：写路径带痕迹（history，经 ops.record_history 单点）、提交在函数内、可单测。
+例外：块库写路径刻意不记 history（库不是场数据，恢复靠每日快照 / 前端撤销栈），提示词组写路径全记。
 分组模型：一个提示词组（prompt_groups）覆盖 N 个镜头；shots.prompt_group_id 指向组；正文存组上。
 并组口径：保留「首个来源组」（按镜头位置先后）的文本；其余来源组文本进痕迹可找回；组空了即删。
 独立成组：选中镜头各得一个新空组；原组全文拆出时，文本跟随首个被拆镜头（不丢字）。
+空组语义：无成员组是撤销链的载体（删镜撤销带组回插），刻意不剪、排到最后。
 """
-import sqlite3
+from core import db, fields, ops
+
+# ── 上限常量（单点定义；错误文案由它们拼出） ──
+MAX_SHOTS = 500          # 一次操作最多涉及镜头数
+MAX_GROUPS = 500         # 一次还原最多组数
+MAX_GROUP_TEXT = 50000   # 组正文长度上限
+MAX_BLOCK_TEXT = 20000   # 块正文长度上限
+MAX_CAT_NAME = 40        # 分类名长度上限
 
 
-def _hist(con, scene_id, entity, entity_id, field, old, new, source="manual"):
-    con.execute(
-        "INSERT INTO history (scene_id, entity, entity_id, field, old_value, new_value, source)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (scene_id, entity, entity_id, field, old, new, source))
+def is_id(x):
+    """行 id 判据：非 bool 的 int（JSON true 不得当 1 用）。"""
+    return isinstance(x, int) and not isinstance(x, bool)
 
 
-def _scene_groups(con, scene_id):
-    return [dict(r) for r in con.execute(
-        "SELECT * FROM prompt_groups WHERE scene_id=? ORDER BY position, id", (scene_id,))]
-
-
-def _scene_shots(con, scene_id):
-    return [dict(r) for r in con.execute(
-        "SELECT * FROM shots WHERE scene_id=? ORDER BY position, id", (scene_id,))]
+def _check_len(value, label, max_len):
+    """长度校验（返回字符串化的值；None→''）。超限报「{label}过长（上限 N 字）」。"""
+    t = "" if value is None else str(value)
+    if len(t) > max_len:
+        raise ValueError("%s过长（上限 %d 字）" % (label, max_len))
+    return t
 
 
 def _members(con, group_id):
@@ -31,7 +36,21 @@ def _members(con, group_id):
         (group_id,))]
 
 
-def _labels(members):
+def _members_many(con, group_ids):
+    """一次取多组成员（按组分桶；组内按 position, id）——替代逐组查询。"""
+    out = {gid: [] for gid in group_ids}
+    if not group_ids:
+        return out
+    q = ",".join(["?"] * len(group_ids))
+    for r in con.execute(
+            "SELECT prompt_group_id, id, shot_no, position FROM shots"
+            " WHERE prompt_group_id IN (%s) ORDER BY prompt_group_id, position, id" % q,
+            group_ids):
+        out.setdefault(r["prompt_group_id"], []).append(dict(r))
+    return out
+
+
+def _shot_refs(members):
     return "镜" + " / ".join(str(m["shot_no"]) for m in members)
 
 
@@ -42,38 +61,37 @@ def _new_group(con, scene_id):
 
 
 def prompt_state(con, scene_id):
-    """场次提示词分组完整状态（含成员镜号），供前端刷新 / 还原对账。"""
-    groups = _scene_groups(con, scene_id)
-    shots = _scene_shots(con, scene_id)
+    """场次提示词分组完整状态（含成员镜号；empty=无成员空组标记），供前端刷新 / 还原对账。"""
+    groups = db.prompt_groups(con, scene_id)
+    shots = db.shots(con, scene_id)
+    db.attach_group_members(groups, shots)
     for g in groups:
-        mem = [s for s in shots if s["prompt_group_id"] == g["id"]]
-        g["member_shots"] = [s["shot_no"] for s in mem]
-        g["member_ids"] = [s["id"] for s in mem]
+        g["empty"] = not g["member_ids"]
     return groups
 
 
 def _normalize_positions(con, scene_id):
-    """组顺序落定 = 首个成员镜的位置顺序；无成员组排到最后（随后会被清）。"""
-    shots = _scene_shots(con, scene_id)
-    groups = _scene_groups(con, scene_id)
+    """组顺序落定 = 首个成员镜的位置顺序；无成员组排到最后（空组是撤销链的载体，刻意不剪）。"""
+    shots = con.execute(
+        "SELECT id, position, prompt_group_id FROM shots WHERE scene_id=? ORDER BY position, id",
+        (scene_id,)).fetchall()
+    rows = con.execute("SELECT id FROM prompt_groups WHERE scene_id=?", (scene_id,)).fetchall()
     first = {}
     for s in shots:
         gid = s["prompt_group_id"]
         if gid is not None and gid not in first:
             first[gid] = (int(s["position"] or 0), s["id"])
-    ordered = sorted(groups, key=lambda g: first.get(g["id"], (10 ** 9, g["id"])))
-    for i, g in enumerate(ordered):
-        if g["position"] != i:
-            con.execute("UPDATE prompt_groups SET position=? WHERE id=?", (i, g["id"]))
+    ordered = sorted((r["id"] for r in rows), key=lambda gid: first.get(gid, (10 ** 9, gid)))
+    ops.reseq(con, "prompt_groups", ordered)
 
 
 def _load_shots(con, shot_ids):
     """读取镜头（校验：整数、存在、同一场次），按位置排序返回。"""
-    if not isinstance(shot_ids, list) or not shot_ids or not all(isinstance(x, int) for x in shot_ids):
+    if not isinstance(shot_ids, list) or not shot_ids or not all(is_id(x) for x in shot_ids):
         raise ValueError("参数不完整（shot_ids）")
     ids = list(dict.fromkeys(shot_ids))
-    if len(ids) > 500:
-        raise ValueError("一次最多 500 镜")
+    if len(ids) > MAX_SHOTS:
+        raise ValueError("一次最多 %d 镜" % MAX_SHOTS)
     q = ",".join("?" * len(ids))
     rows = [dict(r) for r in con.execute("SELECT * FROM shots WHERE id IN (%s)" % q, ids)]
     if len(rows) != len(ids):
@@ -89,16 +107,14 @@ def set_group_text(con, group_id, text):
     g = con.execute("SELECT * FROM prompt_groups WHERE id=?", (group_id,)).fetchone()
     if not g:
         raise ValueError("提示词组不存在：#%s" % group_id)
-    text = "" if text is None else str(text)
-    if len(text) > 50000:
-        raise ValueError("提示词过长（上限 50000 字）")
+    text = _check_len(text, "提示词", MAX_GROUP_TEXT)
     old = g["text"]
     if (old if old is not None else "") == text:
         return {"id": group_id, "text": old, "changed": False}
     con.execute(
         "UPDATE prompt_groups SET text=?, updated_at=datetime('now','localtime') WHERE id=?",
         (text, group_id))
-    _hist(con, g["scene_id"], "prompt_groups", group_id, "text", old, text)
+    ops.record_history(con, g["scene_id"], "prompt_groups", group_id, "text", old, text)
     con.commit()
     return {"id": group_id, "text": text, "changed": True}
 
@@ -115,7 +131,8 @@ def merge_shots(con, shot_ids):
         con.execute(
             "UPDATE shots SET prompt_group_id=?, updated_at=datetime('now','localtime') WHERE id=?",
             (nid, s["id"]))
-        _hist(con, s["scene_id"], "prompt_groups", nid, "create", None, "新建组 · 镜%s" % s["shot_no"])
+        ops.record_history(con, s["scene_id"], "prompt_groups", nid, "create", None,
+                           "新建组 · 镜%s" % s["shot_no"])
         _normalize_positions(con, s["scene_id"])
         con.commit()
         return prompt_state(con, s["scene_id"])
@@ -125,30 +142,37 @@ def merge_shots(con, shot_ids):
         gid = s["prompt_group_id"]
         if gid is not None and gid not in seen:
             seen.append(gid)
-    before = {gid: _members(con, gid) for gid in seen}
+    before = _members_many(con, seen)   # 一次取全部来源组成员（替代逐组查询）
     target = con.execute("SELECT * FROM prompt_groups WHERE id=?", (seen[0],)).fetchone() if seen else None
     made_new = target is None
     target_id = _new_group(con, scene_id) if made_new else target["id"]
     if not made_new and all(s["prompt_group_id"] == target_id for s in shots):
         return prompt_state(con, scene_id)  # 全员已在一组：无操作
     moved = []
+    moved_by = {}
     for s in shots:
-        if s["prompt_group_id"] == target_id:
+        src = s["prompt_group_id"]
+        if src == target_id:
             continue
         con.execute(
             "UPDATE shots SET prompt_group_id=?, updated_at=datetime('now','localtime') WHERE id=?",
             (target_id, s["id"]))
         moved.append(s)
-    for gid in seen:
-        if gid == target_id or _members(con, gid):
-            continue
-        g = con.execute("SELECT * FROM prompt_groups WHERE id=?", (gid,)).fetchone()
-        if g and (g["text"] or "").strip():
-            _hist(con, scene_id, "prompt_groups", gid, "merge",
-                  g["text"], "已并入：%s（原 %s）" % (_labels(moved), _labels(before[gid])))
-        con.execute("DELETE FROM prompt_groups WHERE id=?", (gid,))
-    _hist(con, scene_id, "prompt_groups", target_id, "merge_in", None,
-          ("新建组 · " if made_new else "") + "＋" + _labels(moved))
+        if src is not None:
+            moved_by[src] = moved_by.get(src, 0) + 1
+    empties = [gid for gid in seen
+               if gid != target_id and moved_by.get(gid, 0) >= len(before.get(gid, []))]
+    if empties:
+        q = ",".join(["?"] * len(empties))
+        texts = {r["id"]: r["text"] for r in con.execute(
+            "SELECT id, text FROM prompt_groups WHERE id IN (%s)" % q, empties)}
+        for gid in empties:
+            if (texts.get(gid) or "").strip():
+                ops.record_history(con, scene_id, "prompt_groups", gid, "merge", texts[gid],
+                                   "已并入：%s（原 %s）" % (_shot_refs(moved), _shot_refs(before[gid])))
+            con.execute("DELETE FROM prompt_groups WHERE id=?", (gid,))
+    ops.record_history(con, scene_id, "prompt_groups", target_id, "merge_in", None,
+                       ("新建组 · " if made_new else "") + "＋" + _shot_refs(moved))
     _normalize_positions(con, scene_id)
     con.commit()
     return prompt_state(con, scene_id)
@@ -159,7 +183,8 @@ def detach_shots(con, shot_ids):
     shots = _load_shots(con, shot_ids)
     scene_id = shots[0]["scene_id"]
     before = {}
-    made = []  # [(shot, 原组 id)]
+    made = []       # [(shot, 原组 id, 新组 id)]
+    moved_ids = {}  # 原组 id -> 本组被拆出的 shot id 集合
     for s in shots:
         gid = s["prompt_group_id"]
         if gid is None:
@@ -172,27 +197,27 @@ def detach_shots(con, shot_ids):
         con.execute(
             "UPDATE shots SET prompt_group_id=?, updated_at=datetime('now','localtime') WHERE id=?",
             (nid, s["id"]))
-        made.append((s, gid))
+        made.append((s, gid, nid))
+        moved_ids.setdefault(gid, set()).add(s["id"])
     if made:
         for gid, mem in before.items():
-            left = _members(con, gid)
-            if len(left) >= len(mem):
+            out_made = [x for x in made if x[1] == gid]
+            if not out_made:
                 continue
-            out = " / ".join(str(x[0]["shot_no"]) for x in made if x[1] == gid)
-            note = ("现 %s · 拆出 %s" % (_labels(left), out)) if left else "全部拆出"
+            left = [m for m in mem if m["id"] not in moved_ids[gid]]
+            out = " / ".join(str(x[0]["shot_no"]) for x in out_made)
+            note = ("现 %s · 拆出 %s" % (_shot_refs(left), out)) if left else "全部拆出"
             if not left:
+                heir, heir_new = out_made[0][0], out_made[0][2]
                 g = con.execute("SELECT * FROM prompt_groups WHERE id=?", (gid,)).fetchone()
-                heir = [x for x in made if x[1] == gid][0][0]
-                heir_new = con.execute(
-                    "SELECT prompt_group_id FROM shots WHERE id=?", (heir["id"],)).fetchone()
                 if g and (g["text"] or "").strip():
                     con.execute(
                         "UPDATE prompt_groups SET text=?, updated_at=datetime('now','localtime')"
-                        " WHERE id=?", (g["text"], heir_new["prompt_group_id"]))
+                        " WHERE id=?", (g["text"], heir_new))
                     note += " · 文本随镜%s保留" % heir["shot_no"]
                 if g:
                     con.execute("DELETE FROM prompt_groups WHERE id=?", (gid,))
-            _hist(con, scene_id, "prompt_groups", gid, "detach", _labels(mem), note)
+            ops.record_history(con, scene_id, "prompt_groups", gid, "detach", _shot_refs(mem), note)
         _normalize_positions(con, scene_id)
         con.commit()
     return prompt_state(con, scene_id)
@@ -211,9 +236,9 @@ def split_group(con, group_id):
         con.execute(
             "UPDATE shots SET prompt_group_id=?, updated_at=datetime('now','localtime') WHERE id=?",
             (nid, m["id"]))
-    _hist(con, g["scene_id"], "prompt_groups", group_id, "split",
-          _labels(members),
-          "%s（拆出 %s）" % (_labels(members[:1]), " / ".join(str(m["shot_no"]) for m in members[1:])))
+    ops.record_history(con, g["scene_id"], "prompt_groups", group_id, "split",
+          _shot_refs(members),
+          "%s（拆出 %s）" % (_shot_refs(members[:1]), " / ".join(str(m["shot_no"]) for m in members[1:])))
     _normalize_positions(con, g["scene_id"])
     con.commit()
     return prompt_state(con, g["scene_id"])
@@ -221,61 +246,71 @@ def split_group(con, group_id):
 
 def restore_state(con, scene_id, groups):
     """撤销/还原：把场次提示词分组整体还原到给定状态。
-    groups = [{id?, text, shot_ids:[...]}]（id 缺省=新建；未列出的既有组将删除）。"""
+    groups = [{id?, text, shot_ids:[...]}]（id 缺省=新建；未列出的既有组将删除）。
+    原 id 优先复用（撤销的「完整还原」；被占则退回自增，经 ops.insert_restore 单点语义）。"""
+    if not is_id(scene_id):
+        raise ValueError("参数不完整（scene_id）")
     if not con.execute("SELECT id FROM scenes WHERE id=?", (scene_id,)).fetchone():
         raise ValueError("场景不存在：#%s" % scene_id)
-    if not isinstance(groups, list) or len(groups) > 500:
+    if not isinstance(groups, list) or len(groups) > MAX_GROUPS:
         raise ValueError("参数不完整（groups）")
     all_ids = []
     for g in groups:
         if not isinstance(g, dict):
             raise ValueError("groups 项格式错误")
         ids = g.get("shot_ids") or []
-        if not isinstance(ids, list) or not all(isinstance(x, int) for x in ids):
+        if not isinstance(ids, list) or not all(is_id(x) for x in ids):
             raise ValueError("shot_ids 格式错误")
         all_ids.extend(ids)
+    all_ids = list(dict.fromkeys(all_ids))
     if all_ids:
-        q = ",".join("?" * len(all_ids))
+        q = ",".join(["?"] * len(all_ids))
         valid = {r["id"] for r in con.execute(
             "SELECT id FROM shots WHERE scene_id=? AND id IN (%s)" % q, [scene_id] + all_ids)}
         for x in all_ids:
             if x not in valid:
                 raise ValueError("镜头不在该场次：#%s" % x)
+    existing = {r["id"] for r in con.execute(
+        "SELECT id FROM prompt_groups WHERE scene_id=?", (scene_id,))}
     keep_ids = set()
+    resolved = []  # [(落定组 id, payload 组)]
     for i, g in enumerate(groups):
         gid = g.get("id")
-        row = None
-        if isinstance(gid, int):
-            row = con.execute(
-                "SELECT id FROM prompt_groups WHERE id=? AND scene_id=?", (gid, scene_id)).fetchone()
-        if row:
+        text = g.get("text")
+        if text is not None:
+            text = _check_len(text, "提示词", MAX_GROUP_TEXT)
+        if is_id(gid) and gid in existing:
             keep_ids.add(gid)
-            con.execute("UPDATE prompt_groups SET text=?, position=? WHERE id=?",
-                        (g.get("text"), i, gid))
+            con.execute(
+                "UPDATE prompt_groups SET text=?, position=?, updated_at=datetime('now','localtime')"
+                " WHERE id=?", (text, i, gid))
         else:
-            cur = None
-            if isinstance(gid, int):
-                try:  # 原 id 已被删：复用它（撤销的「完整还原」）
-                    cur = con.execute(
-                        "INSERT INTO prompt_groups (id, scene_id, position, text) VALUES (?,?,?,?)",
-                        (gid, scene_id, i, g.get("text")))
-                    keep_ids.add(gid)
-                except sqlite3.IntegrityError:
-                    cur = None
-            if cur is None:
-                cur = con.execute(
-                    "INSERT INTO prompt_groups (scene_id, position, text) VALUES (?,?,?)",
-                    (scene_id, i, g.get("text")))
-                g["id"] = cur.lastrowid
-                keep_ids.add(cur.lastrowid)
-    con.execute("UPDATE shots SET prompt_group_id=NULL WHERE scene_id=?", (scene_id,))
-    for g in groups:
+            row = {"scene_id": scene_id, "position": i, "text": text}
+            if is_id(gid):
+                row["id"] = gid
+            new_id = ops.insert_restore(con, "prompt_groups", row)
+            keep_ids.add(new_id)
+            gid = new_id
+        resolved.append((gid, g))
+    if all_ids:
+        q = ",".join(["?"] * len(all_ids))
+        con.execute(
+            "UPDATE shots SET prompt_group_id=NULL, updated_at=datetime('now','localtime')"
+            " WHERE scene_id=? AND id NOT IN (%s)" % q, [scene_id] + all_ids)
+    else:
+        con.execute(
+            "UPDATE shots SET prompt_group_id=NULL, updated_at=datetime('now','localtime')"
+            " WHERE scene_id=?", (scene_id,))
+    for gid, g in resolved:
         for sid in (g.get("shot_ids") or []):
-            con.execute("UPDATE shots SET prompt_group_id=? WHERE id=?", (g["id"], sid))
-    for g in _scene_groups(con, scene_id):
+            con.execute(
+                "UPDATE shots SET prompt_group_id=?, updated_at=datetime('now','localtime')"
+                " WHERE id=?", (gid, sid))
+    for g in db.prompt_groups(con, scene_id):
         if g["id"] not in keep_ids:
             con.execute("DELETE FROM prompt_groups WHERE id=?", (g["id"],))
-    _hist(con, scene_id, "prompt_groups", None, "restore", None, "分组状态还原（%d 组）" % len(groups))
+    ops.record_history(con, scene_id, "prompt_groups", None, "restore", None,
+                       "分组状态还原（%d 组）" % len(groups))
     con.commit()
     return prompt_state(con, scene_id)
 
@@ -303,115 +338,125 @@ def _check_text(text):
     t = ("" if text is None else str(text)).strip()
     if not t:
         raise ValueError("块内容不能为空")
-    if len(t) > 20000:
-        raise ValueError("块过长（上限 20000 字）")
-    return t
+    return _check_len(t, "块", MAX_BLOCK_TEXT)
 
 
 def _check_cat(con, category_id):
     if category_id is None:
         return
-    if not isinstance(category_id, int) or not con.execute(
-            "SELECT id FROM block_categories WHERE id=?", (category_id,)).fetchone():
+    if not is_id(category_id):
+        raise ValueError("分类参数错误：%r" % (category_id,))
+    if not con.execute("SELECT id FROM block_categories WHERE id=?", (category_id,)).fetchone():
         raise ValueError("分类不存在：#%s" % category_id)
 
 
-def block_create(con, text, category_id=None):
-    t = _check_text(text)
-    _check_cat(con, category_id)
-    sib = _cat_blocks(con, category_id)
-    pos = (sib[-1]["position"] + 1) if sib else 0
-    cur = con.execute(
-        "INSERT INTO blocks (category_id, text, position, pinned) VALUES (?,?,?,0)",
-        (category_id, t, pos))
-    con.commit()
-    return dict(con.execute("SELECT * FROM blocks WHERE id=?", (cur.lastrowid,)).fetchone())
+def _check_cat_name(name):
+    n = ("" if name is None else str(name)).strip()
+    if not n:
+        raise ValueError("分类名不能为空")
+    if len(n) > MAX_CAT_NAME:
+        raise ValueError("分类名过长（上限 %d 字）" % MAX_CAT_NAME)
+    return n
 
 
-def block_update(con, block_id, fields):
-    """改文本 / 换分类 / 置顶 / 定位（text、category_id、pinned、position；其余键忽略）。
-
-    category_id 或 position 给出时：把块放进目标分类的指定位置——
-    position 缺省＝末尾（兼容旧行为）；索引按「去掉自身后的顺序」夹取到 [0, len]。"""
+def _load_block(con, block_id):
+    """取块行（id 类型不对直接报参数错误；不存在报「块不存在」）。"""
+    if not is_id(block_id):
+        raise ValueError("块参数错误：%r" % (block_id,))
     b = con.execute("SELECT * FROM blocks WHERE id=?", (block_id,)).fetchone()
     if not b:
         raise ValueError("块不存在：#%s" % block_id)
-    fields = fields or {}
-    if "text" in fields:
-        con.execute("UPDATE blocks SET text=? WHERE id=?", (_check_text(fields["text"]), block_id))
-    if "pinned" in fields:
-        con.execute("UPDATE blocks SET pinned=? WHERE id=?", (1 if fields["pinned"] else 0, block_id))
-    if "category_id" in fields or "position" in fields:
-        cid = fields.get("category_id", b["category_id"])
+    return b
+
+
+def block_create(con, text, category_id=None, commit=True):
+    t = _check_text(text)
+    _check_cat(con, category_id)
+    if category_id is None:
+        row = con.execute("SELECT MAX(position) AS p FROM blocks WHERE category_id IS NULL").fetchone()
+    else:
+        row = con.execute("SELECT MAX(position) AS p FROM blocks WHERE category_id=?", (category_id,)).fetchone()
+    pos = (row["p"] + 1) if row and row["p"] is not None else 0
+    cur = con.execute(
+        "INSERT INTO blocks (category_id, text, position, pinned) VALUES (?,?,?,0)",
+        (category_id, t, pos))
+    if commit:
+        con.commit()
+    return dict(con.execute("SELECT * FROM blocks WHERE id=?", (cur.lastrowid,)).fetchone())
+
+
+def _place_block(con, b, cid, pos):
+    """把块放进 cid 分类的第 pos 位（None=末尾，越界夹取）；跨类时源分类同步致密。"""
+    tgt = [x["id"] for x in _cat_blocks(con, cid) if x["id"] != b["id"]]
+    idx = len(tgt) if pos is None else max(0, min(pos, len(tgt)))
+    tgt.insert(idx, b["id"])
+    con.execute("UPDATE blocks SET category_id=? WHERE id=?", (cid, b["id"]))
+    ops.reseq(con, "blocks", tgt)
+    if b["category_id"] != cid:
+        src = [x["id"] for x in _cat_blocks(con, b["category_id"]) if x["id"] != b["id"]]
+        ops.reseq(con, "blocks", src)
+
+
+def block_update(con, block_id, data):
+    """改文本 / 换分类 / 置顶 / 定位（仅接受 text、category_id、pinned、position，其余键拒绝）。
+
+    category_id 或 position 给出时：把块放进目标分类的指定位置——
+    position 缺省＝末尾（兼容旧行为）；索引按「去掉自身后的顺序」夹取到 [0, len]。"""
+    b = _load_block(con, block_id)
+    data = data or {}
+    unknown = [k for k in data if k not in fields.BLOCK_WRITE_KEYS]
+    if unknown:
+        raise ValueError("字段不可写：blocks.%s" % unknown[0])
+    if "text" in data:
+        con.execute("UPDATE blocks SET text=? WHERE id=?", (_check_text(data["text"]), block_id))
+    if "pinned" in data:
+        con.execute("UPDATE blocks SET pinned=? WHERE id=?", (1 if data["pinned"] else 0, block_id))
+    if "category_id" in data or "position" in data:
+        cid = data.get("category_id", b["category_id"])
         _check_cat(con, cid)
-        pos = fields.get("position", None)
+        pos = data.get("position", None)
+        if pos is not None and not is_id(pos):
+            raise ValueError("position 参数错误")
         if cid != b["category_id"] or pos is not None:
-            try:
-                pos = None if pos is None else int(pos)
-            except (TypeError, ValueError):
-                raise ValueError("position 参数错误")
-            tgt = [x for x in _cat_blocks(con, cid) if x["id"] != block_id]
-            idx = len(tgt) if pos is None else max(0, min(pos, len(tgt)))
-            tgt.insert(idx, {"id": block_id})
-            con.execute("UPDATE blocks SET category_id=? WHERE id=?", (cid, block_id))
-            for i, x in enumerate(tgt):
-                con.execute("UPDATE blocks SET position=? WHERE id=?", (i, x["id"]))
-            if b["category_id"] != cid:
-                src = [x for x in _cat_blocks(con, b["category_id"]) if x["id"] != block_id]
-                for i, x in enumerate(src):
-                    con.execute("UPDATE blocks SET position=? WHERE id=?", (i, x["id"]))
+            _place_block(con, b, cid, pos)
     con.commit()
     return dict(con.execute("SELECT * FROM blocks WHERE id=?", (block_id,)).fetchone())
 
 
 def block_delete(con, block_id):
-    b = con.execute("SELECT * FROM blocks WHERE id=?", (block_id,)).fetchone()
-    if not b:
-        raise ValueError("块不存在：#%s" % block_id)
+    b = _load_block(con, block_id)
     con.execute("DELETE FROM blocks WHERE id=?", (block_id,))
     con.commit()
     return dict(b)
 
 
 def block_move(con, block_id, direction):
-    """同分类内与相邻块换位（direction = -1 上移 / 1 下移）。"""
-    b = con.execute("SELECT * FROM blocks WHERE id=?", (block_id,)).fetchone()
-    if not b:
-        raise ValueError("块不存在：#%s" % block_id)
+    """同分类内与相邻块换位（direction = -1 上移 / 1 下移）；到头不抛错，返回 moved: False。"""
+    b = _load_block(con, block_id)
     if direction not in (-1, 1):
         raise ValueError("方向参数错误")
     sib = _cat_blocks(con, b["category_id"])
     idx = next(i for i, x in enumerate(sib) if x["id"] == block_id)
     j = idx + direction
     if j < 0 or j >= len(sib):
-        raise ValueError("已经到头了")
-    sib[idx], sib[j] = sib[j], sib[idx]
-    for i, x in enumerate(sib):
-        con.execute("UPDATE blocks SET position=? WHERE id=?", (i, x["id"]))
-    con.commit()
+        return {"moved": False, "id": block_id}
+    block_update(con, block_id, {"position": j})
+    return {"moved": True, "id": block_id, "index": j, "old_index": idx}
 
 
-def cat_create(con, name):
-    n = ("" if name is None else str(name)).strip()
-    if not n:
-        raise ValueError("分类名不能为空")
-    if len(n) > 40:
-        raise ValueError("分类名过长（上限 40 字）")
+def cat_create(con, name, commit=True):
+    n = _check_cat_name(name)
     row = con.execute("SELECT MAX(position) AS p FROM block_categories").fetchone()
     pos = (row["p"] + 1) if row and row["p"] is not None else 0
     cur = con.execute("INSERT INTO block_categories (name, position) VALUES (?,?)", (n, pos))
-    con.commit()
+    if commit:
+        con.commit()
     return dict(con.execute("SELECT * FROM block_categories WHERE id=?", (cur.lastrowid,)).fetchone())
 
 
 def cat_update(con, cat_id, name):
-    n = ("" if name is None else str(name)).strip()
-    if not n:
-        raise ValueError("分类名不能为空")
-    if len(n) > 40:
-        raise ValueError("分类名过长（上限 40 字）")
-    if not con.execute("SELECT id FROM block_categories WHERE id=?", (cat_id,)).fetchone():
-        raise ValueError("分类不存在：#%s" % cat_id)
+    n = _check_cat_name(name)
+    _check_cat(con, cat_id)
     con.execute("UPDATE block_categories SET name=? WHERE id=?", (n, cat_id))
     con.commit()
     return dict(con.execute("SELECT * FROM block_categories WHERE id=?", (cat_id,)).fetchone())
@@ -419,24 +464,23 @@ def cat_update(con, cat_id, name):
 
 def cat_delete(con, cat_id):
     """删分类：其下块落「未分类」（category_id=NULL），不连带删块。"""
-    if not con.execute("SELECT id FROM block_categories WHERE id=?", (cat_id,)).fetchone():
-        raise ValueError("分类不存在：#%s" % cat_id)
+    _check_cat(con, cat_id)
     con.execute("UPDATE blocks SET category_id=NULL WHERE category_id=?", (cat_id,))
     con.execute("DELETE FROM block_categories WHERE id=?", (cat_id,))
     con.commit()
 
 
 def cat_move(con, cat_id, direction):
+    """分类上下移；到头不抛错，返回 moved: False。"""
     if direction not in (-1, 1):
         raise ValueError("方向参数错误")
+    _check_cat(con, cat_id)
     cats = [dict(r) for r in con.execute("SELECT * FROM block_categories ORDER BY position, id")]
-    idx = next((i for i, x in enumerate(cats) if x["id"] == cat_id), None)
-    if idx is None:
-        raise ValueError("分类不存在：#%s" % cat_id)
+    idx = next(i for i, x in enumerate(cats) if x["id"] == cat_id)
     j = idx + direction
     if j < 0 or j >= len(cats):
-        raise ValueError("已经到头了")
+        return {"moved": False, "id": cat_id}
     cats[idx], cats[j] = cats[j], cats[idx]
-    for i, x in enumerate(cats):
-        con.execute("UPDATE block_categories SET position=? WHERE id=?", (i, x["id"]))
+    ops.reseq(con, "block_categories", [x["id"] for x in cats])
     con.commit()
+    return {"moved": True, "id": cat_id, "index": j, "old_index": idx}

@@ -317,8 +317,19 @@ class TestBlocks(unittest.TestCase):
             prompts.block_create(con, "  ")
         with self.assertRaises(ValueError):
             prompts.block_create(con, "x", 999)
+        res = prompts.cat_move(con, c1["id"], 1)  # 已到底：moved=False（不再是异常）
+        self.assertFalse(res["moved"])
+
+    def test_audit_fixes(self):
+        """审计批2契约：块移动到头 moved=False；未知字段拒绝；bool id 拒绝。"""
+        con = make_db()
+        c1 = prompts.cat_create(con, "A")
+        a1 = prompts.block_create(con, "a1", c1["id"])
+        self.assertFalse(prompts.block_move(con, a1["id"], -1)["moved"])
         with self.assertRaises(ValueError):
-            prompts.cat_move(con, c1["id"], 1)
+            prompts.block_update(con, a1["id"], {"positon": 1})
+        with self.assertRaises(ValueError):
+            prompts.block_update(con, True, {"pinned": True})
 
 
 if __name__ == "__main__":

@@ -54,6 +54,7 @@
 - 2026-09-20 **simplify-code 审计 M3（报告未入 git）**：8 审查员（复用/质量/效率/高度 × 前端批/后端批）产出仓库根 AUDIT-M3.md：15 真 Bug + ★12 先修 + ☆38 值得做 + ◆9 立项 + 小项；关键项经内存库一手复核（含 9 项实测输出）。
 
 - 2026-09-20 **审计修复批1·后端地基**（用户点名修 一/二/三/五）：①core.ops.record_history 单点入口（替换 20 处内联 history INSERT，列序只定义一次）；②core.ops.reseq 位置原语（替换 8 处「读序→逐行写 position」循环；touch 参数对齐 beats updated_at 口径）；③每日快照升级＝SQLite backup 接口 `.tmp`→`os.replace` 原子落盘（不再裸拷 live 文件，中断不留半截正式备份）+ 保留 30 天自动清理 + **下沉到 db.connect(rw=True) 写边界**（删 handlers×9 + api/prompts×2 调用点；脚本等非 HTTP 写者从此自动覆盖）；④db.py shots/prompt_groups/beats 排序补 `, id` 兜底。单测 39+21 全过；快照实测（原子/幂等/保留/零残留）通过。
+- 2026-09-20 **审计修复批2·后端域**：①块写白名单化＝core/fields.BLOCK_WRITE_KEYS 单点，prompts 拒绝未知键（400），api 显式投影（不再透传整包 body；空投影 400）；②守卫与文案拆分：分类参数错误 vs 分类不存在，分类名/镜数上限/块长/组文全走常量单点；③merge 预取（一条 IN 分组查询）＋内存判空组；detach 差集算 left（去掉三处自写自读）；restore 预取既有组＋只动未涉及镜＋all_ids 去重＋走 ops.insert_restore（重命名为公开；不再吞 IntegrityError、不再改写调用方入参）＋更新 updated_at；④分桶共享 db.attach_group_members（handlers.scene 与 prompt_state 共用；prompt_state 补 empty 标记）；⑤block_move 委托 block_update、cat_move 收口 reseq——到头统一 moved:False（不再抛「已经到头了」）；position 严格整型；块操作全走 _load_block/_place_block；⑥api 守卫前置（坏请求不进写连接、不拷库）；⑦seed 内容级幂等（按正文查重，半载可续）＋单事务＋settings.seed_blocks_version＋--reset 前自动快照；⑧测试同步（cat_move 边界改判＋审计契约小测）。探针：内存库 15 项契约全过、种子副本幂等/重置 25 块、场景接口冒烟 200；服务已重启上线。
 
 ## 正在做
 
@@ -61,7 +62,7 @@
 - **M3 提示词系统 ✅ 首轮完成**（M3-1 服务端域 / M3-2 前端拼装台 / M3-3 种子+自测+验收演示；HEAD 见 git log）。
 - 待用户（早间复核）：种子块库过目（7 类 25 块，可删改）。
 - 工具排 B 案 ✅ 已落地（见「刚做完」末条）。
-- **审计修复四批**（用户点名 一/二/三/五，跳过 ◆立项 与 刻意边界）：批1 后端地基 ✅ → 批2 后端域（prompts/api/seed）→ 批3 前端（hotbox/blocks/blockman）→ 批4 测试收尾。
+- **审计修复四批**（用户点名 一/二/三/五，跳过 ◆立项 与 刻意边界）：批1 后端地基 ✅ → 批2 后端域 ✅ → 批3 前端（hotbox/blocks/blockman）→ 批4 测试收尾。
 
 ## 下一步
 

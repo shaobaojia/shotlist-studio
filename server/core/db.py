@@ -59,3 +59,16 @@ def shots(con, scene_id):
 def prompt_groups(con, scene_id):
     return _dicts(con.execute(
         "SELECT * FROM prompt_groups WHERE scene_id=? ORDER BY position, id", (scene_id,)))
+
+
+def attach_group_members(groups, shots):
+    """把镜头按 prompt_group_id 挂到组上（单趟分桶）：补 member_shots / member_ids。
+    传入的 groups 与 shots 均须已按 (position, id) 排序（本模块各查询保证）。"""
+    buckets = {}
+    for s in shots:
+        buckets.setdefault(s["prompt_group_id"], []).append(s)
+    for g in groups:
+        mem = buckets.get(g["id"], [])
+        g["member_shots"] = [s["shot_no"] for s in mem]
+        g["member_ids"] = [s["id"] for s in mem]
+    return groups

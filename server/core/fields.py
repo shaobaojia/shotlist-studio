@@ -13,6 +13,10 @@ options = 类型化控件的预设清单（下拉）：
 CAM_TIERS = ["全景 ★", "中全 ★★", "中景 ★★★", "中近 ★★★", "近景 ★★★★", "特写 ★★★★★", "极特 ★★★★★"]
 CAM_FOCALS = ["24mm", "35mm", "50mm", "85mm", "100mm"]
 
+# 块库写白名单（M3 提示词域；块库不记痕迹、不进 /api/meta 的表格字段）
+BLOCK_FIELDS = ["text", "category_id", "pinned", "position"]
+BLOCK_WRITE_KEYS = set(BLOCK_FIELDS)
+
 SHOT_FIELDS = [
     {"key": "shot_no",       "label": "#",        "type": "text",     "w": 42,  "in_table": True},
     {"key": "camera_move",   "label": "运镜",     "type": "text",     "w": 72,  "in_table": True},
