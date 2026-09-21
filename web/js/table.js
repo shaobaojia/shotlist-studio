@@ -201,6 +201,7 @@ function shotCell(s, f, groups, data) {
 
   if (f.type === 'camera') {
     attachCamEditor(td, {
+      dbl: true,
       id: s.id,
       getCam: () => ({ raw: s.shot_size, focal: s.focal, dof: s.dof }),
       setCam: (k, v) => { s[k] = v; },
@@ -221,6 +222,7 @@ function shotCell(s, f, groups, data) {
   }
 
   attachEditable(td, {
+    dbl: true,
     table: 'shots', id: s.id, field: f.key, label: f.label,
     multiline: isMultiline(f),
     select: f.options || undefined,
@@ -492,12 +494,12 @@ export function walkCell(td, dir) {
     const nt = rows[ti + (dir === 'down' ? 1 : -1)];
     if (!nt) return;
     const ntd = nt.querySelector('td[data-field="' + td.dataset.field + '"]');
-    if (ntd) ntd.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    if (ntd) ntd.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
   } else {
     const tds = Array.from(tr.querySelectorAll('td[data-field]'));
     const i = tds.indexOf(td);
     const ntd = tds[i + dir];
-    if (ntd) ntd.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    if (ntd) ntd.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
   }
 }
 

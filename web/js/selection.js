@@ -69,16 +69,23 @@ export function bindSelection(view, c) {
     const d = drag;
     drag = null;
     document.body.classList.remove('no-select');
-    if (!d.moved && d.shift && sel && sel.table === d.table) {
+    if (!d.moved) {
       const td = e.target && e.target.closest ? e.target.closest('td[data-field]') : null;
       const tr = td && td.closest('tr.shot');
-      if (td && tr) {
+      if (td && tr && tr.closest('table') === d.table) {
         const rc = cellsOf(d.table);
         const fr = rc.rows.indexOf(tr);
         const fc = rc.cols.indexOf(td.dataset.field);
-        if (fr !== -1 && fc !== -1) { sel.fr = fr; sel.fc = fc; paint(); emit(); }
+        if (fr !== -1 && fc !== -1) {
+          if (d.shift && sel && sel.table === d.table) {
+            sel.fr = fr; sel.fc = fc;   // Shift 点选：扩到该格（原行为）
+          } else {
+            sel = { table: d.table, rows: rc.rows, cols: rc.cols, ar: fr, ac: fc, fr: fr, fc: fc };  // 单击 = 选格（塌缩为单格选区）
+          }
+          paint(); emit();
+        }
       }
-      suppressClick = true;
+      if (d.shift) suppressClick = true;
     }
     setTimeout(() => { suppressClick = false; }, 0);
   });
@@ -201,7 +208,7 @@ function openFocus() {
   sel.ar = sel.fr; sel.ac = sel.fc;
   paint();
   emit();
-  td.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  td.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
 }
 
 function shotById(id) {

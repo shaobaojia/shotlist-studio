@@ -13,6 +13,7 @@ const CLEAR = '（清空）';
 let bar = null;
 let countEl = null;
 let delBtn = null;
+let mergeBtn = null;
 let pick = { field: null, value: null };
 let sig = '';
 
@@ -46,6 +47,11 @@ function updateCount(s) {
     countEl.textContent = '已选 ' + (m * colsN) + ' 格 · ' + m + ' 镜 · ' + colsN + ' 列';
   }
   if (delBtn) delBtn.textContent = '删除行（' + m + '）';
+  if (mergeBtn) {
+    const off = m < 2;
+    mergeBtn.disabled = off;
+    mergeBtn.title = off ? '至少选 2 镜才能并为一组' : '把选中的镜头合并为一个提示词组（保留首组文本，可 Ctrl+Z）';
+  }
 }
 
 function selectedRowIds() {
@@ -127,8 +133,8 @@ function build() {
   }
 
   const gm = el('button', 'tool-btn', '并为一组');
-  gm.title = '把选中的镜头合并为一个提示词组（保留首组文本，可 Ctrl+Z）';
   gm.addEventListener('click', () => mergeShotsByIds(selectedRowIds()));
+  mergeBtn = gm;
   bar.appendChild(gm);
   const gh = el('button', 'tool-btn', '独立成组');
   gh.title = '选中的镜头各自拆成独立的提示词组（可 Ctrl+Z）';

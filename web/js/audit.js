@@ -20,9 +20,10 @@ export function getData() { return ctx && ctx.getData(); }
 
 export function onPainted(data) {
   if (!data || !data.scene) return;
-  if (!cur || cur.sceneId !== data.scene.id) { cur = null; openKey = null; }
+  const changed = !cur || cur.sceneId !== data.scene.id;
+  if (changed) { cur = null; openKey = null; }
   decorate(data);
-  fetchState(data.scene.id, false);
+  fetchState(data.scene.id, changed);   // 换场强制重拉（限流闸门不得吃掉换场那一次）
 }
 
 function fetchState(sid, force) {
@@ -238,7 +239,7 @@ function goEdit(i, data) {
   if (res.carrier === 'shot' && field) {
     setTimeout(() => {
       const td = document.querySelector('tr.shot[data-id="' + res.target + '"] td[data-field="' + field + '"]');
-      if (td) td.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      if (td) td.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
       else toast('该列已隐藏——「场务 → 列设置」打开后可直接点格编辑');
     }, 320);
   } else if (res.carrier === 'beat') {

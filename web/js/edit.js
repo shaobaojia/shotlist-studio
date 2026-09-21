@@ -56,9 +56,10 @@ export async function undo() {
 //        multiline?, select?: [options], save?: async (oldV, newV) => (抛错=失败) }
 export function attachEditable(host, cfg) {
   host.classList.add('editable');
-  if (!host.title) host.title = '点击编辑';
-  host.addEventListener('click', (ev) => {
+  if (!host.title) host.title = cfg.dbl ? '双击编辑' : '点击编辑';
+  host.addEventListener(cfg.dbl ? 'dblclick' : 'click', (ev) => {
     ev.stopPropagation();
+    if (cfg.dbl) ev.preventDefault();
     if (cfg.select) {
       openSelectMenu(host, cfg);
       return;
@@ -189,9 +190,10 @@ const NONE = '（无）';
 // cfg: { id, getCam() -> {raw, focal, dof}, setCam(field, v), renderCell(), camOptions() -> {tiers, lens} }
 export function attachCamEditor(host, cfg) {
   host.classList.add('editable');
-  if (!host.title) host.title = '点击编辑（景别 / 焦段）';
-  host.addEventListener('click', (ev) => {
+  if (!host.title) host.title = cfg.dbl ? '双击编辑（景别 / 焦段）' : '点击编辑（景别 / 焦段）';
+  host.addEventListener(cfg.dbl ? 'dblclick' : 'click', (ev) => {
     ev.stopPropagation();
+    if (cfg.dbl) ev.preventDefault();
     if (host.querySelector('.cam-editor')) return;
     openCamForm(host, cfg);
   });
