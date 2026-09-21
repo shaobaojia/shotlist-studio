@@ -173,6 +173,26 @@ class TestRegistry(unittest.TestCase):
         self.assertEqual(len(audit.rules_state(con)), 10)
         con.close()
 
+    def test_rules_state_matches_registry_full(self):
+        """L10 对账扩展：rules_state 每行与 RULES 逐字段对齐（key/desc/recipe/schema）。"""
+        rows = audit.rules_state(self.con)
+        self.assertEqual(len(rows), len(audit.RULES))
+        by_key = {r["key"]: r for r in rows}
+        self.assertEqual(set(by_key), {r["key"] for r in audit.RULES})
+        for r in audit.RULES:
+            row = by_key[r["key"]]
+            self.assertEqual(row["desc"], r.get("desc", ""))
+            self.assertEqual(row.get("recipe"), r.get("recipe"))
+            self.assertEqual(set(row["params_schema"]),
+                             set((r.get("params") or {}).keys()))
+
+    def test_seed_idempotent(self):
+        """种子幂等：重复 seed 不增行、id 与 key 稳定（幂等回填的守卫）。"""
+        before = [(r["id"], r["key"]) for r in audit.rules_state(self.con)]
+        audit.seed_default_rules(self.con)
+        after = [(r["id"], r["key"]) for r in audit.rules_state(self.con)]
+        self.assertEqual(before, after)
+
     def test_rules_state_exposes_schema(self):
         rows = {r["key"]: r for r in audit.rules_state(self.con)}
         d = rows["density"]["params_schema"]["min_shots"]

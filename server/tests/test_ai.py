@@ -337,6 +337,33 @@ class TestChannel(Base):
         finally:
             con.close()
 
+    def test_get_config_defaults(self):
+        """空库 → DEFAULTS 三键兜底、has_key False（配置单源契约）。"""
+        con = self.factory()
+        try:
+            cfg = core_ai.get_config(con)
+        finally:
+            con.close()
+        self.assertEqual(cfg["ai_provider"], core_ai.DEFAULTS["ai_provider"])
+        self.assertEqual(cfg["ai_model"], core_ai.DEFAULTS["ai_model"])
+        self.assertEqual(cfg["ai_base_url"], core_ai.DEFAULTS["ai_base_url"])
+        self.assertFalse(cfg["has_key"])
+
+    def test_channel_injected_returns_cfg_no_precheck(self):
+        """注入桩路径：无 key 也不预检（测试免钥），cfg 同程返回。"""
+        con = self.factory()
+        try:
+            cfg, talk = core_ai.channel(con, lambda c, m: {"text": "甲"})
+            self.assertEqual(cfg["ai_provider"], core_ai.DEFAULTS["ai_provider"])
+            self.assertEqual(talk(cfg, []), "甲")
+        finally:
+            con.close()
+
+    def test_probe_needs_key_first(self):
+        """probe 走 require_key 预检——先抛 AiError，不发网络。"""
+        with self.assertRaises(core_ai.AiError):
+            core_ai.probe({})
+
 
 class TestApply(Base):
     def _mkjob(self, mapping, targets=None, **kw):

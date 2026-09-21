@@ -39,14 +39,16 @@ def blocks_op(m, body, q):
             return err
     if action == "pin" and not isinstance(body.get("pinned"), bool):
         return {"error": "参数不完整（pinned）"}, 400
+    data = None
+    if action == "update":
+        data = {k: body[k] for k in BLOCK_UPDATE_KEYS if k in body}
+        if not data:                                   # L10：投影空检查前移（坏请求不触写连接）
+            return {"error": "参数不完整（无可写字段）"}, 400
     con = db.connect(rw=True)
     try:
         if action == "create":
             return {"ok": True, "block": prompts.block_create(con, body.get("text"), body.get("category_id"))}, 200
         if action == "update":
-            data = {k: body[k] for k in BLOCK_UPDATE_KEYS if k in body}
-            if not data:
-                return {"error": "参数不完整（无可写字段）"}, 400
             return {"ok": True, "block": prompts.block_update(con, rid, data)}, 200
         if action == "delete":
             return {"ok": True, "deleted": prompts.block_delete(con, rid)}, 200

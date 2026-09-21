@@ -38,6 +38,12 @@ class TestRegistry(unittest.TestCase):
         reg = {n for n, t in recipes.REGISTRY["ai"]}
         self.assertEqual(want, reg)
 
+    def test_audit_registry_no_orphans(self):
+        """L10 对账扩展（反向）：审计注册文件每个都被引擎引用——无孤儿配方。"""
+        from core import audit as _audit
+        names = {n for n, t in recipes.REGISTRY["audit"]}
+        self.assertEqual(names, set(_audit.LLM_RECIPES.values()))
+
 
 class TestFileOps(unittest.TestCase):
     def setUp(self):
