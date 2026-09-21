@@ -8,6 +8,8 @@ import { commitField } from './edit.js';
 import { refreshShotCell } from './table.js';
 import { state, fieldOf } from './state.js';
 import { current as selCurrent, rectOf, batchWrite } from './selection.js';
+import { pollJob, cardLife, taskShell, spinHead, cancelBtn, renderFail } from './aicard.js';
+import { floatEnter, floatLeave, floatClose } from './float.js';
 
 const AIS_FALLBACK = ['blocking', 'dialogue', 'director_note', 'beat_action'];   // /api/meta 未载入前兜底（批4/P8）
 const ACTIONS = [
@@ -33,27 +35,9 @@ function fieldLabel(key) {
   return f ? f.label : key;
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-let curSingle = null;   // 当前单格卡：关闭函数
-let curBatch = null;    // 当前批量卡：关闭函数
-
-// 重绘/换场前收起（scene.js paintScene 调用）
+// 重绘/换场前收起（scene.js paintScene 调用）：同层（'ai'）全量闭合（L6 注册表）
 export function closeAiCards() {
-  if (curSingle) { curSingle(); curSingle = null; }
-  if (curBatch) { curBatch(); curBatch = null; }
-}
-
-async function pollJob(jobId, isAlive) {
-  for (let i = 0; i < 420; i++) {
-    if (isAlive && !isAlive()) return null;     // 卡片已关：停轮询（不打扰已付费的结果）
-    const res = await api.aiJob(jobId);
-    const j = res.job;
-    if (!j) throw new Error('任务已丢失（服务可能重启过）——请重试');
-    if (!j.running) return j;
-    await sleep(650);
-  }
-  throw new Error('超时（约 4 分钟未完成）');
+  floatClose('ai');
 }
 
 // ════════ 入口 ════════
@@ -152,20 +136,11 @@ function runPreview(action, targets, o) {
 // ════════ 单格 diff 卡（就近浮层 · 不占版） ════════
 
 function startSingleCard(action, target, o) {
-  if (curSingle) curSingle();
-  const card = el('div', 'ai-diff float-card');
-  const head = el('div', 'aid-head');
-  const body = el('div');
-  const foot = el('div', 'aid-foot');
-  card.appendChild(head);
-  card.appendChild(body);
-  card.appendChild(foot);
-  card.addEventListener('mousedown', (e) => e.preventDefault());   // 保住编辑器焦点
-  document.body.appendChild(card);
+  const sh = taskShell({ cls: 'ai-diff', headCls: 'aid-head', bodyCls: null, footCls: 'aid-foot' });
+  const card = sh.card, head = sh.head, body = sh.body, foot = sh.foot;
 
+  const life = cardLife();
   let jobId = null;
-  let closed = false;
-  let aborted = false;
 
   let lastAnchorRect = (o.anchor && o.anchor.nodeType === 1 && o.anchor.isConnected)
     ? o.anchor.getBoundingClientRect() : null;
@@ -188,42 +163,27 @@ function startSingleCard(action, target, o) {
     card.style.left = x + 'px';
     card.style.top = y + 'px';
   };
-  const onScroll = () => { if (!closed) place(); };
+  const onScroll = () => { if (!life.isClosed()) place(); };
 
-  const close = () => {
-    if (closed) return;
-    closed = true;
-    aborted = true;
+  const close = () => { life.close(); };
+  life.onClose(() => {
     document.removeEventListener('scroll', onScroll, true);
     window.removeEventListener('resize', onScroll);
     card.remove();
-    if (curSingle === close) curSingle = null;
-  };
-  curSingle = close;
+    floatLeave('ai', close);
+  });
+  floatEnter('ai', close);   // 互斥：AI 卡同层开新关旧（L6）
 
   const setLoading = () => {
-    head.textContent = '';
-    head.appendChild(el('span', 'ai-spin'));
-    head.appendChild(document.createTextNode(' ✦ ' + ACTION_CN[action] + ' · 生成中…'));
+    spinHead(head, '✦ ' + ACTION_CN[action] + ' · 生成中…');
     body.textContent = '';
     foot.textContent = '';
-    const b = el('button', 'aid-btn', '取消');
-    b.addEventListener('click', () => close());
-    foot.appendChild(b);
+    foot.appendChild(cancelBtn(close));
     place();
   };
 
   const setError = (msg) => {
-    head.textContent = '✦ ' + ACTION_CN[action] + ' · 失败';
-    body.textContent = '';
-    body.appendChild(el('div', 'aid-err', msg));
-    foot.textContent = '';
-    const b1 = el('button', 'aid-btn primary', '重试');
-    b1.addEventListener('click', (e) => { e.preventDefault(); start(); });
-    const b2 = el('button', 'aid-btn', '关闭');
-    b2.addEventListener('click', (e) => { e.preventDefault(); close(); });
-    foot.appendChild(b1);
-    foot.appendChild(b2);
+    renderFail(head, body, foot, ACTION_CN[action], msg, { retry: start, close: close });
     place();
   };
 
@@ -282,7 +242,7 @@ function startSingleCard(action, target, o) {
   };
 
   const start = async () => {
-    if (aborted) return;
+    if (life.isClosed()) return;
     setLoading();
     const sid = ctx.sceneId ? ctx.sceneId() : null;
     if (!sid) { setError('找不到当前场次'); return; }
@@ -290,12 +250,15 @@ function startSingleCard(action, target, o) {
       const res = await api.aiPreview({ scene_id: sid, action: action, targets: [target] });
       jobId = res.job.id;
       if (res.job.joined) toast('本场已有生成任务在跑——已并入，出稿一起看');
-      const job = await pollJob(jobId, () => !closed && !aborted);
-      if (!job) return;
-      if (closed || aborted) return;
-      setDone(job);
+      const r = await pollJob(() => api.aiJob(jobId).then((x) => x.job), { interval: 650, alive: life.alive });
+      if (r.st === 'abort') return;
+      if (life.isClosed()) return;
+      if (r.st === 'done') { setDone(r.job); return; }
+      if (r.st === 'gone') { setError('任务已丢失（服务可能重启过）——请重试'); return; }
+      if (r.st === 'timeout') { setError('超时（约 4 分钟未完成）'); return; }
+      setError(r.err ? r.err.message : '生成失败');
     } catch (err) {
-      if (!closed) setError(err.message);
+      if (!life.isClosed()) setError(err.message);
     }
   };
 
@@ -305,12 +268,10 @@ function startSingleCard(action, target, o) {
 // ════════ 批量预览卡（指挥条 / 多格动作） ════════
 
 function startBatchCard(opts) {
-  if (curBatch) curBatch();
   const isCmd = !!opts.instruction;
   const titleBase = isCmd ? '指挥条' : (ACTION_CN[opts.action] || '改写');
-  const card = el('div', 'float-card');
-  card.id = 'ai-cmd';
-  const head = el('div', 'aic-head');
+  const sh = taskShell({ id: 'ai-cmd', headCls: 'aic-head', bodyCls: 'aic-list', footCls: 'aic-foot' });
+  const card = sh.card, head = sh.head, list = sh.body, foot = sh.foot;
   const htitle = el('span');
   const sumEl = el('span', 'aic-sum');
   const x = el('span', 'aic-x', '✕');
@@ -318,30 +279,17 @@ function startBatchCard(opts) {
   head.appendChild(htitle);
   head.appendChild(sumEl);
   head.appendChild(x);
-  const list = el('div', 'aic-list');
-  const foot = el('div', 'aic-foot');
-  card.appendChild(head);
-  card.appendChild(list);
-  card.appendChild(foot);
-  card.addEventListener('mousedown', (e) => e.preventDefault());
-  document.body.appendChild(card);
 
+  const life = cardLife();
   let job = null;
   let jobId = null;
-  let closed = false;
-  let aborted = false;
   const checked = {};
   let applyBtn = null;
   let allBtn = null;
 
-  const close = () => {
-    if (closed) return;
-    closed = true;
-    aborted = true;
-    card.remove();
-    if (curBatch === close) curBatch = null;
-  };
-  curBatch = close;
+  const close = () => { life.close(); };
+  life.onClose(() => { card.remove(); floatLeave('ai', close); });
+  floatEnter('ai', close);   // 互斥：AI 卡同层开新关旧（L6）
   x.addEventListener('click', () => close());
 
   const okItems = () => (job ? (job.items || []).filter((it) => !it.error) : []);
@@ -364,15 +312,11 @@ function startBatchCard(opts) {
   };
 
   const setLoading = () => {
-    htitle.textContent = '';
-    htitle.appendChild(el('span', 'ai-spin'));
-    htitle.appendChild(document.createTextNode(' ✦ ' + titleBase + ' · 生成中…'));
+    spinHead(htitle, '✦ ' + titleBase + ' · 生成中…');
     sumEl.textContent = '';
     list.textContent = '';
     foot.textContent = '';
-    const b = el('button', 'aid-btn', '取消');
-    b.addEventListener('click', () => close());
-    foot.appendChild(b);
+    foot.appendChild(cancelBtn(close));
   };
 
   const applyIds = async (ids) => {
@@ -460,18 +404,12 @@ function startBatchCard(opts) {
   };
 
   const start = async () => {
-    if (aborted) return;
+    if (life.isClosed()) return;
     setLoading();
     const sid = ctx.sceneId ? ctx.sceneId() : null;
     if (!sid) { setLoadingErr('找不到当前场次'); return; }
     function setLoadingErr(msg) {
-      htitle.textContent = '✦ ' + titleBase + ' · 失败';
-      list.textContent = '';
-      list.appendChild(el('div', 'aid-err', msg));
-      foot.textContent = '';
-      const b = el('button', 'aid-btn', '关闭');
-      b.addEventListener('click', () => close());
-      foot.appendChild(b);
+      renderFail(htitle, list, foot, titleBase, msg, { close: close });
     }
     try {
       const payload = { scene_id: sid, targets: opts.targets };
@@ -480,12 +418,15 @@ function startBatchCard(opts) {
       const res = await api.aiPreview(payload);
       jobId = res.job.id;
       if (res.job.joined) toast('本场已有生成任务在跑——已并入，出稿一起看');
-      const jb = await pollJob(jobId, () => !closed && !aborted);
-      if (!jb) return;
-      if (closed || aborted) return;
-      setDone(jb);
+      const r = await pollJob(() => api.aiJob(jobId).then((x) => x.job), { interval: 650, alive: life.alive });
+      if (r.st === 'abort') return;
+      if (life.isClosed()) return;
+      if (r.st === 'done') { setDone(r.job); return; }
+      if (r.st === 'gone') { setLoadingErr('任务已丢失（服务可能重启过）——请重试'); return; }
+      if (r.st === 'timeout') { setLoadingErr('超时（约 4 分钟未完成）'); return; }
+      setLoadingErr(r.err ? r.err.message : '生成失败');
     } catch (err) {
-      if (!closed) setLoadingErr(err.message);
+      if (!life.isClosed()) setLoadingErr(err.message);
     }
   };
 

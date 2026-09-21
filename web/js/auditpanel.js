@@ -3,6 +3,7 @@
 import { el } from './ui.js';
 import * as audit from './audit.js';
 import { openAuditSettings } from './auditset.js';
+import { panelShell } from './float.js';
 
 let panel = null, listEl = null, statsEl = null, inputEl = null, runBtn = null, errEl = null;
 let btn = null;   // 工具排「审计」按钮
@@ -27,29 +28,24 @@ window.addEventListener('shotlist:audit-changed', () => {
 });
 
 function build() {
-  panel = el('div');
-  panel.id = 'audit-panel';
-  panel.hidden = true;
-
-  const head = el('div', 'ap-head');
-  head.appendChild(el('b', null, '审计问题'));
   inputEl = document.createElement('input');
   inputEl.className = 'ap-search';
   inputEl.placeholder = '搜索规则 / 内容 / 位置…';
   inputEl.addEventListener('input', render);
-  head.appendChild(inputEl);
   runBtn = el('button', 'tool-btn small ap-run', '跑审计');
   runBtn.title = '按审计设置跑全部启用规则（后台执行，可继续编辑）';
   runBtn.addEventListener('click', () => audit.runAudit());
-  head.appendChild(runBtn);
   const set = el('button', 'tool-btn small', '⚙');
   set.title = '审计设置（规则开关 / 参数）';
   set.addEventListener('click', openAuditSettings);
-  head.appendChild(set);
-  const x = el('button', 'tool-btn small', '✕');
-  x.addEventListener('click', closeAuditPanel);
-  head.appendChild(x);
-  panel.appendChild(head);
+
+  // 外壳基类（L6）：.float-card 补齐点外豁免（此前漏挂＝点面板清选区/收编辑面/关相机表单）
+  const sh = panelShell({
+    id: 'audit-panel', headCls: 'ap-head', title: '审计问题', bodyCls: null, onClose: closeAuditPanel,
+    fillHead: (h) => { h.appendChild(inputEl); h.appendChild(runBtn); h.appendChild(set); },
+  });
+  panel = sh.card;
+  panel.hidden = true;
 
   statsEl = el('div', 'ap-stat');
   panel.appendChild(statsEl);

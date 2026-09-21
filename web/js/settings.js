@@ -4,6 +4,7 @@
 import { api } from './api.js';
 import { el, toast } from './ui.js';
 import { fieldRow, collect } from './formkit.js';
+import { panelShell, floatEnter, floatLeave } from './float.js';
 
 let card = null, bodyEl = null, listBox = null;
 let viewDirty = null;    // 编辑态脏检查（批4：未保存返回提示）
@@ -13,30 +14,27 @@ export function bindSettingsBtn(btn) {
 }
 
 export function toggleSettings() {
-  if (card && !card.hidden) { card.hidden = true; return; }
+  if (card && !card.hidden) { closeSettings(); return; }
   openSettings();
 }
 
+function closeSettings() {
+  if (card) card.hidden = true;
+  floatLeave('panel', closeSettings);
+}
+
 export function openSettings() {
-  const s = document.getElementById('audit-set');       // 浮卡互斥：审计设置若开着先收起（F8）
-  if (s) s.hidden = true;
+  floatEnter('panel', closeSettings);   // 浮卡互斥：设置 ↮ 审计设置（F8 入注册表，L6）
   if (!card) build();
   card.hidden = false;
   loadAll();
 }
 
 function build() {
-  card = el('div', 'float-card');
-  card.id = 'settings-card';
+  const sh = panelShell({ id: 'settings-card', title: '设置', onClose: closeSettings });
+  card = sh.card;
+  bodyEl = sh.body;
   card.hidden = true;
-  const head = el('div', 'sc-head');
-  head.appendChild(el('b', null, '设置'));
-  const x = el('button', 'tool-btn small', '✕');
-  x.addEventListener('click', () => { card.hidden = true; });
-  head.appendChild(x);
-  card.appendChild(head);
-  bodyEl = el('div', 'sc-body');
-  card.appendChild(bodyEl);
   document.body.appendChild(card);
 }
 

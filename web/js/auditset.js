@@ -3,29 +3,27 @@
 import { api } from './api.js';
 import { el, toast } from './ui.js';
 import { fieldRow } from './formkit.js';
+import { panelShell, floatEnter, floatLeave } from './float.js';
 
 let panel = null, bodyEl = null;
 
+function closeAuditSet() {
+  if (panel) panel.hidden = true;
+  floatLeave('panel', closeAuditSet);
+}
+
 export function openAuditSettings() {
+  floatEnter('panel', closeAuditSet);   // 浮卡互斥：审计设置 ↮ 设置（F8 入注册表，L6）
   if (!panel) build();
-  const c = document.getElementById('settings-card');   // 浮卡互斥：顶栏设置若开着先收起（F8）
-  if (c) c.hidden = true;
   panel.hidden = false;
   load();
 }
 
 function build() {
-  panel = el('div', 'float-card');
-  panel.id = 'audit-set';
+  const sh = panelShell({ id: 'audit-set', headCls: 'as-head', bodyCls: 'as-body', title: '审计设置', onClose: closeAuditSet });
+  panel = sh.card;
+  bodyEl = sh.body;
   panel.hidden = true;
-  const head = el('div', 'as-head');
-  head.appendChild(el('b', null, '审计设置'));
-  const x = el('button', 'tool-btn small', '✕');
-  x.addEventListener('click', () => { panel.hidden = true; });
-  head.appendChild(x);
-  panel.appendChild(head);
-  bodyEl = el('div', 'as-body');
-  panel.appendChild(bodyEl);
   document.body.appendChild(panel);
 }
 

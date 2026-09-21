@@ -4,26 +4,28 @@
 import { api } from './api.js';
 import { el, toast } from './ui.js';
 import { recordUndo } from './edit.js';
+import { pollJob } from './aicard.js';
+import { panelShell, floatEnter, floatLeave, floatClose } from './float.js';
 
 let card = null;      // 场次草稿卡
 let pd = null;        // 组级初稿小卡
 
+// 重绘/换场前收起（scene.js paintScene 调用）：同层（'draft'）全量闭合（L6 注册表）
 export function closeDraftCards() {
-  if (card) {
-    if (card._timer) { clearInterval(card._timer); card._timer = null; }
-    card.hidden = true;
-  }
-  if (pd) {
-    if (pd._timer) { clearInterval(pd._timer); pd._timer = null; }
-    pd.remove();
-    pd = null;
-  }
+  floatClose('draft');
+}
+
+// 场次草稿卡：关闭 = 收起（下一次打开回到表单；轮询经 alive 自行退场）
+function closeScene() {
+  if (card) card.hidden = true;
+  floatLeave('draft', closeScene);
 }
 
 // ── 场次草稿卡 ──────────────────────────────────────────────
 
 export function openSceneDraft(sceneId, onApplied) {
   if (!card) buildCard();
+  floatEnter('draft', closeScene);   // 互斥：场次草稿 ↔ 组级初稿（开新关旧，L6）
   card.hidden = false;
   card._sceneId = sceneId;
   card._onApplied = onApplied;
@@ -32,17 +34,10 @@ export function openSceneDraft(sceneId, onApplied) {
 }
 
 function buildCard() {
-  card = el('div', 'float-card');
-  card.id = 'draft-card';
+  const sh = panelShell({ id: 'draft-card', title: '✦ 从台本出草稿', onClose: closeDraftCards });
+  card = sh.card;
   card.hidden = true;
-  const head = el('div', 'sc-head');
-  head.appendChild(el('b', null, '✦ 从台本出草稿'));
-  const x = el('button', 'tool-btn small', '✕');
-  x.addEventListener('click', closeDraftCards);
-  head.appendChild(x);
-  card.appendChild(head);
-  card._body = el('div', 'sc-body');
-  card.appendChild(card._body);
+  card._body = sh.body;
   document.body.appendChild(card);
 }
 
@@ -92,45 +87,25 @@ function showRun() {
 }
 
 function pollScene() {
-  if (card._timer) clearInterval(card._timer);
-  card._ticks = 0;
-  card._timer = setInterval(async () => {
-    if (!card._jobId) return;
-    if (++card._ticks > 420) {                  // 上限 ~8 分钟：死任务不许无限轮询
-      clearInterval(card._timer);
-      card._timer = null;
-      toast('任务超时——请重来', 'err');
-      showForm();
-      return;
-    }
-    let j;
-    try {
-      j = (await api.draftJob(card._jobId)).job;
-    } catch (err) {
-      return;                                   // 网络抖动：下轮再试
-    }
-    if (!j) {
-      clearInterval(card._timer);
-      card._timer = null;
-      toast('任务丢失（服务重启？）——请重来', 'err');
-      showForm();
-      return;
-    }
-    if (j.running) {
+  const jid = card._jobId;
+  pollJob(() => api.draftJob(jid).then((x) => x.job), {
+    interval: 1200, limit: 420, tolerant: true,   // 网络抖动：下轮再试
+    alive: () => !card.hidden && card._jobId === jid,
+    onTick: (j) => {
       card._stage.textContent = j.stage === 'shots'
         ? ('② 出镜头行…（骨架 ' + (j.beats_n != null ? j.beats_n : (j.beats || []).length) + ' 拍已就绪）')
         : '① 分析节拍骨架…';
+    },
+  }).then((r) => {
+    if (r.st === 'abort') return;
+    if (r.st === 'done') {
+      if (r.job.error) { toast('生成失败：' + r.job.error, 'err'); showForm(); return; }
+      showPreview(r.job);
       return;
     }
-    clearInterval(card._timer);
-    card._timer = null;
-    if (j.error) {
-      toast('生成失败：' + j.error, 'err');
-      showForm();
-      return;
-    }
-    showPreview(j);
-  }, 1200);
+    if (r.st === 'gone') { toast('任务丢失（服务重启？）——请重来', 'err'); showForm(); return; }
+    if (r.st === 'timeout') { toast('任务超时——请重来', 'err'); showForm(); return; }
+  });
 }
 
 function showPreview(j) {
@@ -192,31 +167,23 @@ function showPreview(j) {
 // ── 组级初稿小卡 ────────────────────────────────────────────
 
 export function openPromptDraft(opts) {
-  if (pd) {                       // 换卡：旧卡计时器先停（旧闭包只许碰本实例）
-    if (pd._timer) { clearInterval(pd._timer); pd._timer = null; }
-    pd.remove();
-    pd = null;
-  }
-  pd = el('div', 'float-card');
-  const self = pd;                // 本卡实例：轮询只认它
-  pd.id = 'pdraft-card';
-  let stop = () => {};            // 本轮的停表函数（run() 装载）
+  let self = null;                // 本卡实例：轮询只认它
+  let seq = 0;                    // 本轮轮询口令：换轮/关闭即作废（旧闭包只许碰本实例）
+  const stop = () => { seq++; };
   const close = () => {
     stop();
-    self.remove();
+    if (self) self.remove();
     if (pd === self) pd = null;
+    floatLeave('draft', close);
   };
-  const head = el('div', 'sc-head');
-  head.appendChild(el('b', null, '✦ 组级初稿'));
-  const x = el('button', 'tool-btn small', '✕');
-  x.addEventListener('click', close);
-  head.appendChild(x);
-  pd.appendChild(head);
-  const body = el('div', 'sc-body');
+  const sh = panelShell({ id: 'pdraft-card', title: '✦ 组级初稿', onClose: close });
+  self = sh.card;
+  floatEnter('draft', close);     // 互斥：场次草稿 ↔ 组级初稿（开新关旧，L6）
+  pd = self;
+  const body = sh.body;
   const stage = el('div', 'dz-stage', '生成中……约 10～30 秒');
   body.appendChild(stage);
-  pd.appendChild(body);
-  document.body.appendChild(pd);
+  document.body.appendChild(self);
 
   const renderText = (text) => {
     body.textContent = '';
@@ -244,36 +211,23 @@ export function openPromptDraft(opts) {
   };
 
   const run = async () => {
+    const my = ++seq;                             // 本轮口令：旧轮作废
     try {
       const res = await api.draftPrompt(opts.sceneId, opts.shotId);
-      if (pd !== self) return;                    // 卡已被替换/关闭：本轮作废
+      if (pd !== self || seq !== my) return;      // 卡已被替换/关闭：本轮作废
       const jid = res.job.id;
       if (res.job.joined) toast('这个镜头的初稿正在生成——已并入');
-      stop();
-      let ticks = 0;
-      stop = () => {
-        if (self._timer) { clearInterval(self._timer); self._timer = null; }
-      };
-      self._timer = setInterval(async () => {
-        if (pd !== self) { stop(); return; }      // 本卡已谢幕：旧计时器自行退场
-        if (++ticks > 420) { stop(); stage.textContent = '任务超时——请重试'; return; }
-        let j;
-        try {
-          j = (await api.draftJob(jid)).job;
-        } catch (err) {
-          return;                                 // 网络抖动：下轮再试
-        }
-        if (!j) { stop(); stage.textContent = '任务丢失（服务重启？）——请重试'; return; }
-        if (j.running) return;
-        stop();
-        if (j.error) {
-          stage.textContent = '生成失败：' + j.error;
-          return;
-        }
-        renderText(j.text);
-      }, 1200);
+      const r = await pollJob(() => api.draftJob(jid).then((x) => x.job), {
+        interval: 1200, limit: 420, tolerant: true,
+        alive: () => pd === self && seq === my,
+      });
+      if (r.st === 'abort') return;
+      if (r.st === 'timeout') { stage.textContent = '任务超时——请重试'; return; }
+      if (r.st === 'gone') { stage.textContent = '任务丢失（服务重启？）——请重试'; return; }
+      if (r.job.error) { stage.textContent = '生成失败：' + r.job.error; return; }
+      renderText(r.job.text);
     } catch (err) {
-      stage.textContent = '启动失败：' + err.message;
+      if (pd === self && seq === my) stage.textContent = '启动失败：' + err.message;
     }
   };
   run();
