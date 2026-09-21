@@ -3,6 +3,7 @@
 // key 明文永不出后端（只显示「已配置（留空＝不改）」）。
 import { api } from './api.js';
 import { el, toast } from './ui.js';
+import { fieldRow, collect } from './formkit.js';
 
 let card = null, bodyEl = null, listBox = null;
 let viewDirty = null;    // 编辑态脏检查（批4：未保存返回提示）
@@ -60,31 +61,21 @@ async function loadAI() {
 }
 
 function renderAI(sec, cfg) {
-  const field = (label, key, val, ph) => {
-    const wrap = el('label', 'as-p');
-    wrap.appendChild(el('span', 'as-p-k', label));
-    const inp = document.createElement('input');
-    inp.className = 'as-input';
-    inp.dataset.k = key;
-    inp.value = val == null ? '' : val;
-    if (ph) inp.placeholder = ph;
-    wrap.appendChild(inp);
-    return wrap;
-  };
-  sec.appendChild(field('provider', 'provider', cfg.provider));
-  sec.appendChild(field('model', 'model', cfg.model));
-  sec.appendChild(field('base_url', 'base_url', cfg.base_url));
-  sec.appendChild(field('api_key', 'api_key', '', cfg.has_key ? '已配置（留空＝不改）' : '未配置'));
+  sec.appendChild(fieldRow('provider', { key: 'provider', value: cfg.provider }).row);
+  sec.appendChild(fieldRow('model', { key: 'model', value: cfg.model }).row);
+  sec.appendChild(fieldRow('base_url', { key: 'base_url', value: cfg.base_url }).row);
+  sec.appendChild(fieldRow('api_key', { key: 'api_key', value: '',
+    placeholder: cfg.has_key ? '已配置（留空＝不改）' : '未配置' }).row);
 
   const bar = el('div', 'as-bar');
   const save = el('button', 'tool-btn small', '保存配置');
   save.addEventListener('click', async () => {
+    const vals = collect(sec);
     const payload = {};
-    sec.querySelectorAll('.as-input').forEach((inp) => {
-      const v = (inp.value || '').trim();
-      if (inp.dataset.k === 'api_key') { if (v) payload.api_key = v; }
-      else payload[inp.dataset.k] = v;              // 三键恒定发送：空串 = 清回默认（M14）
-    });
+    for (const k of Object.keys(vals)) {
+      if (k === 'api_key') { if (vals[k]) payload.api_key = vals[k]; }
+      else payload[k] = vals[k];                    // 三键恒定发送：空串 = 清回默认（M14）
+    }
     save.disabled = true;
     try {
       const out = await api.aiSave(payload);

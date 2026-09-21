@@ -96,31 +96,31 @@ export function editorRedo(ta) {
   apply(ta, hb.redo.pop());
 }
 
-// 光标处插入（保住光标 · 自动长高；插入也进撤销栈）
-export function insertInto(ta, text) {
-  if (text == null || text === '') return;
+// 范围替换（L7 单点：选段改写 / 剪切 / 插入 / 整文替换共用；进撤销栈）。
+// 返回新光标位（= s0 + text.length）；text 为空串即删除该范围（剪切用）。
+export function replaceRange(ta, s0, s1, text) {
   editorPush(ta);
-  const s0 = ta.selectionStart;
-  const s1 = ta.selectionEnd;
-  const before = ta.value.slice(0, s0);
-  const after = ta.value.slice(s1);
-  const lead = (before && !/\n\s*$/.test(before)) ? '\n\n' : '';
-  ta.value = before + lead + text + after;
-  const pos = (before + lead + text).length;
+  ta.value = ta.value.slice(0, s0) + text + ta.value.slice(s1);
+  const pos = s0 + text.length;
   ta.focus();
   ta.setSelectionRange(pos, pos);
   growTextarea(ta, EDITOR_MIN_H);
   editorMark(ta);
+  return pos;
+}
+
+// 光标处插入（保住光标 · 自动长高；插入也进撤销栈）
+export function insertInto(ta, text) {
+  if (text == null || text === '') return;
+  const s0 = ta.selectionStart;
+  const s1 = ta.selectionEnd;
+  const before = ta.value.slice(0, s0);
+  const lead = (before && !/\n\s*$/.test(before)) ? '\n\n' : '';
+  replaceRange(ta, s0, s1, lead + text);
 }
 
 // 整文替换（初稿落入等；进撤销栈——Ctrl+Z 可撤）
 export function replaceAll(ta, text) {
   if (text == null) return;
-  editorPush(ta);
-  ta.value = text;
-  const pos = text.length;
-  ta.focus();
-  ta.setSelectionRange(pos, pos);
-  growTextarea(ta, EDITOR_MIN_H);
-  editorMark(ta);
+  replaceRange(ta, 0, ta.value.length, text);
 }

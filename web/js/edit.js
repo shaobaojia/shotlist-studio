@@ -52,6 +52,20 @@ export async function undo() {
   return false;
 }
 
+// 字段落定（L7 单点出口）：写成功后调用——本地模型更新 → 编辑面开着就地显示 + 基线同步（否则渲染格）→ 撤销入栈。
+// cfg: { table, id, field, label, onLocal?, renderCell?, ed? }（写口由调用方负责：api.update / api.aiApply 等）。
+export function commitField(cfg, oldV, newV) {
+  if (cfg.onLocal) cfg.onLocal(newV);
+  if (cfg.ed && cfg.ed.isConnected) {
+    cfg.ed.value = newV;
+    if (cfg.ed._syncBaseline) cfg.ed._syncBaseline(newV);
+  } else if (cfg.renderCell) {
+    cfg.renderCell();
+  }
+  recordUndo({ type: 'field', table: cfg.table, id: cfg.id, field: cfg.field,
+               restore: oldV, label: cfg.label });
+}
+
 // cfg: { table, id, field, label, getValue(), onLocal(v), renderCell(),
 //        multiline?, select?: [options], save?: async (oldV, newV) => (抛错=失败) }
 export function attachEditable(host, cfg) {

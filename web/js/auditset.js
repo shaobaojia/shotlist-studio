@@ -2,9 +2,7 @@
 // 口径：每次「跑审计」严格按开关执行；单条「重检」不受开关限制。key 明文永不出后端（只显示是否已配置）。
 import { api } from './api.js';
 import { el, toast } from './ui.js';
-
-const PARAM_CN = { min_shots: '最少镜头数', sizes: '计作特写的景别', wordlist: '模糊词表',
-  require_reaction_shot: '要求反应镜', require_dof: '要求景深标注' };
+import { fieldRow } from './formkit.js';
 
 let panel = null, bodyEl = null;
 
@@ -79,28 +77,37 @@ function ruleRow(r) {
   const params = r.params || {};
   const keys = Object.keys(params);
   if (keys.length) {
+    const schema = r.params_schema || {};       // 控件由后端 schema 派生（L9：RULES 单点）
     const pbox = el('div', 'as-params');
-    for (const k of keys) pbox.appendChild(paramField(r.id, params, k));
+    for (const k of keys) pbox.appendChild(paramField(r.id, params, k, schema[k]));
     row.appendChild(pbox);
   }
   return row;
 }
 
-function paramField(rid, params, k) {
-  const wrap = el('label', 'as-p');
-  wrap.appendChild(el('span', 'as-p-k', PARAM_CN[k] || k));
+function paramField(rid, params, k, meta) {
+  meta = meta || {};
   const val = params[k];
-  let inp;
-  if (typeof val === 'boolean') {
-    inp = document.createElement('input');
-    inp.type = 'checkbox';
-    inp.checked = val;
+  const type = meta.type || (typeof val === 'boolean' ? 'bool'
+    : (typeof val === 'number' ? 'int' : (Array.isArray(val) ? 'list' : 'text')));
+  let spec;
+  if (type === 'bool') {
+    spec = { cls: '', type: 'checkbox', checked: !!val };
+  } else if (type === 'int') {
+    spec = { type: 'number', cls: 'as-input as-num', value: val,
+             min: meta.min != null ? meta.min : 1 };
+  } else if (type === 'list') {
+    const multiline = (val || []).length > 6;
+    spec = { tag: multiline ? 'textarea' : 'input', rows: multiline ? 3 : 0,
+             cls: 'as-input' + (multiline ? ' as-area' : ''), value: (val || []).join('，') };
+  } else {
+    spec = { value: String(val) };
+  }
+  const fr = fieldRow(meta.label || k, spec);
+  const inp = fr.inp;
+  if (type === 'bool') {
     inp.addEventListener('change', () => saveRuleParams(rid, params, k, inp.checked, inp));
-  } else if (typeof val === 'number') {
-    inp = document.createElement('input');
-    inp.type = 'number';
-    inp.className = 'as-input as-num';
-    inp.value = val;
+  } else if (type === 'int') {
     inp.addEventListener('change', () => {
       const raw = (inp.value || '').trim();
       const n = /^\d+$/.test(raw) ? parseInt(raw, 10) : NaN;
@@ -111,22 +118,13 @@ function paramField(rid, params, k) {
       }
       saveRuleParams(rid, params, k, n, inp);
     });
-  } else if (Array.isArray(val)) {
-    const multiline = val.length > 6;
-    inp = document.createElement(multiline ? 'textarea' : 'input');
-    if (multiline) inp.rows = 3;
-    inp.className = 'as-input' + (multiline ? ' as-area' : '');
-    inp.value = val.join('，');
+  } else if (type === 'list') {
     inp.addEventListener('change', () => saveRuleParams(rid, params, k,
       inp.value.split(/[，,\n]/).map((s) => s.trim()).filter(Boolean), inp));
   } else {
-    inp = document.createElement('input');
-    inp.className = 'as-input';
-    inp.value = String(val);
     inp.addEventListener('change', () => saveRuleParams(rid, params, k, inp.value, inp));
   }
-  wrap.appendChild(inp);
-  return wrap;
+  return fr.row;
 }
 
 async function saveRuleParams(rid, params, k, v, inp) {

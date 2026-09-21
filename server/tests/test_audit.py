@@ -182,6 +182,30 @@ class TestRegistry(unittest.TestCase):
         self.assertEqual(rows["loop"]["params"]["require_reaction_shot"], False)   # 值来自 DB
         self.assertTrue(rows["axis"]["desc"])
 
+    def test_field_hints_from_registry(self):
+        """L9：去改目标列由注册表下发（原前端 FIELD_HINT 退役）。"""
+        want = {"size": "shot_size", "sound": "audio", "concrete": "blocking",
+                "space": "spatial", "camera": "camera_pos"}
+        got = {r["key"]: r.get("field") for r in audit.RULES if r.get("field")}
+        self.assertEqual(got, want)
+
+    def test_issues_carry_field(self):
+        """L9：问题行随带 field（去改不再按标题硬编码）。"""
+        rid = self.con.execute(
+            "SELECT id FROM audit_rules WHERE title='声音完整性'").fetchone()["id"]
+        self.con.execute("INSERT INTO audit_issues (scene_id, carrier, target_id, rule_id, message)"
+                         " VALUES (1, 'shot', '1', ?, '冒烟')", (rid,))
+        self.con.commit()
+        row = [r for r in audit.issues_state(self.con, 1)["issues"] if r["rule_id"] == rid][0]
+        self.assertEqual(row["field"], "audio")
+        rid2 = self.con.execute(
+            "SELECT id FROM audit_rules WHERE title='轴线'").fetchone()["id"]
+        self.con.execute("INSERT INTO audit_issues (scene_id, carrier, target_id, rule_id, message)"
+                         " VALUES (1, 'seam', '1>2', ?, '冒烟2')", (rid2,))
+        self.con.commit()
+        row2 = [r for r in audit.issues_state(self.con, 1)["issues"] if r["rule_id"] == rid2][0]
+        self.assertIsNone(row2["field"])                                  # 无 field：不跳格
+
 
 class TestResolveRef(unittest.TestCase):
     def test_norm_ref_prefixes(self):

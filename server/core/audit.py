@@ -16,7 +16,7 @@ CARRIERS = ("scene", "beat", "shot", "seam")
 
 # ── 规则注册表（唯一点；scripts/seed_audit_rules.py 由此落库） ──
 # 一条规则一行：key = slug（DB 键，title 不再当键）；kind；recipe = LLM 配方文件名（程序规则 None）；
-# params = 参数 schema（{参数: {type, label, default[, min]}}——前端控件与校验由此派生）；desc。
+# params = 参数 schema（{参数: {type, label, default[, min]}}——前端控件与校验由此派生）；desc；field =「去改」目标列（可缺省）。
 RULES = [
     {"key": "axis", "title": "轴线", "kind": "llm", "recipe": "axis.md", "params": {},
      "desc": "相邻镜头越轴检查：视线/位置反转且无过渡镜（seam 载体）。"},
@@ -32,21 +32,22 @@ RULES = [
     {"key": "rhythm", "title": "节奏曲线", "kind": "llm", "recipe": "rhythm.md", "params": {},
      "desc": "镜头时长分布与节拍叙事职能的偏差（只报明确问题）。"},
     {"key": "space", "title": "空间一致性", "kind": "llm", "recipe": "space.md", "params": {},
-     "desc": "角色位置突变无动机/缺过渡。"},
+     "field": "spatial", "desc": "角色位置突变无动机/缺过渡。"},
     {"key": "camera", "title": "机位一致性", "kind": "llm", "recipe": "camera.md", "params": {},
-     "desc": "机位策略 vs 场景价值：反打连用 / 建立镜误用 / 插入过度。"},
+     "field": "camera_pos", "desc": "机位策略 vs 场景价值：反打连用 / 建立镜误用 / 插入过度。"},
     {"key": "size", "title": "景别完整", "kind": "program", "recipe": None,
      "params": {"require_dof": {"type": "bool", "label": "要求景深标注", "default": False}},
-     "desc": "景别标注完整性（景深已并入摄影机串，抽查为主）。"},
+     "field": "shot_size", "desc": "景别标注完整性（景深已并入摄影机串，抽查为主）。"},
     {"key": "sound", "title": "声音完整性", "kind": "program", "recipe": None, "params": {},
-     "desc": "声音标注完整性：空音频提示（无声请标「—」）。"},
+     "field": "audio", "desc": "声音标注完整性：空音频提示（无声请标「—」）。"},
     {"key": "concrete", "title": "动作具象化", "kind": "llm", "recipe": "concrete.md",
      "params": {"wordlist": {"type": "list", "label": "模糊词表",
                              "default": ["看着", "说着", "走着", "笑了笑", "看了看", "望了望",
                                          "盯着", "望着", "望向", "停下脚步", "转过身"]}},
-     "desc": "模糊词粗筛 + 判定与具象化建议。"},
+     "field": "blocking", "desc": "模糊词粗筛 + 判定与具象化建议。"},
 ]
 _TITLE_KEY = {r["title"]: r["key"] for r in RULES}
+_RULE_BY_TITLE = {r["title"]: r for r in RULES}
 LLM_RECIPES = {r["key"]: r["recipe"] for r in RULES if r["recipe"]}   # key → 文件名（派生）
 
 
@@ -415,6 +416,8 @@ def _params(row):
 
 def issues_state(con, scene_id):
     rules = {r["id"]: r for r in con.execute("SELECT id, title, kind FROM audit_rules")}
+    fields = {r["id"]: (_RULE_BY_TITLE.get(r["title"]) or {}).get("field")
+              for r in con.execute("SELECT id, title FROM audit_rules")}
     rows = [dict(r) for r in con.execute(
         "SELECT * FROM audit_issues WHERE scene_id=?"
         " ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'fixed' THEN 1 ELSE 2 END,"
@@ -424,6 +427,7 @@ def issues_state(con, scene_id):
         rid = r["rule_id"]
         r["rule_title"] = rules[rid]["title"] if rid in rules else "?"
         r["kind"] = rules[rid]["kind"] if rid in rules else "?"
+        r["field"] = fields.get(rid)              # 「去改」目标列（L9：注册表下发）
         counts[r["status"]] = counts.get(r["status"], 0) + 1
     return {"issues": rows, "counts": counts}
 

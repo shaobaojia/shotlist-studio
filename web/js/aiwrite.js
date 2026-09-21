@@ -4,10 +4,10 @@
 import { api } from './api.js';
 import { el, toast } from './ui.js';
 import { openMenu } from './menu.js';
-import { recordUndo } from './edit.js';
+import { commitField } from './edit.js';
 import { refreshShotCell } from './table.js';
 import { state, fieldOf } from './state.js';
-import { current as selCurrent, rectOf } from './selection.js';
+import { current as selCurrent, rectOf, batchWrite } from './selection.js';
 
 const AIS_FALLBACK = ['blocking', 'dialogue', 'director_note', 'beat_action'];   // /api/meta 未载入前兜底（批4/P8）
 const ACTIONS = [
@@ -237,18 +237,8 @@ function startSingleCard(action, target, o) {
       const res = await api.aiApply(jobId, [it.i]);
       const skip = (res.skipped || []).find((s) => s.i === it.i);
       if (skip) { setError('未应用：' + skip.reason); return; }   // 终态卡，不再只 toast（P9）
-      const ac = o.ac;
-      ac.onLocal(it.after);
-      if (ac.ed && ac.ed.isConnected) {
-        ac.ed.value = it.after;   // 编辑器还开着：就地显示新值（收起时自然重画格子）
-        if (ac.ed._syncBaseline) ac.ed._syncBaseline(it.after);   // 基线同步：收起不重复写、不多压撤销（L9）
-      } else {
-        ac.renderCell();
-      }
-      recordUndo({
-        type: 'field', table: ac.table, id: ac.id, field: ac.field,
-        restore: it.before, label: 'AI ' + ACTION_CN[action],
-      });
+      // 落定三件（模型 / 编辑面基线 / 撤销）走单点：edit.commitField（L7）
+      commitField(Object.assign({}, o.ac, { label: 'AI ' + ACTION_CN[action] }), it.before, it.after);
       toast('已应用（Ctrl+Z 可撤）');
       close();
     } catch (err) {
@@ -387,43 +377,42 @@ function startBatchCard(opts) {
 
   const applyIds = async (ids) => {
     if (!ids.length) { toast('没有勾选任何条目'); return; }
-    try {
-      if (applyBtn) applyBtn.disabled = true;
-      if (allBtn) allBtn.disabled = true;
-      const res = await api.aiApply(jobId, ids);
-      const byI = {};
-      for (const it of (job.items || [])) byI[it.i] = it;
-      const back = [];
-      for (const r of (res.results || [])) {
-        if (!r.changed) continue;
-        const it = byI[r.i];
-        if (!it || it.kind !== 'db') continue;
-        const s = ctx.getShot(it.id);
-        if (!s) continue;
-        back.push({ table: it.table, id: it.id, field: it.field, value: it.before });
-        s[it.field] = it.after;
-        refreshShotCell(s, it.field);
+    const byI = {};
+    for (const it of (job.items || [])) byI[it.i] = it;
+    const ops = [];
+    for (const i of ids) {
+      const it = byI[i];
+      if (it && it.kind === 'db') {
+        ops.push({ i: i, table: it.table, id: it.id, field: it.field, value: it.after, restore: it.before });
       }
-      if (back.length) {
-        recordUndo({
-          type: 'custom', label: 'AI ' + (isCmd ? '指挥条' : titleBase),
-          undo: async () => {
-            await api.batch(back.map((b) => ({ table: b.table, id: b.id, field: b.field, value: b.value })));
-            for (const b of back) {
-              const s = ctx.getShot(b.id);
-              if (s) { s[b.field] = b.value; refreshShotCell(s, b.field); }
-            }
-          },
-        });
-      }
-      const skipped = res.skipped || [];
-      const skipTxt = skipped.length ? ('；' + skipped.length + ' 条未应用：' + skipped[0].reason) : '';
-      toast('已应用 ' + back.length + ' 处' + skipTxt + '（Ctrl+Z 可撤）');
-      close();
-    } catch (err) {
-      toast('应用失败：' + err.message, 'err');
-      updateFoot();
     }
+    if (!ops.length) { close(); return; }
+    if (applyBtn) applyBtn.disabled = true;
+    if (allBtn) allBtn.disabled = true;
+    // 落库 + 本地落定 + 一步撤销：走 selection.batchWrite 泛化口（L7），写口接入 aiApply
+    await batchWrite(ops, 'AI ' + (isCmd ? '指挥条' : titleBase), {
+      write: async (items) => {
+        const out = await api.aiApply(jobId, items.map((o) => o.i));
+        const map = {};
+        for (const o of items) map[o.i] = o;
+        const results = [];
+        for (const r of (out.results || [])) {
+          const o = map[r.i];
+          if (o) results.push({ id: o.id, field: o.field, changed: r.changed, error: r.error, restore: o.restore });
+        }
+        return { results: results, skipped: out.skipped || [] };
+      },
+      done: (n, errs, ret) => {
+        const skipped = (ret && ret.skipped) || [];
+        const skipTxt = skipped.length ? ('；' + skipped.length + ' 条未应用：' + skipped[0].reason) : '';
+        toast('已应用 ' + n + ' 处' + skipTxt + '（Ctrl+Z 可撤）');
+        close();
+      },
+      fail: (err) => {
+        toast('应用失败：' + err.message, 'err');
+        updateFoot();
+      },
+    });
   };
 
   const setDone = (jb) => {

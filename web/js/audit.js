@@ -5,9 +5,6 @@ import { api } from './api.js';
 import { el, toast } from './ui.js';
 import { refreshHistoryIfOpen } from './history.js';
 
-const FIELD_HINT = { '景别完整': 'shot_size', '声音完整性': 'audio',
-  '动作具象化': 'blocking', '空间一致性': 'spatial', '机位一致性': 'camera_pos' };
-
 let ctx = null;        // { getData, refresh }
 let cur = null;        // { sceneId, issues, counts, job }
 let fetchedAt = 0;
@@ -263,7 +260,7 @@ function goEdit(i, data) {
   closeCard();
   if (!res) return;
   if (res.carrier === 'shot') {
-    const field = FIELD_HINT[i.rule_title];
+    const field = i.field;   // 「去改」目标列随问题下发（L9：注册表单点，改标题不再静默失能）
     if (!field) return;   // 无对应列：已定位并闪烁，交由手动修改
     setTimeout(() => {
       const td = document.querySelector('tr.shot[data-id="' + res.target + '"] td[data-field="' + field + '"]');

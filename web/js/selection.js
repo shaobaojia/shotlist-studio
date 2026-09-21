@@ -234,46 +234,58 @@ export function copySelectionTSV() {
   });
 }
 
-// 批量写（一个请求、一次提交）：ops: [{id, field, value}]；含模型更新 + 撤销栈 + 单格重画
-export async function batchWrite(ops, label) {
+// 批量写（L7 泛化）：一个写口、一步撤销；默认 shots 域（ctx.getShot + refreshShotCell）。
+// ops: [{id, field, value, table?, …}]（额外键透传给 write）；opts.write 注入写口（默认 api.batch，返回
+// {results:[{id, field, changed, error, restore?}]}）；opts.table / resolve / refresh 换域；
+// opts.done(changedN, errs, ret) / opts.fail(err) 定制收尾（默认文案照旧）。
+export async function batchWrite(ops, label, opts) {
   if (!ops.length) return 0;
+  opts = opts || {};
+  const table = opts.table || 'shots';
+  const resolve = opts.resolve || ((o) => shotById(o.id));
+  const refresh = opts.refresh || ((s, o) => refreshShotCell(s, o.field));
+  const write = opts.write || ((items) => api.batch(items.map((o) => ({
+    table: o.table || table, id: o.id, field: o.field, value: o.value }))));
   const vmap = {};
   for (const o of ops) vmap[o.id + '|' + o.field] = o.value;
-  let res;
+  let ret;
   try {
-    res = await api.batch(ops.map((o) => ({ table: 'shots', id: o.id, field: o.field, value: o.value })));
+    ret = (await write(ops)) || {};
   } catch (err) {
-    toast('批量失败：' + err.message, 'err');
+    (opts.fail || ((e) => toast('批量失败：' + e.message, 'err')))(err);
     return 0;
   }
-  const results = res.results || [];
+  const results = ret.results || [];
   const errs = results.filter((r) => r.error);
-  const changed = results.filter((r) => r.changed);
   const back = [];
-  for (const r of changed) {
-    const s = shotById(r.id);
+  for (const r of results.filter((x) => x.changed)) {
+    const s = resolve(r);
     if (!s) continue;
-    back.push({ id: r.id, field: r.field, value: s[r.field] == null ? '' : String(s[r.field]) });
+    back.push({ table: table, id: r.id, field: r.field,
+                value: (r.restore != null) ? r.restore : (s[r.field] == null ? '' : String(s[r.field])) });
     s[r.field] = vmap[r.id + '|' + r.field];
-    refreshShotCell(s, r.field);
+    refresh(s, r);
   }
-  if (changed.length) {
+  if (back.length) {
     recordUndo({
       type: 'custom', label: label || '批量',
       undo: async () => {
-        await api.batch(back.map((o) => ({ table: 'shots', id: o.id, field: o.field, value: o.value })));
+        await api.batch(back.map((o) => ({ table: o.table, id: o.id, field: o.field, value: o.value })));
         for (const o of back) {
-          const s = shotById(o.id);
-          if (s) { s[o.field] = o.value; refreshShotCell(s, o.field); }
+          const s = resolve(o);
+          if (s) { s[o.field] = o.value; refresh(s, o); }
         }
       },
     });
-    toast('已改 ' + changed.length + ' 处（Ctrl+Z 可撤）');
-  } else {
-    toast('没有变化');
   }
-  if (errs.length) toast(errs.length + ' 项被拒绝', 'err');
-  return changed.length;
+  if (opts.done) {
+    opts.done(back.length, errs, ret);
+  } else {
+    if (back.length) toast('已改 ' + back.length + ' 处（Ctrl+Z 可撤）');
+    else toast('没有变化');
+    if (errs.length) toast(errs.length + ' 项被拒绝', 'err');
+  }
+  return back.length;
 }
 
 export function clearSelectionCells() {

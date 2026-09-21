@@ -11,8 +11,8 @@ import { openManager } from './blockman.js';
 import { aiTextMenu } from './aiwrite.js';
 import { openPromptDraft } from './draft.js';
 import {
-  EDITOR_MIN_H, editorReset, editorPush, editorMark, editorUndo, editorRedo,
-  editorHasUndo, editorOnInput, insertInto, replaceAll,
+  EDITOR_MIN_H, editorReset, editorUndo, editorRedo,
+  editorHasUndo, editorOnInput, insertInto, replaceAll, replaceRange,
 } from './hbedit.js';
 
 // ctx 注入（scene.js）：getData / refresh / allShots（镜头序单点在 scene.js）/
@@ -254,13 +254,7 @@ function wireEditorEvents(pb, refs, s, data) {
             p0 = ta.value.indexOf(seg);           // 锚点过期（卡片开着时编辑过）→ 退化：首个相同段
             if (p0 < 0) { toast('选段已变化，未替换——请重新选中再试', 'err'); return; }
           }
-          editorPush(ta);
-          ta.value = ta.value.slice(0, p0) + after + ta.value.slice(p0 + seg.length);
-          const pos = p0 + after.length;
-          ta.focus();
-          ta.setSelectionRange(pos, pos);
-          growTextarea(ta, EDITOR_MIN_H);
-          editorMark(ta);
+          replaceRange(ta, p0, p0 + seg.length, after);   // 范围替换单点（L7）
           toast('已替换选段（Ctrl+Z 可撤）');
         });
       } else if (k === 'all') {
@@ -276,12 +270,7 @@ function wireEditorEvents(pb, refs, s, data) {
         const text = ta.value.slice(s0, s1);
         writeClipboard(text).then((ok) => {
           if (!ok) { toast('剪切失败：浏览器限制，请用 Ctrl+X'); return; }
-          editorPush(ta);                                  // 剪切也进撤销栈
-          ta.value = ta.value.slice(0, s0) + ta.value.slice(s1);
-          ta.focus();
-          ta.setSelectionRange(s0, s0);
-          growTextarea(ta, EDITOR_MIN_H);
-          editorMark(ta);
+          replaceRange(ta, s0, s1, '');                    // 剪切 = 空串替换（L7 单点，也进撤销栈）
           toast('已剪切选中文字（Ctrl+Z 可撤）');
         });
       } else if (k === 'selall') {
