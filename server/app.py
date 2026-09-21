@@ -29,6 +29,7 @@ ROUTES = [
     (re.compile(r"^/api/audit/rules$"), audit_api.rules_get),
     (re.compile(r"^/api/audit/summary$"), audit_api.summary),
     (re.compile(r"^/api/ai/settings$"), ai_api.settings_get),
+    (re.compile(r"^/api/ai/job$"), ai_api.job_get),
 ]
 
 POST_ROUTES = [
@@ -48,6 +49,8 @@ POST_ROUTES = [
     (re.compile(r"^/api/audit/rules$"), audit_api.rules_op),
     (re.compile(r"^/api/ai/settings$"), ai_api.settings_set),
     (re.compile(r"^/api/ai/test$"), ai_api.test),
+    (re.compile(r"^/api/ai/preview$"), ai_api.preview),
+    (re.compile(r"^/api/ai/apply$"), ai_api.apply_op),
 ]
 
 CONTENT_TYPES = {
