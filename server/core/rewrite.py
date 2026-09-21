@@ -6,12 +6,13 @@
 - 配方 = recipes/ai/*.md（一份配方一个动作）；每次调用现读——改了立即生效、无需重启。
 - 单次 ≤ 30 条；只改写既有文本——不增行、不删行、不动未选中项。
 - 预览任务在内存（重启即清，进度不是持久数据）；apply 前校验「原值未变」，防误覆盖手工改动。
+- 闸门（M10，批3）：同场在跑 → 并入（快照带 joined=True）；全通道并发 ≤ TASKS_MAX，防连点刷外呼。
 """
 import json
 import threading
 import time
 
-from core import ai, db, fields, ops
+from core import ai, db, fields, ops, recipes
 
 ACTIONS = {"rewrite": "rewrite.md", "concretize": "concretize.md",
            "strengthen": "strengthen.md", "expand": "expand.md"}
@@ -22,13 +23,33 @@ AI_FIELDS = {"shots": ("blocking", "dialogue", "director_note"),
 FIELD_LABELS = {f["key"]: f["label"] for f in (fields.SHOT_FIELDS + fields.BEAT_FIELDS)}
 _BRIEF = (("shot_size", "景别"), ("camera_pos", "机位"), ("blocking", "动作"))
 
+TASKS_MAX = 4                 # 全通道同时进行的外呼上限（草稿/改写共用；审计任务不在内）
+_tasks_lock = threading.Lock()
+_tasks_active = 0
+
+
+def _task_acquire():
+    global _tasks_active
+    with _tasks_lock:
+        if _tasks_active >= TASKS_MAX:
+            return False
+        _tasks_active += 1
+        return True
+
+
+def _task_release():
+    global _tasks_active
+    with _tasks_lock:
+        _tasks_active = max(0, _tasks_active - 1)
+
 
 def load_recipe(name):
-    """读一份创作配方（现读；改完下次调用即生效）。"""
-    p = db.ROOT / "recipes" / "ai" / name
-    if not p.is_file():
-        raise ValueError("配方缺失：%s" % name)
-    return p.read_text(encoding="utf-8")
+    """读一份创作配方（现读；改完下次调用即生效）。
+    经配方注册表白名单 + 路径双保险（批3 收口：不再裸拼路径）。"""
+    r = recipes.read(name)
+    if r["group"] != "ai":
+        raise ValueError("不是创作配方：%s" % name)
+    return r["content"]
 
 
 # ════════ 目标校验与上下文装载 ════════
@@ -180,7 +201,12 @@ class PreviewJobs:
 
     def start(self, scene_id, targets, action=None, instruction=None,
               chat=None, connect_factory=None):
-        """校验目标（同步——参数错立即抛）→ 建任务 → 后台出稿。返回任务快照。"""
+        """校验目标（同步——参数错立即抛）→ 建任务 → 后台出稿。返回任务快照。
+        同场已在跑 → 并入该任务（快照带 joined=True）；并发超限 → ValueError。"""
+        if instruction is not None and not isinstance(instruction, str):
+            raise ValueError("instruction 必须是文本")
+        if action is not None and not isinstance(action, str):
+            raise ValueError("action 必须是文本")
         instruction = (instruction or "").strip()[:500] or None
         if action is not None and instruction:
             raise ValueError("action 与 instruction 只能给一个")
@@ -195,6 +221,13 @@ class PreviewJobs:
         finally:
             con.close()
         with self._lock:
+            for j in self._jobs.values():        # 同场去重（M10）：连点/双击不重复外呼
+                if j.get("running") and j.get("scene_id") == scene_id:
+                    snap = self._snap(j)
+                    snap["joined"] = True
+                    return snap
+            if not _task_acquire():
+                raise ValueError("生成任务过多（同时最多 %d 个）——请等一个跑完再试" % TASKS_MAX)
             self._seq += 1
             job_id = self._seq
             job = {"id": job_id, "scene_id": scene_id,
@@ -213,13 +246,23 @@ class PreviewJobs:
         return snap
 
     def _prune(self):
+        """只淘汰已完成任务（M9）：在跑任务绝不剪——不够删就允许超 keep。"""
         if len(self._jobs) <= self._keep:
             return
-        for old in sorted(self._jobs)[:len(self._jobs) - self._keep]:
+        room = len(self._jobs) - self._keep
+        for old in sorted(self._jobs):
+            if room <= 0:
+                break
+            j = self._jobs.get(old)
+            if j and j.get("running"):
+                continue
             self._jobs.pop(old, None)
+            room -= 1
 
     def _run(self, job_id, sc, beats, shots, items, action, instruction,
              chat, connect_factory):
+        released = [False]
+
         def finish(err=None):
             with self._lock:
                 job = self._jobs.get(job_id)
@@ -228,6 +271,9 @@ class PreviewJobs:
                     job["error"] = err
                     job["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                     job["done"] = self._done(job)
+            if not released[0]:                      # 释放并发名额（恰好一次）
+                released[0] = True
+                _task_release()
 
         send = [it for it in items if not it["error"]]
         if not send:

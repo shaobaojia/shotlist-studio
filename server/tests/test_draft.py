@@ -327,5 +327,60 @@ class TestPromptDraft(Base):
             self.assertGreater(len(body), 200)
 
 
+class TestGates(Base):
+    def test_scene_join_running(self):
+        """同场草稿在跑 → 并入同一任务（M10）。"""
+        m = draft.DraftJobs()
+        calls = []
+
+        def slow(cfg, messages):
+            calls.append(1)
+            _t.sleep(0.5)
+            if "草稿·节拍骨架" in messages[0]["content"]:
+                return json.dumps(BEATS_OK, ensure_ascii=False)
+            return json.dumps(SHOTS_OK, ensure_ascii=False)
+
+        sid = self.mk_scene()
+        j1 = m.start_scene(sid, SCRIPT, chat=slow, connect_factory=self.factory)
+        j2 = m.start_scene(sid, SCRIPT, chat=slow, connect_factory=self.factory)
+        self.assertTrue(j2.get("joined"))
+        self.assertEqual(j2["id"], j1["id"])
+        self.wait(m, j1["id"])
+
+    def test_prompt_join_same_shot(self):
+        """同一镜头初稿在跑 → 并入（M10）。"""
+        m = draft.DraftJobs()
+
+        def slow(cfg, messages):
+            _t.sleep(0.4)
+            return "初稿正文"
+
+        sid = self.mk_scene()
+        shid = self.mk_shot(sid, "01")
+        j1 = m.start_prompt(sid, shid, chat=slow, connect_factory=self.factory)
+        j2 = m.start_prompt(sid, shid, chat=slow, connect_factory=self.factory)
+        self.assertTrue(j2.get("joined"))
+        self.assertEqual(j2["id"], j1["id"])
+        self.wait(m, j1["id"])
+
+    def test_prompt_different_shots_both_run(self):
+        """不同镜头各自成任务（并入只认同一镜头）。"""
+        m = draft.DraftJobs()
+
+        def slow(cfg, messages):
+            _t.sleep(0.4)
+            return "初稿正文"
+
+        sid = self.mk_scene()
+        s1 = self.mk_shot(sid, "01")
+        s2 = self.mk_shot(sid, "02")
+        j1 = m.start_prompt(sid, s1, chat=slow, connect_factory=self.factory)
+        j2 = m.start_prompt(sid, s2, chat=slow, connect_factory=self.factory)
+        self.assertFalse(j2.get("joined"))
+        self.assertNotEqual(j2["id"], j1["id"])
+        self.wait(m, j1["id"])
+        self.wait(m, j2["id"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

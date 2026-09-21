@@ -278,6 +278,7 @@ function startSingleCard(action, target, o) {
     try {
       const res = await api.aiPreview({ scene_id: sid, action: action, targets: [target] });
       jobId = res.job.id;
+      if (res.job.joined) toast('本场已有生成任务在跑——已并入，出稿一起看');
       const job = await pollJob(jobId, () => !closed && !aborted);
       if (!job) return;
       if (closed || aborted) return;
@@ -468,6 +469,7 @@ function startBatchCard(opts) {
       else payload.action = opts.action;
       const res = await api.aiPreview(payload);
       jobId = res.job.id;
+      if (res.job.joined) toast('本场已有生成任务在跑——已并入，出稿一起看');
       const jb = await pollJob(jobId, () => !closed && !aborted);
       if (!jb) return;
       if (closed || aborted) return;

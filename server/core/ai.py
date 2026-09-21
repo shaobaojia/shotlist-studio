@@ -86,6 +86,6 @@ def chat(cfg, messages, temperature=0.2, timeout=180):
     return {"text": text, "ms": int((time.time() - t0) * 1000), "model": cfg["ai_model"]}
 
 
-def test(cfg):
-    """连通性小测：一句话往返。"""
+def probe(cfg):
+    """连通性小测：一句话往返（原名 test——与接口层 handler 重名易混，批3 改名）。"""
     return chat(cfg, [{"role": "user", "content": "只回复两个字：在的"}], temperature=0, timeout=30)

@@ -113,6 +113,20 @@ def _backup(base, g, n, p):
     return dst.name
 
 
+def _write_atomic(p, text):
+    """原子落盘（同目录临时文件 + os.replace）——并发生成线程读配方永远读到完整版本（M11）。"""
+    tmp = p.with_name(p.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, p)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
+
 def save(name, content, root=None):
     base = _base(root)
     g, n, t = _entry(name)
@@ -125,7 +139,7 @@ def save(name, content, root=None):
     p = _path(base, g, n)
     p.parent.mkdir(parents=True, exist_ok=True)
     bak = _backup(base, g, n, p)
-    p.write_text(content, encoding="utf-8")
+    _write_atomic(p, content)
     st = p.stat()
     return {"name": n, "group": g, "title": t,
             "size": st.st_size, "mtime": int(st.st_mtime), "backup": bak}
@@ -140,7 +154,7 @@ def restore_default(name, root=None):
     p = _path(base, g, n)
     bak = _backup(base, g, n, p)
     p.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(src, p)
+    _write_atomic(p, src.read_text(encoding="utf-8"))
     st = p.stat()
     return {"name": n, "group": g, "title": t,
             "content": p.read_text(encoding="utf-8"),

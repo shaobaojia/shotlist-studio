@@ -11,7 +11,7 @@ import re
 import threading
 import time
 
-from . import ai, db, ops
+from . import ai, db, ops, rewrite
 from .rewrite import _extract_json, load_recipe
 
 DRAFT_BEATS_RECIPE = "draft_beats.md"
@@ -119,10 +119,18 @@ class DraftJobs:
             return self._snap(job) if job else None
 
     def _prune(self):
+        """只淘汰已完成任务（M9）：在跑任务绝不剪——不够删就允许超 keep。"""
         if len(self._jobs) <= self._keep:
             return
-        for old in sorted(self._jobs)[:len(self._jobs) - self._keep]:
+        room = len(self._jobs) - self._keep
+        for old in sorted(self._jobs):
+            if room <= 0:
+                break
+            j = self._jobs.get(old)
+            if j and j.get("running"):
+                continue
             self._jobs.pop(old, None)
+            room -= 1
 
     # ── 场级：从台本出草稿 ──
 
@@ -141,6 +149,15 @@ class DraftJobs:
         finally:
             con.close()
         with self._lock:
+            for j in self._jobs.values():        # 同场去重（M10）：连点并入同一任务
+                if (j.get("kind") == "scene" and j.get("running")
+                        and j.get("scene_id") == scene_id):
+                    snap = self._snap(j)
+                    snap["joined"] = True
+                    return snap
+            if not rewrite._task_acquire():
+                raise ValueError("生成任务过多（同时最多 %d 个）——请等一个跑完再试"
+                                 % rewrite.TASKS_MAX)
             self._seq += 1
             job_id = self._seq
             job = {"id": job_id, "kind": "scene", "scene_id": scene_id, "running": True,
@@ -155,6 +172,8 @@ class DraftJobs:
         return snap
 
     def _run_scene(self, job_id, sc, script, chat, connect_factory):
+        released = [False]
+
         def finish(err=None):
             with self._lock:
                 j = self._jobs.get(job_id)
@@ -162,6 +181,9 @@ class DraftJobs:
                     j["running"] = False
                     j["error"] = err
                     j["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            if not released[0]:                      # 释放并发名额（恰好一次）
+                released[0] = True
+                rewrite._task_release()
         try:
             con = connect_factory() if connect_factory else db.connect()
             try:
@@ -226,6 +248,15 @@ class DraftJobs:
         finally:
             con.close()
         with self._lock:
+            for j in self._jobs.values():        # 同一镜头的初稿在跑 → 并入（M10）
+                if (j.get("kind") == "prompt" and j.get("running")
+                        and j.get("shot_id") == shot_id):
+                    snap = self._snap(j)
+                    snap["joined"] = True
+                    return snap
+            if not rewrite._task_acquire():
+                raise ValueError("生成任务过多（同时最多 %d 个）——请等一个跑完再试"
+                                 % rewrite.TASKS_MAX)
             self._seq += 1
             job_id = self._seq
             job = {"id": job_id, "kind": "prompt", "scene_id": scene_id, "shot_id": shot_id,
@@ -240,6 +271,8 @@ class DraftJobs:
         return snap
 
     def _run_prompt(self, job_id, sc, members, blocks, chat, connect_factory):
+        released = [False]
+
         def finish(err=None):
             with self._lock:
                 j = self._jobs.get(job_id)
@@ -247,6 +280,9 @@ class DraftJobs:
                     j["running"] = False
                     j["error"] = err
                     j["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            if not released[0]:                      # 释放并发名额（恰好一次）
+                released[0] = True
+                rewrite._task_release()
         try:
             con = connect_factory() if connect_factory else db.connect()
             try:

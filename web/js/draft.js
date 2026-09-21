@@ -75,6 +75,7 @@ async function startRun(script) {
   try {
     const res = await api.draft(card._sceneId, script);
     card._jobId = res.job.id;
+    if (res.job.joined) toast('本场已有草稿任务在跑——已并入');
     showRun();
     pollScene();
   } catch (err) {
@@ -247,6 +248,7 @@ export function openPromptDraft(opts) {
       const res = await api.draftPrompt(opts.sceneId, opts.shotId);
       if (pd !== self) return;                    // 卡已被替换/关闭：本轮作废
       const jid = res.job.id;
+      if (res.job.joined) toast('这个镜头的初稿正在生成——已并入');
       stop();
       let ticks = 0;
       stop = () => {

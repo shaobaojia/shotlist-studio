@@ -13,7 +13,7 @@ from core import recipes  # noqa: E402
 
 class TestRegistry(unittest.TestCase):
     def test_registry_covers_disk(self):
-        """真库：注册表内 10 份全部实际存在，且数量=10。"""
+        """真库：注册表 13 份（审计 5 + 创作 8）全部实际存在。"""
         self.assertEqual(sum(len(v) for v in recipes.REGISTRY.values()), 13)
         for g, rows in recipes.REGISTRY.items():
             for n, t in rows:
@@ -27,6 +27,16 @@ class TestRegistry(unittest.TestCase):
         for title, fname in audit.LLM_RECIPES.items():
             self.assertIn(fname, [n for n, t in recipes.REGISTRY["audit"]],
                           "审计配方 %s 未注册" % fname)
+
+    def test_ai_registry_matches_engine(self):
+        """创作注册名字串与 rewrite.ACTIONS / CMDBAR / draft 常量一致（对账）。"""
+        from core import draft as _draft
+        from core import rewrite as _rw
+        want = set(_rw.ACTIONS.values()) | {
+            _rw.CMDBAR_RECIPE, _draft.DRAFT_BEATS_RECIPE,
+            _draft.DRAFT_SHOTS_RECIPE, _draft.DRAFT_PROMPT_RECIPE}
+        reg = {n for n, t in recipes.REGISTRY["ai"]}
+        self.assertEqual(want, reg)
 
 
 class TestFileOps(unittest.TestCase):
@@ -60,6 +70,24 @@ class TestFileOps(unittest.TestCase):
         recipes.save("axis.md", "新建", root=self.root)
         self.assertEqual(recipes.read("axis.md", root=self.root)["content"], "新建")
 
+    def test_save_atomic(self):
+        """原子写（M11）：成功后无 .tmp 残留；写失败原文件未动、也不留 .tmp。"""
+        from unittest import mock
+        recipes.save("rewrite.md", "v2", root=self.root)
+        self.assertEqual(list((self.root / "recipes").rglob("*.tmp")), [])
+        real = Path.write_text
+
+        def boom(self, *a, **k):
+            if self.name.endswith(".tmp"):
+                raise OSError("disk full")
+            return real(self, *a, **k)
+
+        with mock.patch.object(Path, "write_text", boom):
+            with self.assertRaises(OSError):
+                recipes.save("rewrite.md", "坏写", root=self.root)
+        self.assertEqual(recipes.read("rewrite.md", root=self.root)["content"], "v2")
+        self.assertEqual(list((self.root / "recipes").rglob("*.tmp")), [])
+
     def test_save_rejects(self):
         for bad in ("nope.md", "../axis.md", "audit/axis.md", "rewrite.md/../x", ""):
             with self.assertRaises(recipes.RecipeError):
@@ -86,6 +114,7 @@ class TestFileOps(unittest.TestCase):
         baks = sorted((self.root / "data" / "recipe-backups").glob("ai__rewrite.*.md"))
         self.assertEqual(len(baks), 2)                                  # 保存 1 + 恢复前 1
         self.assertEqual(baks[-1].read_text(encoding="utf-8"), "改坏了")
+        self.assertEqual(list((self.root / "recipes").rglob("*.tmp")), [])
 
     def test_read_missing(self):
         with self.assertRaises(recipes.RecipeError):

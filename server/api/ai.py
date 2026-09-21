@@ -39,7 +39,7 @@ def test(m, body, q):
     finally:
         con.close()
     try:
-        res = ai.test(cfg)
+        res = ai.probe(cfg)
         return {"ok": True, "ms": res["ms"], "model": res["model"],
                 "reply": (res["text"] or "").strip()[:50]}, 200
     except ai.AiError as e:
@@ -52,11 +52,6 @@ def preview(m, body, q):
     sid = body.get("scene_id")
     if not isinstance(sid, int):
         return {"error": "参数不完整（scene_id）"}, 400
-    action, instruction = body.get("action"), body.get("instruction")
-    if action is not None and instruction:
-        return {"error": "action 与 instruction 只能给一个"}, 400
-    if action is None and not (isinstance(instruction, str) and instruction.strip()):
-        return {"error": "参数不完整（action 或 instruction）"}, 400
     con = db.connect()
     try:
         cfg = ai.get_config(con)
@@ -65,8 +60,9 @@ def preview(m, body, q):
     if not cfg["has_key"]:
         return {"error": "未配置 API Key（先去设置里填）"}, 400
     try:
-        job = rewrite.JOBS.start(sid, targets=body.get("targets"), action=action,
-                                 instruction=instruction)
+        job = rewrite.JOBS.start(sid, targets=body.get("targets"),
+                                 action=body.get("action"),
+                                 instruction=body.get("instruction"))
     except ValueError as e:
         return {"error": str(e)}, 400
     return {"ok": True, "job": job}, 200

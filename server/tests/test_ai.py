@@ -48,6 +48,13 @@ class TestRecipes(unittest.TestCase):
         with self.assertRaises(ValueError):
             rewrite.load_recipe("nope.md")
 
+    def test_recipe_whitelist(self):
+        """load_recipe 经注册表白名单（批3 收口：曾裸拼路径，可读任意相对路径）。"""
+        with self.assertRaises(ValueError):
+            rewrite.load_recipe("../audit/axis.md")
+        with self.assertRaises(ValueError):
+            rewrite.load_recipe("axis.md")               # 审计组配方不给创作通道
+
 
 class Base(unittest.TestCase):
     def setUp(self):
@@ -76,6 +83,15 @@ class Base(unittest.TestCase):
                 return m, j
             _t.sleep(0.05)
         raise AssertionError("preview job 未在限时内完成")
+
+    def wait_job(self, m, jid, timeout=15):
+        deadline = _t.time() + timeout
+        while _t.time() < deadline:
+            j = m.get(jid)
+            if j and not j["running"]:
+                return j
+            _t.sleep(0.05)
+        raise AssertionError("job 未在限时内完成")
 
     def shot_val(self, no, field="blocking"):
         con = self.factory()
@@ -199,6 +215,85 @@ class TestPreview(Base):
                     action="rewrite", connect_factory=f)
         with self.assertRaises(ValueError):
             m.start(999, [self.tshot("01")], action="rewrite", connect_factory=f)
+
+
+    def test_validation_type_errors(self):
+        """类型错一律 ValueError（M7/L6 核心侧）：不再 500。"""
+        m = rewrite.PreviewJobs()
+        f = self.factory
+        with self.assertRaises(ValueError):
+            m.start(1, [self.tshot("01")], action={"x": 1}, connect_factory=f)
+        with self.assertRaises(ValueError):
+            m.start(1, [self.tshot("01")], action=["rewrite"], connect_factory=f)
+        with self.assertRaises(ValueError):
+            m.start(1, [self.tshot("01")], instruction=123, connect_factory=f)
+
+    def test_whitespace_instruction_with_action(self):
+        """空白 instruction 视为未给（L6 口径：与 core 单源一致）。"""
+        m, j = self.preview([self.tshot("01")], action="rewrite", instruction="   ",
+                            chat=stub_items({0: "A"}))
+        self.assertEqual(j["items"][0]["after"], "A")
+
+
+class TestGates(Base):
+    def test_join_same_scene_running(self):
+        """同场在跑 → 并入同一任务（M10）：连点不重复外呼。"""
+        m = rewrite.PreviewJobs()
+        calls = []
+
+        def slow(cfg, messages):
+            calls.append(1)
+            _t.sleep(0.6)
+            return '{"items":[{"i":0,"after":"慢稿"}]}'
+
+        j1 = m.start(1, [self.tshot("01")], action="rewrite",
+                     chat=slow, connect_factory=self.factory)
+        j2 = m.start(1, [self.tshot("02")], action="rewrite",
+                     chat=slow, connect_factory=self.factory)
+        self.assertTrue(j2.get("joined"))
+        self.assertEqual(j2["id"], j1["id"])
+        j = self.wait_job(m, j1["id"])
+        self.assertEqual(len(calls), 1)                  # 只外呼了一次
+        self.assertEqual(j["items"][0]["after"], "慢稿")
+
+    def test_global_cap_and_release(self):
+        """全通道并发上限（M10）：占满即拒、跑完释放；跨任务簿同闸。"""
+        from unittest import mock
+        from core import draft as _draft
+        m = rewrite.PreviewJobs()
+
+        def slow(cfg, messages):
+            _t.sleep(0.5)
+            return '{"items":[{"i":0,"after":"x"}]}'
+
+        with mock.patch.object(rewrite, "TASKS_MAX", 1):
+            j1 = m.start(1, [self.tshot("01")], action="rewrite",
+                         chat=slow, connect_factory=self.factory)
+            self.assertFalse(rewrite._task_acquire())    # 名额已占满
+            dm = _draft.DraftJobs()
+            with self.assertRaises(ValueError):
+                dm.start_scene(1, "很长的台本。" * 12, chat=slow,
+                               connect_factory=self.factory)
+            self.wait_job(m, j1["id"])
+            self.assertTrue(rewrite._task_acquire())     # 跑完已释放
+            rewrite._task_release()
+
+    def test_prune_keeps_running(self):
+        """剪枝只淘汰完成件（M9）：在跑绝不剪，不够删就允许超 keep。"""
+        m = rewrite.PreviewJobs(keep=2)
+        with m._lock:
+            m._jobs = {1: {"id": 1, "running": True},
+                       2: {"id": 2, "running": False},
+                       3: {"id": 3, "running": False},
+                       4: {"id": 4, "running": False}}
+            m._prune()
+            self.assertIn(1, m._jobs)
+            self.assertEqual(sorted(m._jobs), [1, 4])
+            m._jobs = {5: {"id": 5, "running": True},
+                       6: {"id": 6, "running": True},
+                       7: {"id": 7, "running": True}}
+            m._prune()
+            self.assertEqual(len(m._jobs), 3)            # 全在跑：超 keep 保留
 
 
 class TestApply(Base):
