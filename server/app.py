@@ -14,6 +14,7 @@ from api import handlers  # noqa: E402
 from api import prompts as prompts_api  # noqa: E402
 from api import audit as audit_api  # noqa: E402
 from api import ai as ai_api  # noqa: E402
+from api import recipes as recipes_api  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = (ROOT / "web").resolve()
@@ -30,6 +31,8 @@ ROUTES = [
     (re.compile(r"^/api/audit/summary$"), audit_api.summary),
     (re.compile(r"^/api/ai/settings$"), ai_api.settings_get),
     (re.compile(r"^/api/ai/job$"), ai_api.job_get),
+    (re.compile(r"^/api/recipes$"), recipes_api.list_get),
+    (re.compile(r"^/api/recipes/get$"), recipes_api.get_get),
 ]
 
 POST_ROUTES = [
@@ -51,6 +54,8 @@ POST_ROUTES = [
     (re.compile(r"^/api/ai/test$"), ai_api.test),
     (re.compile(r"^/api/ai/preview$"), ai_api.preview),
     (re.compile(r"^/api/ai/apply$"), ai_api.apply_op),
+    (re.compile(r"^/api/recipes/save$"), recipes_api.save_post),
+    (re.compile(r"^/api/recipes/default$"), recipes_api.default_post),
 ]
 
 CONTENT_TYPES = {

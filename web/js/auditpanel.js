@@ -43,7 +43,7 @@ function build() {
   runBtn.addEventListener('click', () => audit.runAudit());
   head.appendChild(runBtn);
   const set = el('button', 'tool-btn small', '⚙');
-  set.title = '审计设置（规则开关 / 参数 / AI 通道）';
+  set.title = '审计设置（规则开关 / 参数）';
   set.addEventListener('click', openAuditSettings);
   head.appendChild(set);
   const x = el('button', 'tool-btn small', '✕');

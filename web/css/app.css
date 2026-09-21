@@ -603,3 +603,25 @@ td.editing, .beat-action.editing, .kv-value.editing { position: relative; }
 #ai-cmd .aic-hint { margin-left: auto; color: var(--dim); font-size: 11px; }
 .sbar-ai { width: 210px; flex: none; background: #fffdf6; border: 1px solid rgba(60, 50, 30, 0.22); border-radius: 6px; padding: 3px 8px; font: inherit; font-size: 12px; color: var(--text); }
 .sbar-ai:focus { outline: none; border-color: var(--accent); }
+
+/* 设置与配方中心（M4b-3）：顶栏「设置」→ AI 通道 + 配方 */
+.topbar-right { display: flex; align-items: center; gap: 8px; }
+#settings-btn { font-size: 11px; color: var(--dim); border: 1px solid rgba(60, 50, 30, 0.30); background: transparent; padding: 1px 9px; border-radius: 6px; cursor: pointer; white-space: nowrap; font-family: inherit; }
+#settings-btn:hover { color: var(--head); background: rgba(255, 255, 255, 0.45); border-color: rgba(105, 88, 58, 0.40); }
+#settings-card { position: fixed; right: 14px; top: 56px; width: 620px; max-width: 94vw; max-height: 80vh;
+  background: var(--card); border: 1px solid rgba(90, 78, 55, 0.30); border-radius: 10px;
+  z-index: 47; display: flex; flex-direction: column; box-shadow: var(--shadow-float); }
+#settings-card[hidden] { display: none; }
+.sc-head { display: flex; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--rule); background: var(--paper); border-radius: 10px 10px 0 0; }
+.sc-head b { font-size: 13px; color: var(--head); margin-right: auto; }
+.sc-body { overflow: auto; padding: 10px 12px 14px; }
+.sc-g-t { margin: 12px 0 4px; font-size: 11.5px; color: var(--dim); }
+.sc-r { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; cursor: pointer; border: 1px solid transparent; }
+.sc-r:hover { background: rgba(60, 50, 30, 0.05); border-color: var(--rule); }
+.sc-r-t { font-size: 12.5px; color: var(--head); font-weight: 600; }
+.sc-r-m { margin-left: auto; font-size: 11px; color: var(--dim); }
+.sc-r-go { font-size: 11px; color: var(--accent); }
+.sc-r.missing { opacity: 0.5; cursor: default; }
+.sc-e-head { display: flex; align-items: center; gap: 10px; margin: 6px 0 8px; }
+.sc-e-title { font-size: 13px; color: var(--head); }
+.sc-e-area { min-height: 300px; width: 100%; box-sizing: border-box; }

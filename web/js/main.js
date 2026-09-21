@@ -6,6 +6,7 @@ import { renderFilm } from './film.js';
 import { renderScene, refreshCurrentView } from './scene.js';
 import { undo, recordUndo } from './edit.js';
 import { openMenu } from './menu.js';
+import { bindSettingsBtn } from './settings.js';
 
 let navBound = false;
 let dragChip = null;
@@ -238,6 +239,7 @@ async function boot() {
     buildNav();
     refreshNavBadges();
     syncTopbarVar();
+    bindSettingsBtn(document.getElementById('settings-btn'));
     if (window.ResizeObserver) { try { new ResizeObserver(syncTopbarVar).observe(document.getElementById('topbar')); } catch (e) { /* ignore */ } }
     window.addEventListener('hashchange', route);
     window.addEventListener('shotlist:film-changed', () => { reloadFilm(); });

@@ -51,4 +51,8 @@ export const api = {
   aiPreview: (payload) => post('/api/ai/preview', payload),
   aiJob: (id) => get('/api/ai/job?id=' + id),
   aiApply: (jobId, itemIds) => post('/api/ai/apply', { job_id: jobId, item_ids: itemIds }),
+  recipes: () => get('/api/recipes'),
+  recipeGet: (name) => get('/api/recipes/get?name=' + encodeURIComponent(name)),
+  recipeSave: (name, content) => post('/api/recipes/save', { name: name, content: content }),
+  recipeDefault: (name) => post('/api/recipes/default', { name: name }),
 };
