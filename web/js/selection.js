@@ -103,7 +103,8 @@ export function bindSelection(view, c) {
     const t = e.target;
     if (!t || !t.closest) return;
     if (t.closest('td[data-field]') || t.closest('#sel-bar') || t.closest('.menu') || t.closest('.cell-editor, .cam-editor')
-        || t.closest('.ai-diff') || t.closest('.ai-cmd')) return;
+        || t.closest('.ai-diff') || t.closest('.ai-cmd')
+        || t.closest('#draft-card') || t.closest('#pdraft-card')) return;
     clearSel();
   }, true);
 

@@ -625,3 +625,29 @@ td.editing, .beat-action.editing, .kv-value.editing { position: relative; }
 .sc-e-head { display: flex; align-items: center; gap: 10px; margin: 6px 0 8px; }
 .sc-e-title { font-size: 13px; color: var(--head); }
 .sc-e-area { min-height: 300px; width: 100%; box-sizing: border-box; }
+
+/* 草稿档（M4b-4）：从台本出草稿 + 组级初稿 */
+.dz-violet { color: #6b5a8e; border-color: rgba(107, 90, 142, 0.45); }
+.dz-violet:hover { background: rgba(107, 90, 142, 0.08); }
+#draft-card { position: fixed; right: 14px; top: 56px; width: 640px; max-width: 94vw; max-height: 82vh;
+  background: var(--card); border: 1px solid rgba(90, 78, 55, 0.30); border-radius: 10px;
+  z-index: 48; display: flex; flex-direction: column; box-shadow: var(--shadow-float); }
+#draft-card[hidden] { display: none; }
+.dz-script { min-height: 190px; width: 100%; box-sizing: border-box; }
+.dz-stage { font-size: 12.5px; color: var(--head); padding: 10px 2px; }
+.dz-list { border: 1px solid var(--rule); border-radius: 8px; padding: 8px 10px; max-height: 46vh; overflow: auto; background: #fffefa; }
+.dz-beat { display: flex; gap: 8px; align-items: baseline; margin-top: 8px; }
+.dz-beat:first-child { margin-top: 0; }
+.dz-bno { background: var(--amber); color: #fff; font-size: 10px; border-radius: 7px; padding: 0 6px; }
+.dz-bname { font-size: 12.5px; font-weight: 600; color: var(--head); }
+.dz-bkind { font-size: 11px; color: var(--dim); }
+.dz-bsum { font-size: 11px; color: var(--dim); margin: 2px 0 4px 22px; line-height: 1.55; }
+.dz-shot { display: flex; gap: 6px; font-size: 11.5px; color: var(--ink2); padding: 2px 0 2px 22px; flex-wrap: wrap; }
+.dz-shot b { color: var(--head); font-weight: 600; }
+.dz-shot .dz-dim { color: var(--dim); }
+#pdraft-card { position: fixed; right: 14px; bottom: 14px; width: 460px; max-width: 92vw; max-height: 70vh;
+  background: var(--card); border: 1px solid rgba(90, 78, 55, 0.30); border-radius: 10px;
+  z-index: 48; display: flex; flex-direction: column; box-shadow: var(--shadow-float); }
+.dz-draft-text { white-space: pre-wrap; font: inherit; font-size: 12px; line-height: 1.6; color: var(--ink2);
+  background: #fffdf6; border: 1px solid rgba(60, 50, 30, 0.18); border-radius: 7px;
+  padding: 8px 10px; margin: 0 0 8px; max-height: 40vh; overflow: auto; }

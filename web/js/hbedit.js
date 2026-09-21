@@ -112,3 +112,15 @@ export function insertInto(ta, text) {
   growTextarea(ta, EDITOR_MIN_H);
   editorMark(ta);
 }
+
+// 整文替换（初稿落入等；进撤销栈——Ctrl+Z 可撤）
+export function replaceAll(ta, text) {
+  if (text == null) return;
+  editorPush(ta);
+  ta.value = text;
+  const pos = text.length;
+  ta.focus();
+  ta.setSelectionRange(pos, pos);
+  growTextarea(ta, EDITOR_MIN_H);
+  editorMark(ta);
+}

@@ -27,11 +27,14 @@ REGISTRY = {
         ("strengthen.md", "强化"),
         ("expand.md", "扩写"),
         ("cmdbar.md", "指挥条"),
+        ("draft_beats.md", "草稿·节拍骨架"),
+        ("draft_shots.md", "草稿·镜头行"),
+        ("draft_prompt.md", "草稿·组级初稿"),
     ],
 }
 GROUP_CN = {
     "audit": "审计配方 · 十规则里用 AI 的 5 项",
-    "ai": "创作配方 · 四动作 + 指挥条",
+    "ai": "创作配方 · 四动作 + 指挥条 + 草稿档×3",
 }
 MAX_BYTES = 200_000     # 单份上限 200KB
 KEEP_BACKUPS = 30       # 每份保留最近 N 个备份

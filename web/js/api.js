@@ -55,4 +55,8 @@ export const api = {
   recipeGet: (name) => get('/api/recipes/get?name=' + encodeURIComponent(name)),
   recipeSave: (name, content) => post('/api/recipes/save', { name: name, content: content }),
   recipeDefault: (name) => post('/api/recipes/default', { name: name }),
+  draft: (sceneId, script) => post('/api/ai/draft', { scene_id: sceneId, script: script }),
+  draftPrompt: (sceneId, shotId) => post('/api/ai/draft/prompt', { scene_id: sceneId, shot_id: shotId }),
+  draftJob: (id) => get('/api/ai/draft/job?id=' + id),
+  draftApply: (jobId) => post('/api/ai/draft/apply', { job_id: jobId }),
 };

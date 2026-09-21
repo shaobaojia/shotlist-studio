@@ -17,6 +17,7 @@ import { initHotbox, releaseComposer } from './hotbox.js';
 import { initAudit, onPainted as auditOnPainted } from './audit.js';
 import { bindAuditBtn, toggleAuditPanel, closeAuditPanel } from './auditpanel.js';
 import { initAiWrite, closeAiCards } from './aiwrite.js';
+import { openSceneDraft, closeDraftCards } from './draft.js';
 
 const PREFS_KEY = 'shotlist_prefs_v1';
 let prefs = loadPrefs();   // { wrap, hidden:{key:true=隐藏}, widths:{key:px} }
@@ -167,6 +168,7 @@ function paintScene(view) {
   if (!data) return;
   releaseComposer();               // 重绘前释放编辑面（防悬空 activeBox / 陈旧上下文写库；订阅与点外监听一并清）
   closeAiCards();                  // 重绘前收起 AI 预览卡（M4b-2）
+  closeDraftCards();               // 重绘前收起草稿卡（M4b-4）
   clearSel();
   view.textContent = '';
   view.classList.toggle('wrap-off', !prefs.wrap);
@@ -176,8 +178,8 @@ function paintScene(view) {
   view.appendChild(freeze);
   const shots = allShots(data);
   if (!shots.length && !data.beats.length) {
-    view.appendChild(el('div', 'empty', '本场暂无镜头——用下方「＋ 添加节拍」搭骨架，再往里加镜头。'));
-    view.appendChild(addBeatBar());
+    view.appendChild(el('div', 'empty', '本场暂无镜头——「＋ 添加节拍」搭骨架，或「✦ 从台本出草稿」贴一段台本先出初稿。'));
+    view.appendChild(addBeatBar(true));
     syncFreezeH();
     return;
   }
@@ -224,7 +226,7 @@ function fmtDur(sec) {
 }
 
 // 场次末尾「＋ 添加节拍」（空场也显示：搭骨架入口）
-function addBeatBar() {
+function addBeatBar(withDraft) {
   const bar = el('div', 'add-beat-bar');
   const btn = el('button', 'tool-btn add-beat', '＋ 添加节拍');
   btn.title = '在本场末尾添加节拍';
@@ -250,6 +252,14 @@ function addBeatBar() {
     }
   });
   bar.appendChild(btn);
+  if (withDraft) {
+    const d = el('button', 'tool-btn add-beat dz-violet', '✦ 从台本出草稿…');
+    d.title = '贴一段台本，AI 搭出节拍骨架 + 镜头行草稿（仅空场可用）';
+    d.addEventListener('click', () => {
+      if (currentData) openSceneDraft(currentData.scene.id, refreshCurrentView);
+    });
+    bar.appendChild(d);
+  }
   return bar;
 }
 

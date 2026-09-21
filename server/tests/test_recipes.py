@@ -14,7 +14,7 @@ from core import recipes  # noqa: E402
 class TestRegistry(unittest.TestCase):
     def test_registry_covers_disk(self):
         """真库：注册表内 10 份全部实际存在，且数量=10。"""
-        self.assertEqual(sum(len(v) for v in recipes.REGISTRY.values()), 10)
+        self.assertEqual(sum(len(v) for v in recipes.REGISTRY.values()), 13)
         for g, rows in recipes.REGISTRY.items():
             for n, t in rows:
                 p = Path(recipes.db.ROOT) / "recipes" / g / n

@@ -9,9 +9,10 @@ import { buildShelf, storeAsBlock, byPosition } from './blocks.js';
 import { writeClipboard } from './clipboard.js';
 import { openManager } from './blockman.js';
 import { aiTextMenu } from './aiwrite.js';
+import { openPromptDraft } from './draft.js';
 import {
   EDITOR_MIN_H, editorReset, editorPush, editorMark, editorUndo, editorRedo,
-  editorHasUndo, editorOnInput, insertInto,
+  editorHasUndo, editorOnInput, insertInto, replaceAll,
 } from './hbedit.js';
 
 // ctx 注入（scene.js）：getData / refresh / allShots（镜头序单点在 scene.js）/
@@ -66,6 +67,21 @@ function renderBox(pb) {
         : '提示词（镜 ' + g.member_shots[0] + '）')
     : '提示词（未组 —— 写入时自动建组）';
   head.appendChild(label);
+  const dbtn = el('button', 'tool-btn small dz-violet', '✦ 初稿');
+  dbtn.title = '按本组镜头数据 + 块库出一版初稿（进编辑面、未保存）';
+  dbtn.addEventListener('mousedown', (e) => e.preventDefault());
+  dbtn.addEventListener('click', () => {
+    openPromptDraft({
+      sceneId: pb._ctx.data.scene.id, shotId: s.id,
+      onInsert: (text) => {
+        if (!pb._state || pb._state.collapsed) activateBox(pb);
+        const st = pb._state;
+        if (st && st.ta) { replaceAll(st.ta, text); }
+        toast('初稿已进编辑面——精修后「保存」才落库（Ctrl+Z 可撤）');
+      },
+    });
+  });
+  head.appendChild(dbtn);
   if (g && g.member_shots.length > 1) {
     const ops = el('span', 'pb-ops');
     const b1 = el('button', 'tool-btn small', '本镜独立');
@@ -130,7 +146,7 @@ function activateBox(pb) {
     if (t && pb.contains(t)) return;
     const m = menuEl();
     if (m && m.contains(t)) return;    // 菜单内点选不算点外
-    if (t.closest && t.closest('.ai-diff, .ai-cmd')) return;   // AI 预览卡不算点外（M4b-2）
+    if (t.closest && t.closest('.ai-diff, .ai-cmd, #draft-card, #pdraft-card')) return;   // 浮卡不算点外（M4b-2/4）
     collapseBox(pb, true);
   };
   pb._state.docMouse = onDocMouse;
