@@ -301,6 +301,7 @@ class DraftJobs:
                 raise ValueError("草稿不可用：%s" % (job["error"] or "生成为空"))
             if job.get("applied"):
                 raise ValueError("这份草稿已落入过——请重新生成")
+            job["applied"] = True        # 锁内认领（CAS）：并发双落入只放行一份
             beats = [dict(b) for b in job["beats"]]
             shots = [dict(s) for s in job["shots"]]
             scene_id = job["scene_id"]
@@ -347,11 +348,13 @@ class DraftJobs:
                 shot_ids.append(sid)
                 ops.record_history(con, scene_id, "shots", sid, "create", None, no, source="ai")
             con.commit()
+        except Exception:
+            with self._lock:
+                j = self._jobs.get(job_id)
+                if j:
+                    j["applied"] = False     # 写失败放开认领：修正后可重试
+            raise
         finally:
             con.close()
-        with self._lock:
-            j = self._jobs.get(job_id)
-            if j:
-                j["applied"] = True
         return {"beat_ids": beat_ids, "shot_ids": shot_ids,
                 "applied": {"beats": len(beat_ids), "shots": len(shot_ids)}}

@@ -121,6 +121,19 @@ class TestProgramRules(unittest.TestCase):
         self.assertEqual(audit.seed_default_rules(self.con), 0)
         self.assertEqual(len(audit.rules_state(self.con)), 10)
 
+    def test_seed_reset_remaps_issues(self):
+        """--reset 重建：存量问题按 title 回迁新规则 id（不留孤儿——回归：曾全变 NULL）。"""
+        self.run_audit()
+        before = audit.issues_state(self.con, self.sid)["issues"]
+        self.assertEqual(len(before), 4)
+        self.assertTrue(all(r["rule_id"] is not None for r in before))
+        audit.seed_default_rules(self.con, reset=True)
+        after = audit.issues_state(self.con, self.sid)["issues"]
+        self.assertEqual(len(after), 4)
+        self.assertTrue(all(r["rule_id"] is not None for r in after))
+        self.assertTrue(all(r["rule_title"] != "?" for r in after))
+        self.assertEqual(len(audit.rules_state(self.con)), 10)
+
 
 class TestLlmRules(unittest.TestCase):
     def setUp(self):
@@ -146,8 +159,11 @@ class TestLlmRules(unittest.TestCase):
     def test_llm_garbage_and_bad_ref(self):
         def garbage(cfg, messages):
             return "抱歉，我无法完成。not json"
-        audit.run_scene(self.con, self.sid, ai_chat=garbage)
+        summary, _ = audit.run_scene(self.con, self.sid, ai_chat=garbage)
         self.assertEqual(len(_issues(self.con, self.sid, "轴线")), 0)
+        axis = [x for x in summary["rules"] if x["title"] == "轴线"][0]
+        self.assertFalse(axis["ran"])                     # 不可解析 → 规则级 error（不静默）
+        self.assertIn("回包", axis["error"])
 
         def bad_ref(cfg, messages):
             if "越轴" in messages[0]["content"]:
@@ -165,6 +181,16 @@ class TestLlmRules(unittest.TestCase):
         self.assertIn("boom", axis["error"])
         prog = ("闭环", "戏点密度", "戏点特写", "景别完整", "声音完整性")
         self.assertTrue(all(x["ran"] for x in summary["rules"] if x["title"] in prog))
+
+    def test_unparseable_reply_no_silent_fix(self):
+        """LLM 回包不可解析 → 该规则跳过 reconcile：旧 open 不被假熄灭（回归）。"""
+        audit.run_scene(self.con, self.sid, ai_chat=_stub_axis("视线反向，疑越轴"))
+        self.assertEqual(_issues(self.con, self.sid, "轴线")[0]["status"], "open")
+
+        def garbage(cfg, messages):
+            return "不知道。"
+        audit.run_scene(self.con, self.sid, ai_chat=garbage)
+        self.assertEqual(_issues(self.con, self.sid, "轴线")[0]["status"], "open")
 
 
 class TestJobManager(unittest.TestCase):
@@ -209,6 +235,72 @@ class TestJobManager(unittest.TestCase):
             self.assertTrue(all(s == "done" for s in states.values()), states)
             self.assertEqual(j["found_total"], 4)
             con = factory()
+            try:
+                self.assertEqual(audit.issues_state(con, 1)["counts"]["open"], 4)
+            finally:
+                con.close()
+
+    def test_concurrent_start_joins_instead_of_double(self):
+        """并发 start：第二个必须并入（不双读规则/双跑）——回归：曾双跑双写。"""
+        import os
+        import sqlite3
+        import tempfile
+        import threading
+        import time as _t
+
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "audit.db")
+            seed = make_audit_db(path)
+            audit.seed_default_rules(seed)
+            seed.close()
+            calls = []
+            entered = threading.Event()
+            gate = threading.Event()
+
+            def factory():
+                name = threading.current_thread().name
+                calls.append(name)
+                if name == "starter-1" and calls.count("starter-1") == 1:
+                    entered.set()
+                    gate.wait(5)
+                c = sqlite3.connect(path, timeout=10)
+                c.execute("PRAGMA foreign_keys=ON")
+                c.row_factory = sqlite3.Row
+                return c
+
+            m = audit.JobManager()
+            snaps = {}
+
+            def go(name):
+                snaps[name] = m.start(1, chat=lambda cfg, ms: '{"findings": []}',
+                                      connect_factory=factory)
+
+            t1 = threading.Thread(target=go, args=("starter-1",), name="starter-1")
+            t2 = threading.Thread(target=go, args=("starter-2",), name="starter-2")
+            t1.start()
+            self.assertTrue(entered.wait(3))
+            t2.start()
+            _t.sleep(0.15)                       # 让第二路抵达临界区
+            gate.set()
+            t1.join(5)
+            t2.join(5)
+            self.assertFalse(t1.is_alive() or t2.is_alive())
+            self.assertEqual(calls.count("starter-1"), 1)
+            self.assertEqual(calls.count("starter-2"), 0)      # 并入：第二路不读规则
+            self.assertTrue(snaps["starter-2"].get("joined"))
+            self.assertFalse(snaps["starter-1"].get("joined"))
+            self.assertEqual(snaps["starter-1"]["started_at"], snaps["starter-2"]["started_at"])
+            deadline = _t.time() + 15
+            while _t.time() < deadline:
+                j = m.status(1)
+                if j and not j["running"]:
+                    break
+                _t.sleep(0.1)
+            j = m.status(1)
+            self.assertFalse(j["running"])
+            con = sqlite3.connect(path, timeout=10)
+            con.execute("PRAGMA foreign_keys=ON")
+            con.row_factory = sqlite3.Row
             try:
                 self.assertEqual(audit.issues_state(con, 1)["counts"]["open"], 4)
             finally:

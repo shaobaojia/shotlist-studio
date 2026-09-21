@@ -95,7 +95,10 @@ def issue_op(m, body, q):
             sid, rid = row["scene_id"], row["rule_id"]
         finally:
             con.close()
-        return {"ok": True, "job": audit.JOBS.start(sid, only=[rid])}, 200
+        if rid is None:
+            return {"error": "问题未关联规则（规则可能重种过）——请先「跑审计」一轮后再试"}, 400
+        job = audit.JOBS.start(sid, only=[rid])
+        return {"ok": True, "job": job, "joined": bool(job.get("joined"))}, 200
     con = db.connect(rw=True)
     try:
         if action == "waive":

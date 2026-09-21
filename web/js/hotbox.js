@@ -249,9 +249,14 @@ function wireEditorEvents(pb, refs, s, data) {
         const seg = selText();
         const sPos = ta.selectionStart;
         aiTextMenu(pt, seg, ta.value, (after) => {
+          let p0 = sPos;
+          if (ta.value.slice(p0, p0 + seg.length) !== seg) {
+            p0 = ta.value.indexOf(seg);           // 锚点过期（卡片开着时编辑过）→ 退化：首个相同段
+            if (p0 < 0) { toast('选段已变化，未替换——请重新选中再试', 'err'); return; }
+          }
           editorPush(ta);
-          ta.value = ta.value.slice(0, sPos) + after + ta.value.slice(sPos + seg.length);
-          const pos = sPos + after.length;
+          ta.value = ta.value.slice(0, p0) + after + ta.value.slice(p0 + seg.length);
+          const pos = p0 + after.length;
           ta.focus();
           ta.setSelectionRange(pos, pos);
           growTextarea(ta, EDITOR_MIN_H);

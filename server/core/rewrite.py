@@ -288,6 +288,13 @@ def apply_items(con, job, item_ids=None):
         want = set(item_ids)
     else:
         want = {it["i"] for it in picks}
+    last = {}                                # 同一 (表,行,字段) 多条目 → 只认最后一条
+    for it in picks:
+        if it["i"] not in want or it.get("kind") != "db" or not it.get("after"):
+            continue
+        t, f = it.get("table"), it.get("field")
+        if t in AI_FIELDS and f in AI_FIELDS[t]:
+            last[(t, it["id"], f)] = it["i"]
     items, idx, skipped, seen = [], [], [], set()
     for it in picks:
         if it["i"] not in want:
@@ -302,6 +309,9 @@ def apply_items(con, job, item_ids=None):
         table, fld = it["table"], it["field"]
         if table not in AI_FIELDS or fld not in AI_FIELDS[table]:
             skipped.append({"i": it["i"], "reason": "目标不受支持"})
+            continue
+        if last.get((table, it["id"], fld)) != it["i"]:
+            skipped.append({"i": it["i"], "reason": "重复目标（保留最后一条）"})
             continue
         row = con.execute("SELECT %s AS v FROM %s WHERE id=?" % (fld, table),
                           (it["id"],)).fetchone()

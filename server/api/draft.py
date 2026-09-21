@@ -35,7 +35,8 @@ def job_get(m, q):
         return {"error": "参数不完整（id）"}, 400
     job = JOBS.get(jid)
     if not job:
-        return {"error": "任务不存在"}, 404
+        # 与 AI 域同契约：任务不在 → 200 + job:null（前端走「任务丢失」提示，不当网络错误死轮询）
+        return {"ok": True, "job": None}, 200
     return {"ok": True, "job": job}, 200
 
 

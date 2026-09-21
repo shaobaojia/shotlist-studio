@@ -227,6 +227,22 @@ class TestApply(Base):
         self.assertEqual(hist[0]["old_value"], "男人看着手机")
         self.assertEqual(hist[0]["new_value"], "新甲")
 
+    def test_apply_duplicate_targets_keep_last(self):
+        """同一 (表,行,字段) 多条目 → 只应用最后一条（回归：曾双写覆盖+幽灵痕迹）。"""
+        t = self.tshot("01")
+        m, j = self._mkjob({0: "先到", 1: "后到"}, targets=[t, t])
+        self.assertEqual(len(j["items"]), 2)
+        con = self.factory()
+        try:
+            res = rewrite.apply_items(con, m.get(j["id"]))
+        finally:
+            con.close()
+        self.assertEqual(res["applied"], 1)
+        self.assertEqual(res["submitted"], 1)
+        self.assertEqual(self.shot_val("01"), "后到")
+        self.assertEqual(len(self.history()), 1)
+        self.assertIn("重复目标", res["skipped"][0]["reason"])
+
     def test_apply_subset(self):
         m, j = self._mkjob({0: "新甲", 1: "新乙"})
         con = self.factory()

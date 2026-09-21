@@ -236,15 +236,18 @@ def _load_recipe(title):
 
 
 def _extract_json(text):
+    """AI 回包 → dict；不可解析即抛错——走规则级 error 通道（否则遗留问题会被误判「未再命中」静默熄灯）。"""
     t = (text or "").strip()
     i, j = t.find("{"), t.rfind("}")
     if i < 0 or j <= i:
-        return {}
+        raise ValueError("回包无 JSON 对象（%.60s）" % (t or "空"))
     try:
         obj = json.loads(t[i:j + 1])
-        return obj if isinstance(obj, dict) else {}
-    except Exception:
-        return {}
+    except Exception as e:
+        raise ValueError("回包 JSON 解析失败：%s" % e)
+    if not isinstance(obj, dict):
+        raise ValueError("回包 JSON 不是对象")
+    return obj
 
 
 def _resolve_ref(ctx, carrier, ref):
@@ -268,8 +271,11 @@ def _resolve_ref(ctx, carrier, ref):
 
 def _parse_findings(ctx, text):
     data = _extract_json(text)
+    raw = data.get("findings")
+    if not isinstance(raw, list):
+        raise ValueError("回包缺少 findings 列表")
     out = []
-    for f in (data.get("findings") or []):
+    for f in raw:
         if not isinstance(f, dict):
             continue
         carrier = str(f.get("carrier") or "").strip()
@@ -482,9 +488,24 @@ def update_rule(con, rid, enabled=None, params=None):
 
 
 def seed_default_rules(con, reset=False):
-    """种子规则：幂等（按 title 查重）；reset=True 先清空。"""
+    """种子规则：幂等（按 title 查重）。
+    reset=True：重建——删旧前记下存量问题的规则归属，重建后按 title 回迁新 id（不留孤儿）。"""
     if reset:
+        old = {r["id"]: r["title"] for r in con.execute("SELECT id, title FROM audit_rules")}
+        links = [(r["id"], r["rule_id"]) for r in con.execute(
+            "SELECT id, rule_id FROM audit_issues WHERE rule_id IS NOT NULL")]
         con.execute("DELETE FROM audit_rules")
+        new = {}
+        for title, kind, params, _desc in DEFAULT_RULES:
+            cur = con.execute("INSERT INTO audit_rules (kind, title, params) VALUES (?,?,?)",
+                              (kind, title, json.dumps(params, ensure_ascii=False)))
+            new[title] = cur.lastrowid
+        for iid, old_rid in links:
+            nid = new.get(old.get(old_rid))
+            if nid:
+                con.execute("UPDATE audit_issues SET rule_id=? WHERE id=?", (nid, iid))
+        con.commit()
+        return len(DEFAULT_RULES)
     have = {r["title"] for r in con.execute("SELECT title FROM audit_rules")}
     added = 0
     for title, kind, params, _desc in DEFAULT_RULES:
@@ -515,33 +536,38 @@ class JobManager:
             return self._snap(job) if job else None
 
     def start(self, scene_id, only=None, chat=None, connect_factory=None):
-        """启动（或加入进行中的）任务，立即返回任务快照。"""
+        """启动（或加入进行中的）任务，立即返回任务快照。
+        joined=True = 并入既有任务（此时 only 不生效，前端应如实提示）；
+        规则读取与登记同临界区——并发 start 只放行一份，不双跑。"""
         with self._lock:
             cur = self._jobs.get(scene_id)
             if cur and cur["running"]:
-                return self._snap(cur)
-        con = connect_factory() if connect_factory else db.connect()
-        try:
-            rules = [dict(r) for r in con.execute("SELECT * FROM audit_rules ORDER BY id")]
-        finally:
-            con.close()
-        if only is not None:
-            ids = set(only)
-            rules = [r for r in rules if r["id"] in ids]
-        else:
-            rules = [r for r in rules if r["enabled"]]
-        job = {
-            "scene_id": scene_id, "running": True,
-            "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "finished_at": None, "found_total": 0, "error": None,
-            "rules": [{"id": r["id"], "title": r["title"], "kind": r["kind"],
-                       "state": "pending", "found": 0, "error": None, "ms": 0} for r in rules],
-        }
-        with self._lock:
+                snap = self._snap(cur)
+                snap["joined"] = True
+                return snap
+            con = connect_factory() if connect_factory else db.connect()
+            try:
+                rules = [dict(r) for r in con.execute("SELECT * FROM audit_rules ORDER BY id")]
+            finally:
+                con.close()
+            if only is not None:
+                ids = set(only)
+                rules = [r for r in rules if r["id"] in ids]
+            else:
+                rules = [r for r in rules if r["enabled"]]
+            job = {
+                "scene_id": scene_id, "running": True,
+                "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "finished_at": None, "found_total": 0, "error": None,
+                "rules": [{"id": r["id"], "title": r["title"], "kind": r["kind"],
+                           "state": "pending", "found": 0, "error": None, "ms": 0} for r in rules],
+            }
             self._jobs[scene_id] = job
+            snap = self._snap(job)
+            snap["joined"] = False
         threading.Thread(target=self._run, args=(scene_id, only, chat, connect_factory),
                          daemon=True).start()
-        return self._snap(job)
+        return snap
 
     def _run(self, scene_id, only, chat, connect_factory):
         def updater(rule, state, found, error, ms):

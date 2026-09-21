@@ -259,7 +259,7 @@ export async function runAudit() {
     else cur = { sceneId: data.scene.id, issues: [], counts: { open: 0, fixed: 0, waived: 0 }, job: res.job, rules: [] };
     notify();
     startPoll();
-    toast('审计已开始（按设置跑）');
+    toast(res.job && res.job.joined ? '审计正在进行——本轮先等它跑完（完成即出结果）' : '审计已开始（按设置跑）');
   } catch (err) { toast('启动失败：' + err.message, 'err'); }
 }
 
@@ -269,7 +269,11 @@ export async function recheckIssue(i) {
     if (cur && res.job) cur.job = res.job;
     notify();
     startPoll();
-    toast('重检中：' + i.rule_title + ' …');
+    if (res.joined) {
+      toast('本场审计正在跑——重检未单独排上，请等本轮完成后再点一次', 'err');
+    } else {
+      toast('重检中：' + i.rule_title + ' …');
+    }
   } catch (err) { toast('重检失败：' + err.message, 'err'); }
 }
 

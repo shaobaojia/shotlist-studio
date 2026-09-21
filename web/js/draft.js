@@ -92,8 +92,16 @@ function showRun() {
 
 function pollScene() {
   if (card._timer) clearInterval(card._timer);
+  card._ticks = 0;
   card._timer = setInterval(async () => {
     if (!card._jobId) return;
+    if (++card._ticks > 420) {                  // 上限 ~8 分钟：死任务不许无限轮询
+      clearInterval(card._timer);
+      card._timer = null;
+      toast('任务超时——请重来', 'err');
+      showForm();
+      return;
+    }
     let j;
     try {
       j = (await api.draftJob(card._jobId)).job;
@@ -102,6 +110,7 @@ function pollScene() {
     }
     if (!j) {
       clearInterval(card._timer);
+      card._timer = null;
       toast('任务丢失（服务重启？）——请重来', 'err');
       showForm();
       return;
@@ -113,6 +122,7 @@ function pollScene() {
       return;
     }
     clearInterval(card._timer);
+    card._timer = null;
     if (j.error) {
       toast('生成失败：' + j.error, 'err');
       showForm();
@@ -181,17 +191,24 @@ function showPreview(j) {
 // ── 组级初稿小卡 ────────────────────────────────────────────
 
 export function openPromptDraft(opts) {
-  if (pd) { pd.remove(); pd = null; }
+  if (pd) {                       // 换卡：旧卡计时器先停（旧闭包只许碰本实例）
+    if (pd._timer) { clearInterval(pd._timer); pd._timer = null; }
+    pd.remove();
+    pd = null;
+  }
   pd = el('div');
+  const self = pd;                // 本卡实例：轮询只认它
   pd.id = 'pdraft-card';
+  let stop = () => {};            // 本轮的停表函数（run() 装载）
+  const close = () => {
+    stop();
+    self.remove();
+    if (pd === self) pd = null;
+  };
   const head = el('div', 'sc-head');
   head.appendChild(el('b', null, '✦ 组级初稿'));
   const x = el('button', 'tool-btn small', '✕');
-  x.addEventListener('click', () => {
-    if (pd._timer) clearInterval(pd._timer);
-    pd.remove();
-    pd = null;
-  });
+  x.addEventListener('click', close);
   head.appendChild(x);
   pd.appendChild(head);
   const body = el('div', 'sc-body');
@@ -208,9 +225,7 @@ export function openPromptDraft(opts) {
     ins.title = '替换当前编辑面内容；保存后才落库——编辑面内 Ctrl+Z 可撤';
     ins.addEventListener('click', () => {
       opts.onInsert(text);
-      if (pd._timer) clearInterval(pd._timer);
-      pd.remove();
-      pd = null;
+      close();
     });
     const again = el('button', 'tool-btn small', '再来一版');
     again.addEventListener('click', () => {
@@ -220,11 +235,7 @@ export function openPromptDraft(opts) {
       run();
     });
     const cancel = el('button', 'tool-btn small', '丢弃');
-    cancel.addEventListener('click', () => {
-      if (pd._timer) clearInterval(pd._timer);
-      pd.remove();
-      pd = null;
-    });
+    cancel.addEventListener('click', close);
     bar.appendChild(ins);
     bar.appendChild(again);
     bar.appendChild(cancel);
@@ -234,23 +245,25 @@ export function openPromptDraft(opts) {
   const run = async () => {
     try {
       const res = await api.draftPrompt(opts.sceneId, opts.shotId);
+      if (pd !== self) return;                    // 卡已被替换/关闭：本轮作废
       const jid = res.job.id;
-      if (pd._timer) clearInterval(pd._timer);
-      pd._timer = setInterval(async () => {
-        if (!pd) return;
+      stop();
+      let ticks = 0;
+      stop = () => {
+        if (self._timer) { clearInterval(self._timer); self._timer = null; }
+      };
+      self._timer = setInterval(async () => {
+        if (pd !== self) { stop(); return; }      // 本卡已谢幕：旧计时器自行退场
+        if (++ticks > 420) { stop(); stage.textContent = '任务超时——请重试'; return; }
         let j;
         try {
           j = (await api.draftJob(jid)).job;
         } catch (err) {
-          return;
+          return;                                 // 网络抖动：下轮再试
         }
-        if (!j) {
-          clearInterval(pd._timer);
-          stage.textContent = '任务丢失（服务重启？）——请重试';
-          return;
-        }
+        if (!j) { stop(); stage.textContent = '任务丢失（服务重启？）——请重试'; return; }
         if (j.running) return;
-        clearInterval(pd._timer);
+        stop();
         if (j.error) {
           stage.textContent = '生成失败：' + j.error;
           return;

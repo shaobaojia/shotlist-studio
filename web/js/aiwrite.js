@@ -39,12 +39,12 @@ export function closeAiCards() {
   if (curBatch) { curBatch(); curBatch = null; }
 }
 
-async function pollJob(jobId, onTick) {
+async function pollJob(jobId, isAlive) {
   for (let i = 0; i < 420; i++) {
+    if (isAlive && !isAlive()) return null;     // 卡片已关：停轮询（不打扰已付费的结果）
     const res = await api.aiJob(jobId);
     const j = res.job;
     if (!j) throw new Error('任务已丢失（服务可能重启过）——请重试');
-    if (onTick) onTick(j);
     if (!j.running) return j;
     await sleep(650);
   }
@@ -278,7 +278,8 @@ function startSingleCard(action, target, o) {
     try {
       const res = await api.aiPreview({ scene_id: sid, action: action, targets: [target] });
       jobId = res.job.id;
-      const job = await pollJob(jobId, () => {});
+      const job = await pollJob(jobId, () => !closed && !aborted);
+      if (!job) return;
       if (closed || aborted) return;
       setDone(job);
     } catch (err) {
@@ -467,7 +468,8 @@ function startBatchCard(opts) {
       else payload.action = opts.action;
       const res = await api.aiPreview(payload);
       jobId = res.job.id;
-      const jb = await pollJob(jobId, () => {});
+      const jb = await pollJob(jobId, () => !closed && !aborted);
+      if (!jb) return;
       if (closed || aborted) return;
       setDone(jb);
     } catch (err) {

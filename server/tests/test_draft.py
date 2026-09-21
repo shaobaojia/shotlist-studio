@@ -5,6 +5,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import threading
 import time as _t
 import unittest
 from pathlib import Path
@@ -201,6 +202,51 @@ class TestApply(Base):
         # 二次落入被拒
         with self.assertRaises(ValueError):
             m.apply(j["id"], connect_factory=self.factory)
+
+    def test_apply_concurrent_single_write(self):
+        """并发「落入」只放行一份（锁内认领）——回归：曾并发双写。"""
+        sid = self.mk_scene()
+        m, j = self.run_scene(sid, {"beats": BEATS_OK, "shots": SHOTS_OK})
+        jid = j["id"]
+        entered = threading.Event()
+        gate = threading.Event()
+        calls = []
+
+        def factory():
+            calls.append(threading.current_thread().name)
+            if len(calls) == 1:
+                entered.set()
+                gate.wait(5)
+            return self.factory()
+
+        results = {}
+
+        def worker(name):
+            try:
+                res = m.apply(jid, connect_factory=factory)
+                results[name] = ("ok", res["applied"])
+            except ValueError as e:
+                results[name] = ("rej", str(e))
+
+        t1 = threading.Thread(target=worker, args=("w1",), name="w1")
+        t2 = threading.Thread(target=worker, args=("w2",), name="w2")
+        t1.start()
+        self.assertTrue(entered.wait(3))
+        t2.start()
+        t2.join(5)
+        gate.set()
+        t1.join(5)
+        self.assertFalse(t1.is_alive() or t2.is_alive())
+        ok = [k for k, v in results.items() if v[0] == "ok"]
+        rej = [k for k, v in results.items() if v[0] == "rej"]
+        self.assertEqual(len(ok), 1, results)
+        self.assertEqual(len(rej), 1, results)
+        self.assertIn("已落入过", results[rej[0]][1])
+        self.assertEqual(results[ok[0]][1], {"beats": 2, "shots": 2})
+        bs = self.rows("SELECT * FROM beats WHERE scene_id=?", (sid,))
+        ss = self.rows("SELECT * FROM shots WHERE scene_id=?", (sid,))
+        self.assertEqual(len(bs), 2)                      # 只写了一份
+        self.assertEqual(len(ss), 2)
 
     def test_apply_appends(self):
         sid = self.mk_scene()
