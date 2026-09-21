@@ -197,6 +197,12 @@ class PreviewJobs:
             if not job:
                 return None
             job["done"] = self._done(job)
+            if job.get("running"):               # 轮询期轻载（P7）：大文本不进快照
+                snap = dict(job)
+                snap["items"] = [{"i": it["i"], "label": it["label"],
+                                  "error": it["error"], "ms": it["ms"]}
+                                 for it in job["items"]]
+                return snap
             return self._snap(job)
 
     def start(self, scene_id, targets, action=None, instruction=None,

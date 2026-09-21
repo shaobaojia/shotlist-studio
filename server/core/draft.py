@@ -116,7 +116,17 @@ class DraftJobs:
     def get(self, job_id):
         with self._lock:
             job = self._jobs.get(job_id)
-            return self._snap(job) if job else None
+            if not job:
+                return None
+            if job.get("running"):               # 轮询期轻载（P7）：骨架正文不随轮询回传
+                snap = dict(job)
+                snap["beats"] = []
+                snap["shots"] = []
+                snap["text"] = None
+                snap["beats_n"] = len(job.get("beats") or [])
+                snap["shots_n"] = len(job.get("shots") or [])
+                return snap
+            return self._snap(job)
 
     def _prune(self):
         """只淘汰已完成任务（M9）：在跑任务绝不剪——不够删就允许超 keep。"""

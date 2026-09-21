@@ -295,6 +295,24 @@ class TestGates(Base):
             m._prune()
             self.assertEqual(len(m._jobs), 3)            # 全在跑：超 keep 保留
 
+    def test_get_light_while_running(self):
+        """轮询期轻载（P7）：在跑时不出大文本，跑完给全量。"""
+        m = rewrite.PreviewJobs()
+
+        def slow(cfg, messages):
+            _t.sleep(0.6)
+            return '{"items":[{"i":0,"after":"A"}]}'
+
+        j = m.start(1, [self.tshot("01")], action="rewrite",
+                    chat=slow, connect_factory=self.factory)
+        mid = m.get(j["id"])
+        self.assertTrue(mid["running"])
+        self.assertNotIn("before", mid["items"][0])
+        self.assertEqual(mid["items"][0]["label"], "镜01 · 动作调度")
+        full = self.wait_job(m, j["id"])
+        self.assertEqual(full["items"][0]["before"], "男人看着手机")
+        self.assertEqual(full["items"][0]["after"], "A")
+
 
 class TestApply(Base):
     def _mkjob(self, mapping, targets=None, **kw):

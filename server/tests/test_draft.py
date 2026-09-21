@@ -381,6 +381,25 @@ class TestGates(Base):
         self.wait(m, j1["id"])
         self.wait(m, j2["id"])
 
+    def test_get_light_while_running(self):
+        """轮询期轻载（P7）：在跑时骨架正文不回传，数量字段保留（阶段提示用）。"""
+        m = draft.DraftJobs()
+
+        def slow(cfg, messages):
+            _t.sleep(0.5)
+            if "草稿·节拍骨架" in messages[0]["content"]:
+                return json.dumps(BEATS_OK, ensure_ascii=False)
+            return json.dumps(SHOTS_OK, ensure_ascii=False)
+
+        sid = self.mk_scene()
+        j = m.start_scene(sid, SCRIPT, chat=slow, connect_factory=self.factory)
+        mid = m.get(j["id"])
+        self.assertTrue(mid["running"])
+        self.assertEqual(mid["beats"], [])
+        self.assertIn("beats_n", mid)
+        j2 = self.wait(m, j["id"])
+        self.assertGreater(len(j2["beats"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

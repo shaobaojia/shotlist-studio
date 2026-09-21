@@ -118,7 +118,7 @@ function pollScene() {
     }
     if (j.running) {
       card._stage.textContent = j.stage === 'shots'
-        ? ('② 出镜头行…（骨架 ' + (j.beats || []).length + ' 拍已就绪）')
+        ? ('② 出镜头行…（骨架 ' + (j.beats_n != null ? j.beats_n : (j.beats || []).length) + ' 拍已就绪）')
         : '① 分析节拍骨架…';
       return;
     }
