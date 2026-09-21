@@ -32,7 +32,7 @@ export function openSceneDraft(sceneId, onApplied) {
 }
 
 function buildCard() {
-  card = el('div');
+  card = el('div', 'float-card');
   card.id = 'draft-card';
   card.hidden = true;
   const head = el('div', 'sc-head');
@@ -167,7 +167,7 @@ function showPreview(j) {
         type: 'custom', label: 'AI 草稿落入',
         undo: async () => {
           await api.del({ table: 'shots', ids: res.shot_ids });
-          for (const bid of res.beat_ids) await api.del({ table: 'beats', id: bid });
+          if (res.beat_ids && res.beat_ids.length) await api.del({ table: 'beats', ids: res.beat_ids });   // 一次批删，不再 N+1（批4/D 尾）
         },
       });
       toast('已落入：' + res.applied.beats + ' 拍 / ' + res.applied.shots + ' 镜（Ctrl+Z 可撤）');
@@ -197,7 +197,7 @@ export function openPromptDraft(opts) {
     pd.remove();
     pd = null;
   }
-  pd = el('div');
+  pd = el('div', 'float-card');
   const self = pd;                // 本卡实例：轮询只认它
   pd.id = 'pdraft-card';
   let stop = () => {};            // 本轮的停表函数（run() 装载）

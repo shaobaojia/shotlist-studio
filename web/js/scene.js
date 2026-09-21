@@ -1,7 +1,7 @@
 // 场级页——页面组装：头部（可编）/ 工具条（整理镜号·开关·筛选·跳转）/ 分组与平铺；
 // 表格与节拍区在 table.js；编辑引擎在 edit.js；拖动在 drag.js；筛选在 filter.js。
 import { api } from './api.js';
-import { state } from './state.js';
+import { state, fieldOf } from './state.js';
 import { el, fmt, toast } from './ui.js';
 import { JIWEI_LEGEND } from './cells.js';
 import { buildTable, beatSection } from './table.js';
@@ -84,10 +84,7 @@ export async function renderScene(view, sceneNo) {
     groupsMap: () => promptGroupsMap,
     reapply: () => { clearSel(); applyFilter(fctx); },
   });
-  initAudit({
-    getData: () => currentData,
-    refresh: refreshCurrentView,
-  });
+  initAudit({ getData: () => currentData });   // refresh 注入为死件，批4 删
   initAiWrite({
     getShot: (id) => (currentData ? allShots(currentData).find((s) => s.id === id) : null),
     sceneId: () => (currentData ? currentData.scene.id : null),
@@ -173,7 +170,7 @@ function paintScene(view) {
   view.textContent = '';
   view.classList.toggle('wrap-off', !prefs.wrap);
 
-  const freeze = el('div', 'scene-freeze');
+  const freeze = el('div', 'scene-freeze float-card');
   freeze.appendChild(sceneHead(data.scene, data));
   view.appendChild(freeze);
   const shots = allShots(data);
@@ -384,7 +381,7 @@ function viewTools() {
   buildFilterTools(bar, fctx);
 
   if (sortState) {
-    const f = state.meta.shot_fields.find((x) => x.key === sortState.key);
+    const f = fieldOf(sortState.key);
     bar.appendChild(el('span', 'sort-info',
       '视图排序：' + (f ? f.label : sortState.key) + (sortState.dir === 1 ? ' ↑' : ' ↓') + '（仅视图）'));
     const btn = el('button', 'tool-btn', '清除排序');

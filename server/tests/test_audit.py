@@ -9,7 +9,7 @@ sys.path.insert(0, str(SERVER))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from core import audit  # noqa: E402
-from _fixture import make_audit_db  # noqa: E402
+from _fixture import make_base_db  # noqa: E402
 
 
 def stub_empty(cfg, messages):
@@ -18,7 +18,7 @@ def stub_empty(cfg, messages):
 
 def _stub_axis(msg=None):
     def stub(cfg, messages):
-        if "越轴" in messages[0]["content"]:
+        if "审计配方 · 轴线" in messages[0]["content"]:
             if msg is None:
                 return '{"findings": []}'
             return '{"findings":[{"carrier":"seam","ref":"01->02","message":"%s"}]}' % msg
@@ -33,7 +33,7 @@ def _issues(con, sid, title=None):
 
 class TestProgramRules(unittest.TestCase):
     def setUp(self):
-        self.con = make_audit_db()
+        self.con = make_base_db()
         audit.seed_default_rules(self.con)
         self.sid = 1
 
@@ -57,6 +57,11 @@ class TestProgramRules(unittest.TestCase):
         self.run_audit()
         self.run_audit()
         state = audit.issues_state(self.con, self.sid)
+        self.assertEqual(state["counts"]["open"], 4)
+
+    def test_dict_reply_normalized(self):
+        """真 chat 回包形状 {text}——归一后照常解析（批4 钉）。"""
+        _, state = self.run_audit(stub=lambda cfg, messages: {"text": '{"findings": []}'})
         self.assertEqual(state["counts"]["open"], 4)
         self.assertEqual(len(state["issues"]), 4)
 
@@ -150,7 +155,7 @@ class TestResolveRef(unittest.TestCase):
 
 class TestLlmRules(unittest.TestCase):
     def setUp(self):
-        self.con = make_audit_db()
+        self.con = make_base_db()
         audit.seed_default_rules(self.con)
         self.sid = 1
 
@@ -179,7 +184,7 @@ class TestLlmRules(unittest.TestCase):
         self.assertIn("回包", axis["error"])
 
         def bad_ref(cfg, messages):
-            if "越轴" in messages[0]["content"]:
+            if "审计配方 · 轴线" in messages[0]["content"]:
                 return '{"findings":[{"carrier":"seam","ref":"99->01","message":"x"}]}'
             return '{"findings": []}'
         audit.run_scene(self.con, self.sid, ai_chat=bad_ref)
@@ -215,7 +220,7 @@ class TestJobManager(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "audit.db")
-            seed = make_audit_db(path)
+            seed = make_base_db(path)
             audit.seed_default_rules(seed)
             seed.close()
 
@@ -263,7 +268,7 @@ class TestJobManager(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as td:
             path = os.path.join(td, "audit.db")
-            seed = make_audit_db(path)
+            seed = make_base_db(path)
             audit.seed_default_rules(seed)
             seed.close()
             calls = []

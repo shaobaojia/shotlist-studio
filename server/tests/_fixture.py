@@ -56,8 +56,18 @@ def make_prompts_db():
     return con
 
 
-def make_audit_db(db_path=None):
-    """审计域基准库：1 场 2 节拍 4 镜。
+def conn_factory(db_path):
+    """临时库连接工厂（与生产 rw 连接同形；注入 job 类 connect_factory 用，批4/P12）。"""
+    def f():
+        con = sqlite3.connect(db_path, timeout=10)
+        con.row_factory = sqlite3.Row
+        con.execute("PRAGMA foreign_keys=ON")
+        return con
+    return f
+
+
+def make_base_db(db_path=None):
+    """通用基准库（审计/创作/草稿共用）：1 场 2 节拍 4 镜。
     基线问题：景别空×1（镜02）、声音空带台词×1（镜02）、戏点密度×1、戏点缺特写×1。"""
     con = _conn(db_path)
     con.execute("INSERT INTO films (title) VALUES ('t')")

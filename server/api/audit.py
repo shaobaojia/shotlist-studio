@@ -54,7 +54,7 @@ def audit_get(m, q):
     try:
         if not _scene_exists(con, sid):
             return {"error": "场景不存在"}, 400
-        return {"ok": True, "scene_id": sid, "rules": audit.rules_state(con),
+        return {"ok": True, "scene_id": sid,
                 "job": audit.JOBS.status(sid),
                 **audit.issues_state(con, sid)}, 200
     finally:

@@ -15,7 +15,7 @@ sys.path.insert(0, str(SERVER))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from core import draft      # noqa: E402
-from _fixture import make_audit_db  # noqa: E402
+from _fixture import conn_factory, make_base_db  # noqa: E402
 
 SCRIPT = "内景 旧公寓客厅 深夜。男人坐在沙发上反复解锁手机，屏幕上没有新消息。他起身走到窗前拉开一条缝，对面楼的灯一盏盏灭着。"
 
@@ -52,17 +52,12 @@ class Base(unittest.TestCase):
     def setUp(self):
         self.td = tempfile.TemporaryDirectory()
         self.path = os.path.join(self.td.name, "draft.db")
-        seed = make_audit_db(self.path)
+        seed = make_base_db(self.path)
         seed.close()
+        self.factory = conn_factory(self.path)
 
     def tearDown(self):
         self.td.cleanup()
-
-    def factory(self):
-        c = sqlite3.connect(self.path, timeout=10)
-        c.execute("PRAGMA foreign_keys=ON")
-        c.row_factory = sqlite3.Row
-        return c
 
     def mk_scene(self):
         con = self.factory()

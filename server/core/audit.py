@@ -342,7 +342,7 @@ def reconcile(con, scene_id, rule, findings):
                         " updated_at=datetime('now','localtime') WHERE id=?", (ex["id"],))
 
 
-def run_scene(con, scene_id, only=None, ai_chat=None, write=True, progress=None):
+def run_scene(con, scene_id, only=None, ai_chat=None, progress=None):
     """跑审计：only=None → 全部启用规则；only={id,…} → 指定规则（重检，无视开关）。
     progress(rule, state, found, error, ms) 供任务进度上报（state: running/done/error）。
     返回 (summary, state)。"""
@@ -400,13 +400,12 @@ def run_scene(con, scene_id, only=None, ai_chat=None, write=True, progress=None)
             summary.append({"id": r["id"], "title": r["title"], "ran": False,
                             "found": 0, "error": err, "ms": ms})
             continue
-        if write and findings is not None:
+        if findings is not None:
             reconcile(con, scene_id, r, findings)
         summary.append({"id": r["id"], "title": r["title"], "ran": True,
                         "found": len(findings or []), "error": None, "ms": ms})
         total += len(findings or [])
-    if write:
-        con.commit()
+    con.commit()
     return ({"scene_id": scene_id, "rules": summary, "found": total,
              "ms": int((time.time() - t0) * 1000)}, issues_state(con, scene_id))
 

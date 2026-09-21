@@ -3,8 +3,8 @@
 // 摄影机复合控件（景别×2 + 焦段）也在这里：改动即存，含旧格式归一化（内嵌焦段/景深迁入独立字段）。
 // 单选字段与复合控件走自绘浮动菜单（menu.js，非原生 select）：一次点击直达列表，拾取不关表单。
 import { api } from './api.js';
-import { toast, growTextarea } from './ui.js';
-import { openMenu, closeMenu, menuOpen, menuEl } from './menu.js';
+import { toast, growTextarea, isFloatTarget } from './ui.js';
+import { openMenu, closeMenu, menuOpen } from './menu.js';
 
 const undoStack = [];
 const UNDO_MAX = 100;
@@ -82,9 +82,10 @@ function openSelectMenu(host, cfg) {
 }
 
 function openEditor(host, cfg) {
-  const original = cfg.getValue() == null ? '' : String(cfg.getValue());
+  let base = cfg.getValue() == null ? '' : String(cfg.getValue());
   const ed = document.createElement(cfg.multiline ? 'textarea' : 'input');
-  ed.value = original;
+  ed.value = base;
+  ed._syncBaseline = (v) => { base = v; };   // 外部落库（AI 接受）后同步基线（L9）
   ed.title = cfg.multiline ? 'Ctrl+Enter 保存 · Tab 走格 · Esc 取消' : 'Enter 保存并下移 · Tab 走格 · Esc 取消';
   ed.className = 'cell-editor';
   host.classList.add('editing');
@@ -118,7 +119,7 @@ function openEditor(host, cfg) {
     const nv = ed.value;
     host.classList.remove('editing');
     cfg.renderCell();
-    if (commit && nv !== original) save(cfg, original, nv);
+    if (commit && nv !== base) save(cfg, base, nv);
   };
   ed.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -270,8 +271,7 @@ function openCamForm(host, cfg) {
   const onOutside = (e) => {
     const t = e.target;
     if (wrap.contains(t)) return;
-    const m = menuEl();
-    if (m && m.contains(t)) return; // 菜单内的点选不算点外
+    if (isFloatTarget(t)) return;   // 浮卡/菜单内点选不算点外（单点判定，L1）
     close();
   };
   const onEsc = (e) => {

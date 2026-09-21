@@ -2,7 +2,7 @@
 // + 批量操作（设值 / 清空 / 复制 TSV）。选区限定在单张表内；点击即编不受影响（拖出格才算框选）。
 // 设计对齐：设计稿 §4「Tab / 方向键走格；多选（Shift / 框选）→ 表底选区条批量改」。
 import { api } from './api.js';
-import { toast } from './ui.js';
+import { toast, isFloatTarget } from './ui.js';
 import { recordUndo } from './edit.js';
 import { writeClipboard, toTSV } from './clipboard.js';
 import { refreshShotCell, visibleRows } from './table.js';
@@ -102,9 +102,8 @@ export function bindSelection(view, c) {
     if (!sel) return;
     const t = e.target;
     if (!t || !t.closest) return;
-    if (t.closest('td[data-field]') || t.closest('#sel-bar') || t.closest('.menu') || t.closest('.cell-editor, .cam-editor')
-        || t.closest('.ai-diff') || t.closest('.ai-cmd')
-        || t.closest('#draft-card') || t.closest('#pdraft-card')) return;
+    if (t.closest('td[data-field]') || t.closest('#sel-bar')
+        || t.closest('.cell-editor, .cam-editor') || isFloatTarget(t)) return;
     clearSel();
   }, true);
 

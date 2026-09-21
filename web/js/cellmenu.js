@@ -6,7 +6,7 @@ import { openMenu } from './menu.js';
 import { recordUndo } from './edit.js';
 import { writeClipboard, pasteBlock, toTSV, tableFieldKeys } from './clipboard.js';
 import { refreshShotCell, refreshBeatAction } from './table.js';
-import { isAiField, aiMenu, aiMenuForBeat } from './aiwrite.js';
+import { isAiField, aiMenu, aiMenuForBeat, targetsFromSel } from './aiwrite.js';
 import { current as selCurrent, inCell, copySelectionTSV, clearSelectionCells, tlCell, rectOf } from './selection.js';
 
 let shotsOf = null;
@@ -73,18 +73,7 @@ function openSelMenu(td, tr, e) {
   const rc = rectOf();
   const n = (rc.r2 - rc.r1 + 1) * (rc.c2 - rc.c1 + 1);
   const mrows = rc.r2 - rc.r1 + 1;
-  const aiT = [];
-  const sCur = selCurrent();
-  if (sCur) {
-    for (let r = rc.r1; r <= rc.r2; r++) {
-      const trI = sCur.rows[r];
-      if (!trI) continue;
-      const sid = Number(trI.dataset.id);
-      for (let c = rc.c1; c <= rc.c2; c++) {
-        if (isAiField(sCur.cols[c])) aiT.push({ table: 'shots', id: sid, field: sCur.cols[c] });
-      }
-    }
-  }
+  const aiT = targetsFromSel();   // 单点：选区→AI 目标（批4/D 尾，删内联双循环）
   const items = [
     { key: 'copySel', label: '复制选区（' + n + ' 格）' },
     { key: 'copyCell', label: '复制本格' },

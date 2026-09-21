@@ -6,10 +6,10 @@ import { el, toast } from './ui.js';
 import { openMenu } from './menu.js';
 import { recordUndo } from './edit.js';
 import { refreshShotCell } from './table.js';
-import { state } from './state.js';
+import { state, fieldOf } from './state.js';
 import { current as selCurrent, rectOf } from './selection.js';
 
-const AIS = new Set(['blocking', 'dialogue', 'director_note']);
+const AIS_FALLBACK = ['blocking', 'dialogue', 'director_note', 'beat_action'];   // /api/meta 未载入前兜底（批4/P8）
 const ACTIONS = [
   { key: 'rewrite', label: '改写 · 换更准更顺的说法' },
   { key: 'concretize', label: '具象化 · 模糊动作钉成可见细节' },
@@ -17,14 +17,19 @@ const ACTIONS = [
   { key: 'expand', label: '扩写 · 一句话扩成拍得出的一拍' },
 ];
 const ACTION_CN = { rewrite: '改写', concretize: '具象化', strengthen: '强化', expand: '扩写' };
+const maxTargets = () => ((state.meta && state.meta.ai_max_targets) || 30);   // 上限单点：/api/meta（批4/P8）
 
 let ctx = { getShot: () => null, sceneId: () => null };
 export function initAiWrite(c) { ctx = Object.assign(ctx, c); }
 
-export function isAiField(key) { return AIS.has(key); }
+export function isAiField(key) {
+  const m = state.meta;
+  const list = (m && m.ai_fields) || AIS_FALLBACK;   // 单源：/api/meta（批4/P8）
+  return list.indexOf(key) !== -1;
+}
 
 function fieldLabel(key) {
-  const f = ((state.meta && state.meta.shot_fields) || []).find((x) => x.key === key);
+  const f = fieldOf(key);
   return f ? f.label : key;
 }
 
@@ -64,7 +69,7 @@ export function targetsFromSel() {
     if (!tr) continue;
     const id = Number(tr.dataset.id);
     for (let c = rc.c1; c <= rc.c2; c++) {
-      if (AIS.has(s.cols[c])) out.push({ table: 'shots', id: id, field: s.cols[c] });
+      if (isAiField(s.cols[c])) out.push({ table: 'shots', id: id, field: s.cols[c] });
     }
   }
   return out;
@@ -73,7 +78,7 @@ export function targetsFromSel() {
 // A. 右键（格子 / 选区）：单格 → 近处卡；多格 → 批量卡
 export function aiMenu(anchor, targets) {
   if (!targets.length) { toast('这里没有可改写的字段'); return; }
-  if (targets.length > 30) { toast('一次最多 30 格（本次 ' + targets.length + '）——请分批', 'err'); return; }
+  if (targets.length > maxTargets()) { toast('一次最多 ' + maxTargets() + ' 格（本次 ' + targets.length + '）——请分批', 'err'); return; }
   openActionMenu(anchor, targets, {});
 }
 
@@ -109,7 +114,7 @@ export function runCmdbarFromSel(instruction) {
   if (!instruction) { toast('先写一句指令（比如：都具象化）'); return; }
   const targets = targetsFromSel();
   if (!targets.length) { toast('选区内没有可改写的字段（支持：动作调度 / 台词 / 导演备注）', 'err'); return; }
-  if (targets.length > 30) { toast('一次最多 30 格（本次 ' + targets.length + '）——请分批', 'err'); return; }
+  if (targets.length > maxTargets()) { toast('一次最多 ' + maxTargets() + ' 格（本次 ' + targets.length + '）——请分批', 'err'); return; }
   startBatchCard({ instruction: instruction, targets: targets });
 }
 
@@ -148,7 +153,7 @@ function runPreview(action, targets, o) {
 
 function startSingleCard(action, target, o) {
   if (curSingle) curSingle();
-  const card = el('div', 'ai-diff');
+  const card = el('div', 'ai-diff float-card');
   const head = el('div', 'aid-head');
   const body = el('div');
   const foot = el('div', 'aid-foot');
@@ -162,11 +167,18 @@ function startSingleCard(action, target, o) {
   let closed = false;
   let aborted = false;
 
+  let lastAnchorRect = (o.anchor && o.anchor.nodeType === 1 && o.anchor.isConnected)
+    ? o.anchor.getBoundingClientRect() : null;
   const place = () => {
-    const a = (o.anchor && o.anchor.nodeType === 1)
-      ? o.anchor.getBoundingClientRect()
-      : { left: (o.anchor && o.anchor.x) || 24, right: (o.anchor && o.anchor.x) || 24,
-          top: (o.anchor && o.anchor.y) || 80, bottom: (o.anchor && o.anchor.y) || 80 };
+    let a;
+    if (o.anchor && o.anchor.nodeType === 1) {
+      if (o.anchor.isConnected) lastAnchorRect = o.anchor.getBoundingClientRect();
+      a = lastAnchorRect;                        // 锚点被重绘销毁：用最后一次矩形，不跳左上角（L8）
+      if (!a) a = { left: 24, right: 24, top: 80, bottom: 80 };
+    } else {
+      a = { left: (o.anchor && o.anchor.x) || 24, right: (o.anchor && o.anchor.x) || 24,
+            top: (o.anchor && o.anchor.y) || 80, bottom: (o.anchor && o.anchor.y) || 80 };
+    }
     const w = card.offsetWidth;
     const h = card.offsetHeight;
     let x = a.left;
@@ -222,13 +234,14 @@ function startSingleCard(action, target, o) {
         close();
         return;
       }
-      const res = await api.aiApply(jobId, [0]);
-      const skip = (res.skipped || [])[0];
-      if (skip) { toast('未应用：' + skip.reason, 'err'); return; }
+      const res = await api.aiApply(jobId, [it.i]);
+      const skip = (res.skipped || []).find((s) => s.i === it.i);
+      if (skip) { setError('未应用：' + skip.reason); return; }   // 终态卡，不再只 toast（P9）
       const ac = o.ac;
       ac.onLocal(it.after);
       if (ac.ed && ac.ed.isConnected) {
         ac.ed.value = it.after;   // 编辑器还开着：就地显示新值（收起时自然重画格子）
+        if (ac.ed._syncBaseline) ac.ed._syncBaseline(it.after);   // 基线同步：收起不重复写、不多压撤销（L9）
       } else {
         ac.renderCell();
       }
@@ -244,7 +257,11 @@ function startSingleCard(action, target, o) {
   };
 
   const setDone = (job) => {
-    const it = (job.items || [])[0] || {};
+    const items = job.items || [];
+    const it = items.find((x) => x.kind === 'db' && x.table === target.table
+                              && x.id === target.id && x.field === target.field)
+            || items.find((x) => x.kind === 'text' && x.before === (target.text || ''))
+            || items[0] || {};   // 并入任务时按目标定位，不再写死 [0]（P9）
     if (it.error || !it.after) { setError(it.error || '模型未返回内容'); return; }
     head.textContent = '✦ ' + ACTION_CN[action] + ' · 一版就绪';
     body.textContent = '';
@@ -258,7 +275,11 @@ function startSingleCard(action, target, o) {
     body.appendChild(r2);
     foot.textContent = '';
     const ok = el('button', 'aid-btn primary', '接受');
-    ok.addEventListener('click', (e) => { e.preventDefault(); accept(it); });
+    ok.addEventListener('click', (e) => {
+      e.preventDefault();
+      ok.disabled = true;                       // 防双击双提交（P9）
+      accept(it).finally(() => { ok.disabled = false; });
+    });
     const no = el('button', 'aid-btn', '拒绝');
     no.addEventListener('click', (e) => { e.preventDefault(); close(); });
     const again = el('button', 'aid-btn', '再来一版');
@@ -297,7 +318,7 @@ function startBatchCard(opts) {
   if (curBatch) curBatch();
   const isCmd = !!opts.instruction;
   const titleBase = isCmd ? '指挥条' : (ACTION_CN[opts.action] || '改写');
-  const card = el('div');
+  const card = el('div', 'float-card');
   card.id = 'ai-cmd';
   const head = el('div', 'aic-head');
   const htitle = el('span');

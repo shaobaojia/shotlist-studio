@@ -17,7 +17,7 @@ export function openAuditSettings() {
 }
 
 function build() {
-  panel = el('div');
+  panel = el('div', 'float-card');
   panel.id = 'audit-set';
   panel.hidden = true;
   const head = el('div', 'as-head');
@@ -95,13 +95,22 @@ function paramField(rid, params, k) {
     inp = document.createElement('input');
     inp.type = 'checkbox';
     inp.checked = val;
-    inp.addEventListener('change', () => saveRuleParams(rid, params, k, inp.checked));
+    inp.addEventListener('change', () => saveRuleParams(rid, params, k, inp.checked, inp));
   } else if (typeof val === 'number') {
     inp = document.createElement('input');
     inp.type = 'number';
     inp.className = 'as-input as-num';
     inp.value = val;
-    inp.addEventListener('change', () => saveRuleParams(rid, params, k, Number(inp.value) || 0));
+    inp.addEventListener('change', () => {
+      const raw = (inp.value || '').trim();
+      const n = /^\d+$/.test(raw) ? parseInt(raw, 10) : NaN;
+      if (!raw || !Number.isFinite(n) || n < 1) {   // 空值/折算一律拒绝：不再「显示 0、实跑 3」（L3）
+        inp.value = params[k];
+        toast('请输入 ≥1 的整数（保持原值不变）', 'err');
+        return;
+      }
+      saveRuleParams(rid, params, k, n, inp);
+    });
   } else if (Array.isArray(val)) {
     const multiline = val.length > 6;
     inp = document.createElement(multiline ? 'textarea' : 'input');
@@ -109,18 +118,19 @@ function paramField(rid, params, k) {
     inp.className = 'as-input' + (multiline ? ' as-area' : '');
     inp.value = val.join('，');
     inp.addEventListener('change', () => saveRuleParams(rid, params, k,
-      inp.value.split(/[，,\n]/).map((s) => s.trim()).filter(Boolean)));
+      inp.value.split(/[，,\n]/).map((s) => s.trim()).filter(Boolean), inp));
   } else {
     inp = document.createElement('input');
     inp.className = 'as-input';
     inp.value = String(val);
-    inp.addEventListener('change', () => saveRuleParams(rid, params, k, inp.value));
+    inp.addEventListener('change', () => saveRuleParams(rid, params, k, inp.value, inp));
   }
   wrap.appendChild(inp);
   return wrap;
 }
 
-async function saveRuleParams(rid, params, k, v) {
+async function saveRuleParams(rid, params, k, v, inp) {
+  const prev = params[k];
   const next = Object.assign({}, params);
   next[k] = v;
   try {
@@ -128,6 +138,11 @@ async function saveRuleParams(rid, params, k, v) {
     params[k] = v;
     toast('已保存（下次跑审计生效）');
   } catch (err) {
+    if (inp) {                                   // 失败回滚到原显示值（与开关同款，L3）
+      if (typeof prev === 'boolean') inp.checked = prev;
+      else if (Array.isArray(prev)) inp.value = prev.join('，');
+      else inp.value = String(prev);
+    }
     toast('保存失败：' + err.message, 'err');
   }
 }

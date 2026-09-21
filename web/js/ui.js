@@ -57,3 +57,9 @@ export function durText(v) {
   const n = parseFloat(s);
   return isNaN(n) ? s : Math.round(n) + 's';
 }
+
+
+// 浮层单点判定（批4/L1）：浮卡根统一挂 .float-card；点外监听一律走这里
+export function isFloatTarget(t) {
+  return !!(t && t.closest && t.closest('.float-card, .menu'));
+}

@@ -1,5 +1,5 @@
 // 表底选区条（M2-4）：选区出现时浮出——计数 / 批量设值（枚举走菜单、文本走输入）/ 复制 / 清空。
-import { state } from './state.js';
+import { state, fieldOf } from './state.js';
 import { el } from './ui.js';
 import { openMenu } from './menu.js';
 import { onChange, current, clearSel, rectOf, copySelectionTSV, clearSelectionCells, applyFieldValue } from './selection.js';
@@ -43,7 +43,7 @@ function updateCount(s) {
   const m = rc.r2 - rc.r1 + 1;
   const colsN = rc.c2 - rc.c1 + 1;
   if (colsN === 1) {
-    const f = state.meta.shot_fields.find((x) => x.key === s.cols[rc.c1]);
+    const f = fieldOf(s.cols[rc.c1]);
     countEl.textContent = '已选 ' + m + ' 镜 · ' + (f ? f.label : s.cols[rc.c1]);
   } else {
     countEl.textContent = '已选 ' + (m * colsN) + ' 格 · ' + m + ' 镜 · ' + colsN + ' 列';
@@ -82,13 +82,13 @@ function build() {
 
   const mid = el('span', 'sbar-mid');
   bar.appendChild(mid);
-  const f = state.meta.shot_fields.find((x) => x.key === pick.field) || null;
+  const f = fieldOf(pick.field) || null;
 
   const fbtn = el('button', 'tool-btn', f ? f.label : '设值…');
   fbtn.title = '选择要批量设置的字段';
   fbtn.addEventListener('click', () => {
     const items = BATCH_KEYS.map((k) => {
-      const ff = state.meta.shot_fields.find((x) => x.key === k);
+      const ff = fieldOf(k);
       return ff ? { key: k, label: ff.label, current: k === pick.field } : null;
     }).filter(Boolean);
     openMenu(fbtn, items, (k) => {

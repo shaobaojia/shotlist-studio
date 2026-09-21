@@ -9,7 +9,7 @@ const FIELD_HINT = { '景别完整': 'shot_size', '声音完整性': 'audio',
   '动作具象化': 'blocking', '空间一致性': 'spatial', '机位一致性': 'camera_pos' };
 
 let ctx = null;        // { getData, refresh }
-let cur = null;        // { sceneId, issues, counts, job, rules }
+let cur = null;        // { sceneId, issues, counts, job }
 let fetchedAt = 0;
 let pollTimer = null;
 let openKey = null;    // 'carrier:target' 当前展开的问题卡
@@ -51,7 +51,7 @@ function notify() { window.dispatchEvent(new CustomEvent('shotlist:audit-changed
 function applyRead(res, sid) {
   const wasRunning = !!(cur && cur.job && cur.job.running);
   cur = { sceneId: sid, issues: res.issues || [], counts: res.counts || { open: 0, fixed: 0, waived: 0 },
-          job: res.job || null, rules: res.rules || [] };
+          job: res.job || null };
   const key = stateKey();
   const changed = key !== lastKey;
   lastKey = key;
@@ -124,7 +124,6 @@ function buildLamp(key, count, msg) {
   lamp.title = msg || '审计问题（点击查看）';
   if (count > 1) lamp.appendChild(el('i', 'lamp-n', String(count)));
   const stop = (e) => e.stopPropagation();
-  lamp.addEventListener('mousedown', stop);
   lamp.addEventListener('pointerdown', stop);
   lamp.addEventListener('dblclick', stop);
   lamp.addEventListener('click', (e) => {
@@ -143,7 +142,7 @@ function clearCards() {
   document.querySelectorAll('.audit-card').forEach((n) => n.remove());
 }
 
-export function closeCard() {
+function closeCard() {
   clearCards();
   openKey = null;
   window.dispatchEvent(new Event('resize'));   // 场级卡收起：吸顶区高度重算（M3）
@@ -183,7 +182,7 @@ function openCard(key, data, silent) {
 }
 
 function insertCardTr(row, card) {
-  const tr = el('tr', 'audit-card-tr');
+  const tr = el('tr', 'audit-card-tr float-card');
   tr.dataset.for = String(row.dataset.id);   // 同行标记（筛选隐藏联动，M6）
   const td = document.createElement('td');
   const table = row.closest('table');
@@ -198,7 +197,7 @@ function insertCardTr(row, card) {
 }
 
 function buildCard(carrier, target, list, data) {
-  const card = el('div', 'audit-card');
+  const card = el('div', 'audit-card float-card');
   const head = el('div', 'ac-head');
   head.appendChild(el('b', null, '审计 · ' + carrierText(carrier, target, data)));
   head.appendChild(el('span', 'sp'));
@@ -287,7 +286,7 @@ export async function runAudit() {
     const res = await api.auditRun(data.scene.id);
     seq++;                       // 本地权威写：作废在飞旧读
     if (cur && cur.sceneId === data.scene.id) cur.job = res.job;
-    else cur = { sceneId: data.scene.id, issues: [], counts: { open: 0, fixed: 0, waived: 0 }, job: res.job, rules: [] };
+    else cur = { sceneId: data.scene.id, issues: [], counts: { open: 0, fixed: 0, waived: 0 }, job: res.job };
     notify();
     startPoll();
     toast(res.job && res.job.joined ? '审计正在进行——本轮先等它跑完（完成即出结果）' : '审计已开始（按设置跑）');

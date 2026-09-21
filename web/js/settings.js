@@ -5,6 +5,7 @@ import { api } from './api.js';
 import { el, toast } from './ui.js';
 
 let card = null, bodyEl = null, listBox = null;
+let viewDirty = null;    // 编辑态脏检查（批4：未保存返回提示）
 
 export function bindSettingsBtn(btn) {
   if (btn) btn.addEventListener('click', toggleSettings);
@@ -24,7 +25,7 @@ export function openSettings() {
 }
 
 function build() {
-  card = el('div');
+  card = el('div', 'float-card');
   card.id = 'settings-card';
   card.hidden = true;
   const head = el('div', 'sc-head');
@@ -82,12 +83,15 @@ function renderAI(sec, cfg) {
     sec.querySelectorAll('.as-input').forEach((inp) => {
       const v = (inp.value || '').trim();
       if (inp.dataset.k === 'api_key') { if (v) payload.api_key = v; }
-      else if (v) payload[inp.dataset.k] = v;
+      else payload[inp.dataset.k] = v;              // 三键恒定发送：空串 = 清回默认（M14）
     });
+    save.disabled = true;
     try {
-      await api.aiSave(payload);
+      const out = await api.aiSave(payload);
+      fillAI(sec, (out && out.config) || {});       // 回读刷新值与占位符（M14）
       toast('AI 配置已保存');
     } catch (err) { toast('保存失败：' + err.message, 'err'); }
+    save.disabled = false;
   });
   const testb = el('button', 'tool-btn small', '连通测试');
   const result = el('span', 'as-test-result', '');
@@ -106,6 +110,19 @@ function renderAI(sec, cfg) {
   bar.appendChild(testb);
   bar.appendChild(result);
   sec.appendChild(bar);
+}
+
+function fillAI(sec, cfg) {
+  const set = (k, v) => {
+    const i = sec.querySelector('.as-input[data-k="' + k + '"]');
+    if (i) i.value = v == null ? '' : v;
+  };
+  set('provider', cfg.provider);
+  set('model', cfg.model);
+  set('base_url', cfg.base_url);
+  set('api_key', '');                               // key 明文不留在 DOM（M14）
+  const kInp = sec.querySelector('.as-input[data-k="api_key"]');
+  if (kInp) kInp.placeholder = cfg.has_key ? '已配置（留空＝不改）' : '未配置';
 }
 
 // ── 二区：配方（列表 → 就地编辑）────────────────────────────
@@ -127,6 +144,7 @@ function fmtTime(sec) {
 }
 
 async function refreshList() {
+  viewDirty = null;
   listBox.textContent = '加载中…';
   try {
     const res = await api.recipes();
@@ -163,7 +181,10 @@ async function openEdit(name) {
   listBox.textContent = '';
   const head = el('div', 'sc-e-head');
   const back = el('button', 'tool-btn small', '‹ 返回列表');
-  back.addEventListener('click', () => { refreshList(); });
+  back.addEventListener('click', () => {
+    if (viewDirty && viewDirty() && !confirm('有未保存的修改，确定丢弃并返回列表？')) return;
+    refreshList();
+  });
   head.appendChild(back);
   head.appendChild(el('b', 'sc-e-title', r.title + '（' + r.group + '/' + r.name + '）'));
   listBox.appendChild(head);
@@ -172,6 +193,7 @@ async function openEdit(name) {
   ta.className = 'as-input as-area sc-e-area';
   ta.spellcheck = false;
   ta.value = r.content;
+  viewDirty = () => ta.value !== r.content;    // 脏检查（批4）
   listBox.appendChild(ta);
 
   const meta = el('div', 'as-desc', fmtSize(r.size) + ' · 改于 ' + fmtTime(r.mtime));
@@ -184,6 +206,7 @@ async function openEdit(name) {
     try {
       const out = await api.recipeSave(name, ta.value);
       const rr = out.recipe;
+      r.content = ta.value;                       // 基线同步：脏检查归零（批4）
       meta.textContent = fmtSize(rr.size) + ' · 改于 ' + fmtTime(rr.mtime) + ' · 旧版已备份';
       toast('已保存：' + r.title + '（立即生效，旧版已备份）');
     } catch (err) {
@@ -198,6 +221,7 @@ async function openEdit(name) {
     try {
       const out = await api.recipeDefault(name);
       ta.value = out.recipe.content;
+      r.content = out.recipe.content;             // 恢复即基线（批4）
       meta.textContent = '已恢复出厂文本（旧版已备份）';
       toast('已恢复默认：' + r.title);
     } catch (err) {

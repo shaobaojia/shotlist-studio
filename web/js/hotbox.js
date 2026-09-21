@@ -2,7 +2,7 @@
 // 写作逻辑 = 拼积木式：块库点插（插入即固化）＋ 自由手写；{占位符} 在插入瞬间代入当前镜的值。
 // 交互口径：Ctrl+Enter 保存并下一镜 · Esc 收起（不保存）· 点编辑面外回读视图（自动保存）。
 import { api } from './api.js';
-import { el, toast, growTextarea, durText } from './ui.js';
+import { el, toast, growTextarea, durText, isFloatTarget } from './ui.js';
 import { openMenu, menuEl } from './menu.js';
 import { recordUndo, undo as globalUndo } from './edit.js';
 import { buildShelf, storeAsBlock, byPosition } from './blocks.js';
@@ -146,7 +146,7 @@ function activateBox(pb) {
     if (t && pb.contains(t)) return;
     const m = menuEl();
     if (m && m.contains(t)) return;    // 菜单内点选不算点外
-    if (t.closest && t.closest('.ai-diff, .ai-cmd, #draft-card, #pdraft-card')) return;   // 浮卡不算点外（M4b-2/4）
+    if (isFloatTarget(t)) return;   // 浮卡不算点外（单点判定：.float-card/.menu，L1）
     collapseBox(pb, true);
   };
   pb._state.docMouse = onDocMouse;

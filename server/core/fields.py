@@ -64,5 +64,15 @@ BEAT_FIELDS = [
 ]
 
 
+# AI 能力位（单源，批4/P8）：前端经 /api/meta 消费，勿在前端手抄字段名
+AI_FIELDS = {
+    "shots": ("blocking", "dialogue", "director_note"),
+    "beats": ("beat_action",),
+}
+AI_MAX_TARGETS = 30
+
+
 def meta():
-    return {"shot_fields": SHOT_FIELDS, "scene_fields": SCENE_FIELDS, "beat_fields": BEAT_FIELDS}
+    return {"shot_fields": SHOT_FIELDS, "scene_fields": SCENE_FIELDS, "beat_fields": BEAT_FIELDS,
+            "ai_fields": [k for v in AI_FIELDS.values() for k in v],
+            "ai_max_targets": AI_MAX_TARGETS}

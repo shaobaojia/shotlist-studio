@@ -1,6 +1,6 @@
 // 表格模块：列构建 / 单元格渲染 / 就地编辑绑定 / 节拍区 / 详情区。
 // 显示规格 = cells.js（老库移植）；编辑引擎 = edit.js；页面组装在 scene.js。
-import { state } from './state.js';
+import { state, fieldOf } from './state.js';
 import { el, fmt, toast } from './ui.js';
 import { cellContent } from './cells.js';
 import { attachEditable, attachCamEditor, parseCam, recordUndo } from './edit.js';
@@ -247,15 +247,15 @@ export function refreshDetailValue(s, key) {
 }
 
 function refreshTableValue(s, key) {
-  const f = state.meta.shot_fields.find((x) => x.key === key);
+  const f = fieldOf(key);
   if (!f) return;
   document.querySelectorAll('tr.shot[data-id="' + s.id + '"] td[data-field="' + key + '"]')
     .forEach((td) => { renderShotField(td, s, f); });
 }
 
 function camOptions() {
-  const sz = state.meta.shot_fields.find((x) => x.key === 'shot_size');
-  const fo = state.meta.shot_fields.find((x) => x.key === 'focal');
+  const sz = fieldOf('shot_size');
+  const fo = fieldOf('focal');
   return { tiers: (sz && sz.options) || [], lens: (fo && fo.options) || [] };
 }
 
@@ -522,7 +522,7 @@ export function visibleRows(table) {
 // 单格重画 + 详情区同步（批量/清空/粘贴共用）
 export function refreshShotCell(s, key) {
   if (!s) return;
-  const f = state.meta.shot_fields.find((x) => x.key === key);
+  const f = fieldOf(key);
   if (!f) return;
   document.querySelectorAll('tr.shot[data-id="' + s.id + '"] td[data-field="' + key + '"]')
     .forEach((td) => { renderShotField(td, s, f); });

@@ -13,8 +13,9 @@ SERVER = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVER))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from core import ai as core_ai  # noqa: E402
 from core import rewrite  # noqa: E402
-from _fixture import make_audit_db  # noqa: E402
+from _fixture import conn_factory, make_base_db  # noqa: E402
 
 
 def _prep(con):
@@ -60,18 +61,13 @@ class Base(unittest.TestCase):
     def setUp(self):
         self.td = tempfile.TemporaryDirectory()
         self.path = os.path.join(self.td.name, "rw.db")
-        seed = make_audit_db(self.path)
+        seed = make_base_db(self.path)
         _prep(seed)
         seed.close()
+        self.factory = conn_factory(self.path)
 
     def tearDown(self):
         self.td.cleanup()
-
-    def factory(self):
-        c = sqlite3.connect(self.path, timeout=10)
-        c.execute("PRAGMA foreign_keys=ON")
-        c.row_factory = sqlite3.Row
-        return c
 
     def preview(self, targets, **kw):
         m = rewrite.PreviewJobs()
@@ -412,6 +408,40 @@ class TestApply(Base):
                 _t.sleep(0.1)
         finally:
             con.close()
+
+
+class TestAiConfig(unittest.TestCase):
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.td.name, "cfg.db")
+        seed = make_base_db(self.path)
+        seed.close()
+        self.con = conn_factory(self.path)()
+
+    def tearDown(self):
+        self.con.close()
+        self.td.cleanup()
+
+    def test_public_config_no_key(self):
+        """对外视图永不含 key 明文（批4 契约钉）。"""
+        pub = core_ai.public_config({"ai_provider": "p", "ai_model": "m", "ai_base_url": "u",
+                                     "api_key": "sk-secret", "has_key": True})
+        self.assertEqual(set(pub), {"provider", "model", "base_url", "has_key"})
+        self.assertNotIn("sk-secret", str(pub))
+
+    def test_save_config_semantics(self):
+        """文本字段空串 = 清回默认；api_key 空串 = 不改（M14 契约；data 用全键名，api 层已做短键映射）。"""
+        core_ai.save_config(self.con, {"ai_provider": "p1", "ai_model": "m1",
+                                       "ai_base_url": "u1", "api_key": "sk-1"})
+        self.assertTrue(core_ai.get_config(self.con)["has_key"])
+        core_ai.save_config(self.con, {"api_key": ""})              # key 空 = 不改
+        self.assertTrue(core_ai.get_config(self.con)["has_key"])
+        core_ai.save_config(self.con, {"ai_model": ""})             # 文本空串 = 清回默认
+        self.assertEqual(core_ai.get_config(self.con)["ai_model"], core_ai.DEFAULTS["ai_model"])
+        core_ai.save_config(self.con, {"ai_provider": "p2"})        # 未传字段不动
+        cfg = core_ai.get_config(self.con)
+        self.assertEqual(cfg["ai_provider"], "p2")
+        self.assertEqual(cfg["ai_base_url"], "u1")
 
 
 if __name__ == "__main__":

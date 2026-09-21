@@ -30,20 +30,23 @@ def get_config(con):
 
 
 def save_config(con, data):
-    """更新配置：文本字段空值跳过；api_key 传非空才落（空 = 不改）。
+    """更新配置：文本字段传空串 = 清回默认（M14）；api_key 传非空才落（空 = 不改）。
     返回最新配置（含明文 key——仅限进程内使用；对前端一律走 public_config）。"""
-    upd = {}
     for k in CONFIG_FIELDS:
-        v = (data or {}).get(k)
-        if v is not None and str(v).strip():
-            upd[k] = str(v).strip()
+        if k not in (data or {}):
+            continue
+        v = str((data or {}).get(k) or "").strip()
+        if v:
+            con.execute(
+                "INSERT INTO settings (key, value) VALUES (?,?)"
+                " ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, v))
+        else:
+            con.execute("DELETE FROM settings WHERE key=?", (k,))
     key = (data or {}).get("api_key")
     if isinstance(key, str) and key.strip():
-        upd[KEY_FIELD] = key.strip()
-    for k, v in upd.items():
         con.execute(
             "INSERT INTO settings (key, value) VALUES (?,?)"
-            " ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, v))
+            " ON CONFLICT(key) DO UPDATE SET value=excluded.value", (KEY_FIELD, key.strip()))
     con.commit()
     return get_config(con)
 

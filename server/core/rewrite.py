@@ -17,9 +17,8 @@ from core import ai, db, fields, ops, recipes
 ACTIONS = {"rewrite": "rewrite.md", "concretize": "concretize.md",
            "strengthen": "strengthen.md", "expand": "expand.md"}
 CMDBAR_RECIPE = "cmdbar.md"
-MAX_TARGETS = 30
-AI_FIELDS = {"shots": ("blocking", "dialogue", "director_note"),
-             "beats": ("beat_action",)}
+MAX_TARGETS = fields.AI_MAX_TARGETS
+AI_FIELDS = fields.AI_FIELDS              # 单源：core/fields.py（批4/P8）
 FIELD_LABELS = {f["key"]: f["label"] for f in (fields.SHOT_FIELDS + fields.BEAT_FIELDS)}
 _BRIEF = (("shot_size", "景别"), ("camera_pos", "机位"), ("blocking", "动作"))
 
