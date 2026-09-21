@@ -187,11 +187,11 @@ settings       设置：key / value（含 AI provider/model/key——存本地�
 
 ## 10. Skill 拆分、仓库与开发流程
 
-- **两个 Skill**（命名待定，候选：创作 `shotlist-studio` / 开发 `shotlist-studio-dev`）：
+- **两个 Skill**（2026-09-22 定案落地：创作 `shotlist-studio` / 开发 `shotlist-studio-dev`；互不共享文件）：
   - 创作：方法论 + 工具使用指南（不含代码）。
   - 开发：架构约定 + 管线 + 验证协议 + 坑（不含创作方法）。
   - 互不共享文件（独立模块化）。
-- 仓库：`read/Projects/shotlist-studio/`；GitHub `shaobaojia/shotlist-studio`（设计冻结后建，公开）。结构：`server/ web/ scripts/ recipes/ references/ data/(gitignore) DESIGN.md AGENTS.md README.md`（目录细则与代码分层见 §11）。
+- 仓库：`read/Projects/shotlist-studio/`；GitHub `shaobaojia/shotlist-studio`（公开——2026-09-22 建库首推）。结构：`server/ web/ scripts/ recipes/ references/ data/(gitignore) DESIGN.md AGENTS.md README.md`（目录细则与代码分层见 §11）。
 - 流程：设计先行（本稿）→ 冻结 → 动工；一条命令管线（run / migrate / test / export）；验证先行（三层，见下）；AGENTS.md 四字段（刚做完 / 正在做 / 下一步 / 坑）；需求池文件；里程碑推 GitHub。
 - **验证三层**（2026-09-19 实测）：① 容器无头回归——逻辑层硬断言（unittest / DOM stub），改完即跑；② Hermes 自带浏览器实测——真浏览器直连应用：功能操作 + DOM 断言 + 截图视觉核对；③ 预览窗 / 本机过目——桌面预览窗（Agent 驱动、实时围观、可高亮标注）+ 用户本机浏览器拍板；家 PC WebBridge 退为备用通道（仅在需操作家 PC 真实浏览器时启用）。
 - 纪律：凭证红线（一切 key / secret 不入库）；改动大批量模板走脚本替换，不裸 patch。
@@ -274,7 +274,7 @@ web/
 1. §3 字段字典语义审（重点：去冗余设计、"场 / 节拍 / 镜头"三层拆分）。
 2. §5.3 块库种子——我出清单后你删改。
 3. §6 审计规则集表述审。
-4. §10 两个 Skill 命名。
+4. ~~§10 两个 Skill 命名~~ ✅ 已定（`shotlist-studio` / `shotlist-studio-dev`）。
 5. §13 里程碑切分。
 6. 如有：给 1-2 条你最近新写法的提示词样例，用于校准块库（非必须）。
 7. 镜号子号格式（17A 式）如无异议按此执行。
