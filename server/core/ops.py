@@ -501,6 +501,56 @@ def create_beat(con, scene_id):
     return dict(con.execute("SELECT * FROM beats WHERE id=?", (new_id,)).fetchone())
 
 
+def append_beats(con, scene_id, rows, source="ai"):
+    """追加行原语（L4）：场尾按序落节拍——编号 = 既有最大数字顺延；position 续尾；逐行 create 痕迹。
+    rows = [{name, kind, outside_action, reaction, closed_loop}]；不 commit（调用方收尾保一步事务）。
+    返回新建 id 列表。"""
+    ex = list(con.execute("SELECT * FROM beats WHERE scene_id=? ORDER BY position, id", (scene_id,)))
+    mx = 0
+    for b in ex:
+        m = re.match(r"^(\d+)", str(b["beat_no"] or ""))
+        if m:
+            mx = max(mx, int(m.group(1)))
+    pos0 = max([b["position"] for b in ex]) + 1 if ex else 0
+    ids = []
+    for i, r in enumerate(rows):
+        r = r or {}
+        no = str(mx + 1 + i)
+        cur = con.execute(
+            "INSERT INTO beats (scene_id, position, beat_no, name, kind,"
+            " outside_action, reaction, closed_loop) VALUES (?,?,?,?,?,?,?,?)",
+            (scene_id, pos0 + i, no, r.get("name"), r.get("kind"),
+             r.get("outside_action"), r.get("reaction"), r.get("closed_loop")))
+        ids.append(cur.lastrowid)
+        record_history(con, scene_id, "beats", cur.lastrowid, "create", None, no, source=source)
+    return ids
+
+
+def append_shots(con, scene_id, rows, source="ai"):
+    """追加行原语（L4）：场尾按序落镜头——编号 %02d 顺延；position 续尾；逐行 create 痕迹。
+    rows = [{beat_id, camera_move, camera_pos, blocking, dialogue, duration}]；不 commit（同 append_beats）。
+    返回新建 id 列表。"""
+    ex = list(con.execute("SELECT * FROM shots WHERE scene_id=? ORDER BY position, id", (scene_id,)))
+    mx = 0
+    for s in ex:
+        m = re.match(r"^(\d+)", str(s["shot_no"] or ""))
+        if m:
+            mx = max(mx, int(m.group(1)))
+    pos0 = max([s["position"] for s in ex]) + 1 if ex else 0
+    ids = []
+    for k, r in enumerate(rows):
+        r = r or {}
+        no = "%02d" % (mx + 1 + k)
+        cur = con.execute(
+            "INSERT INTO shots (scene_id, beat_id, position, shot_no, camera_move,"
+            " camera_pos, blocking, dialogue, duration) VALUES (?,?,?,?,?,?,?,?,?)",
+            (scene_id, r.get("beat_id"), pos0 + k, no, r.get("camera_move"),
+             r.get("camera_pos"), r.get("blocking"), r.get("dialogue"), r.get("duration")))
+        ids.append(cur.lastrowid)
+        record_history(con, scene_id, "shots", cur.lastrowid, "create", None, no, source=source)
+    return ids
+
+
 def duplicate_beat(con, beat_id):
     """节拍深拷：副本节拍紧跟源节拍；其下镜头连内容一起拷（字母后缀编号），插在其后连续块。"""
     src = con.execute("SELECT * FROM beats WHERE id=?", (beat_id,)).fetchone()

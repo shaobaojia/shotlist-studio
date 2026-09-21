@@ -12,7 +12,7 @@ import json
 import threading
 import time
 
-from core import ai, db, fields, jobs, ops, recipes
+from core import ai, db, digest, fields, jobs, ops, recipes
 
 ACTIONS = {"rewrite": "rewrite.md", "concretize": "concretize.md",
            "strengthen": "strengthen.md", "expand": "expand.md"}
@@ -20,7 +20,7 @@ CMDBAR_RECIPE = "cmdbar.md"
 MAX_TARGETS = fields.AI_MAX_TARGETS
 AI_FIELDS = fields.AI_FIELDS              # 单源：core/fields.py（批4/P8）
 FIELD_LABELS = {f["key"]: f["label"] for f in (fields.SHOT_FIELDS + fields.BEAT_FIELDS)}
-_BRIEF = (("shot_size", "景别"), ("camera_pos", "机位"), ("blocking", "动作"))
+_BRIEF = (("shot_size", 60), ("camera_pos", 60), ("blocking", 60))   # 镜头速览 spec（digest.shots_lines）
 
 # 并发闸门与任务簿机制：core/jobs.py 单点（L1）——本域只留条目形状与 _run
 
@@ -87,27 +87,9 @@ def _norm_targets(con, scene_id, targets):
     return out
 
 
-def _scene_line(sc):
-    return "场：%s %s ｜ 价值：%s ｜ 弧线：%s → %s" % (
-        sc.get("scene_no") or "?", sc.get("title") or "", sc.get("value") or "—",
-        sc.get("pole_start") or "—", sc.get("pole_end") or "—")
-
-
-def _shots_brief(shots):
-    lines = []
-    for s in shots:
-        parts = ["镜%s" % s["shot_no"]]
-        for key, cn in _BRIEF:
-            v = (s[key] or "").strip().replace("\n", " ")
-            if v:
-                parts.append("%s:%s" % (cn, v[:60]))
-        lines.append(" ｜ ".join(parts))
-    return lines
-
-
 def build_user(sc, beats, shots, items):
     """拼 user 消息：场线 + 节拍线 + 镜头速览 + 待改写清单（序号对位）。"""
-    lines = [_scene_line(sc)]
+    lines = [digest.scene_line(sc)]
     bl = "；".join("节拍%s%s%s" % (b["beat_no"],
                                   ("[%s]" % b["kind"]) if b["kind"] else "",
                                   (" " + b["name"]) if b["name"] else "")
@@ -115,7 +97,7 @@ def build_user(sc, beats, shots, items):
     if bl:
         lines.append("节拍：" + bl)
     lines.append("镜头速览：")
-    lines += _shots_brief(shots)
+    lines += digest.shots_lines(shots, _BRIEF)
     lines.append("")
     lines.append("【待改写 %d 条】" % len(items))
     for it in items:

@@ -23,8 +23,8 @@ def main():
         con = db.connect()
         try:
             for r in audit.rules_state(con):
-                print("#%s [%s] %s enabled=%s params=%s" % (
-                    r["id"], r["kind"], r["title"], r["enabled"], r["params"]))
+                print("#%s [%s] %s key=%s enabled=%s params=%s" % (
+                    r["id"], r["kind"], r["title"], r.get("key"), r["enabled"], r["params"]))
         finally:
             con.close()
         return
@@ -34,7 +34,7 @@ def main():
         rows = audit.rules_state(con)
         print("种子完成：新增 %d，现共 %d 条" % (added, len(rows)))
         for r in rows:
-            print("  #%s [%s] %s" % (r["id"], r["kind"], r["title"]))
+            print("  #%s [%s] %s key=%s" % (r["id"], r["kind"], r["title"], r.get("key")))
     finally:
         con.close()
 

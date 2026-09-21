@@ -6,11 +6,10 @@
 - 组级初稿只出稿（文本），进编辑面与否由前端决定；不自动保存。
 - 配方现读（recipes/ai/draft_*.md）——与四动作同口径。
 """
-import re
 import threading
 import time
 
-from . import ai, db, jobs, ops
+from . import ai, db, digest, jobs, ops
 from .rewrite import _extract_json, load_recipe
 
 DRAFT_BEATS_RECIPE = "draft_beats.md"
@@ -86,13 +85,8 @@ def _strip_fence(t):
     return t
 
 
-def _scene_line(sc):
-    parts = ["场：%s %s" % (sc.get("scene_no") or "?", sc.get("title") or "")]
-    if sc.get("value"):
-        parts.append("价值：%s" % sc["value"])
-    if sc.get("pole_start") or sc.get("pole_end"):
-        parts.append("弧线：%s → %s" % (sc.get("pole_start") or "—", sc.get("pole_end") or "—"))
-    return " ｜ ".join(parts)
+_MEMBER_SPEC = (("shot_size", 80), ("focal", 80), ("camera_move", 80), ("camera_pos", 80),
+                ("spatial", 80), ("blocking", 80), ("dialogue", 80))   # 组内镜头速览 spec
 
 
 # ── 任务（内存级；重启即清） ────────────────────────────────────
@@ -155,7 +149,7 @@ class DraftJobs(jobs.JobBoard):
             finally:
                 con.close()
             t0 = time.time()
-            scene_line = _scene_line(sc)
+            scene_line = digest.scene_line(sc, terse=True)
             text1 = ai_chat(cfg, [
                 {"role": "system", "content": load_recipe(DRAFT_BEATS_RECIPE)},
                 {"role": "user", "content": scene_line + "\n\n【台本】\n" + script}])
@@ -237,16 +231,8 @@ class DraftJobs(jobs.JobBoard):
             finally:
                 con.close()
             t0 = time.time()
-            lines = [_scene_line(sc), "", "【组内镜头（%d 镜）】" % len(members)]
-            for m in members:
-                parts = ["镜%s" % m["shot_no"]]
-                for key, cn in (("shot_size", "景别"), ("focal", "焦段"), ("camera_move", "运镜"),
-                                ("camera_pos", "机位"), ("spatial", "空间关系"),
-                                ("blocking", "动作"), ("dialogue", "台词")):
-                    v = (m.get(key) or "").strip().replace("\n", " ")
-                    if v:
-                        parts.append("%s:%s" % (cn, v[:80]))
-                lines.append(" ｜ ".join(parts))
+            lines = [digest.scene_line(sc, terse=True), "", "【组内镜头（%d 镜）】" % len(members)]
+            lines += digest.shots_lines(members, _MEMBER_SPEC)
             lines.append("")
             lines.append("【块库（可复用句式）】")
             for t in blocks:
@@ -291,43 +277,15 @@ class DraftJobs(jobs.JobBoard):
             sc = con.execute("SELECT * FROM scenes WHERE id=?", (scene_id,)).fetchone()
             if not sc:
                 raise ValueError("场景不存在（可能已被删除）")
-            ex_b = list(con.execute(
-                "SELECT * FROM beats WHERE scene_id=? ORDER BY position, id", (scene_id,)))
-            ex_s = list(con.execute(
-                "SELECT * FROM shots WHERE scene_id=? ORDER BY position, id", (scene_id,)))
-            mx_b = mx_s = 0
-            for b in ex_b:
-                m = re.match(r"^(\d+)", str(b["beat_no"] or ""))
-                if m:
-                    mx_b = max(mx_b, int(m.group(1)))
-            for s in ex_s:
-                m = re.match(r"^(\d+)", str(s["shot_no"] or ""))
-                if m:
-                    mx_s = max(mx_s, int(m.group(1)))
-            pos_b = max([b["position"] for b in ex_b]) + 1 if ex_b else 0
-            pos_s = max([s["position"] for s in ex_s]) + 1 if ex_s else 0
-            beat_ids = []
-            for i, b in enumerate(beats):
-                no = str(mx_b + 1 + i)
-                cur = con.execute(
-                    "INSERT INTO beats (scene_id, position, beat_no, name, kind,"
-                    " outside_action, reaction, closed_loop) VALUES (?,?,?,?,?,?,?,?)",
-                    (scene_id, pos_b + i, no, b["name"], b["kind"],
-                     b["outside_action"], b["reaction"], b["closed_loop"]))
-                bid = cur.lastrowid
-                beat_ids.append(bid)
-                ops.record_history(con, scene_id, "beats", bid, "create", None, no, source="ai")
-            shot_ids = []
-            for k, s in enumerate(shots):
-                no = "%02d" % (mx_s + 1 + k)
-                cur = con.execute(
-                    "INSERT INTO shots (scene_id, beat_id, position, shot_no, camera_move,"
-                    " camera_pos, blocking, dialogue, duration) VALUES (?,?,?,?,?,?,?,?,?)",
-                    (scene_id, beat_ids[s["beat"] - 1], pos_s + k, no, s["camera_move"],
-                     s["camera_pos"], s["blocking"], s["dialogue"], s["duration"]))
-                sid = cur.lastrowid
-                shot_ids.append(sid)
-                ops.record_history(con, scene_id, "shots", sid, "create", None, no, source="ai")
+            beat_ids = ops.append_beats(con, scene_id, [
+                {"name": b["name"], "kind": b["kind"], "outside_action": b["outside_action"],
+                 "reaction": b["reaction"], "closed_loop": b["closed_loop"]}
+                for b in beats], source="ai")
+            shot_ids = ops.append_shots(con, scene_id, [
+                {"beat_id": beat_ids[s["beat"] - 1], "camera_move": s["camera_move"],
+                 "camera_pos": s["camera_pos"], "blocking": s["blocking"],
+                 "dialogue": s["dialogue"], "duration": s["duration"]}
+                for s in shots], source="ai")
             con.commit()
         except Exception:
             with self._lock:

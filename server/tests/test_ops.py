@@ -443,5 +443,62 @@ class TestLockScene(unittest.TestCase):
             ops.lock_scene(con, 999, True, snap_root="/tmp")
 
 
+class TestAppendRows(unittest.TestCase):
+    """L4 追加行原语：编号顺延 / 位置续尾 / 痕迹 / 不自行 commit（事务归调用方）。"""
+
+    def setUp(self):
+        self.con = make_db()
+
+    def tearDown(self):
+        self.con.close()
+
+    def test_append_beats_sequential(self):
+        ids = ops.append_beats(self.con, 1, [
+            {"name": "新节拍", "kind": "⚪ 填充", "outside_action": "a", "reaction": "b",
+             "closed_loop": "c"},
+            {"name": "新节拍2", "kind": "🔴 戏点", "outside_action": "", "reaction": "",
+             "closed_loop": ""}], source="ai")
+        self.assertEqual(len(ids), 2)
+        rows = [dict(r) for r in self.con.execute(
+            "SELECT * FROM beats WHERE scene_id=1 ORDER BY position")]
+        self.assertEqual([r["beat_no"] for r in rows], ["1", "2", "3"])
+        self.assertEqual([r["position"] for r in rows], [0, 1, 2])
+        hist = [dict(r) for r in self.con.execute("SELECT * FROM history WHERE entity='beats'")]
+        self.assertEqual(len(hist), 2)
+        self.assertEqual({h["source"] for h in hist}, {"ai"})
+        self.assertEqual({h["new_value"] for h in hist}, {"2", "3"})
+
+    def test_append_shots_sequential(self):
+        ids = ops.append_shots(self.con, 1, [
+            {"beat_id": 1, "camera_move": "推", "camera_pos": "🔴 正打", "blocking": "b1",
+             "dialogue": "", "duration": "3"},
+            {"beat_id": 1, "blocking": "b2"}], source="ai")
+        self.assertEqual(len(ids), 2)
+        rows = [dict(r) for r in self.con.execute(
+            "SELECT * FROM shots WHERE id IN (?,?) ORDER BY position", ids)]
+        self.assertEqual([r["shot_no"] for r in rows], ["18", "19"])   # 既有 03/01/17A → 最大 17 顺延
+        self.assertEqual([r["position"] for r in rows], [4, 5])        # 既有 1..3 → 续尾
+        self.assertEqual(rows[0]["camera_move"], "推")
+
+    def test_append_empty_scene(self):
+        cur = self.con.execute(
+            "INSERT INTO scenes (film_id, scene_no, title) VALUES (1, 's020', '空场')")
+        sid = cur.lastrowid
+        self.con.commit()
+        bids = ops.append_beats(self.con, sid, [{"name": "头", "kind": "⚪ 填充"}], source="ai")
+        b = self.con.execute("SELECT * FROM beats WHERE id=?", (bids[0],)).fetchone()
+        self.assertEqual((b["beat_no"], b["position"]), ("1", 0))
+        sids = ops.append_shots(self.con, sid, [{"beat_id": bids[0], "blocking": "开篇"}], source="ai")
+        s = self.con.execute("SELECT * FROM shots WHERE id=?", (sids[0],)).fetchone()
+        self.assertEqual((s["shot_no"], s["position"]), ("01", 0))
+
+    def test_not_committed_by_callee(self):
+        """不自行 commit：回滚即无痕（事务归调用方）。"""
+        ops.append_beats(self.con, 1, [{"name": "x", "kind": "⚪ 填充"}], source="ai")
+        self.con.rollback()
+        n = self.con.execute("SELECT COUNT(*) c FROM beats WHERE scene_id=1").fetchone()["c"]
+        self.assertEqual(n, 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

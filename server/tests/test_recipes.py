@@ -24,7 +24,7 @@ class TestRegistry(unittest.TestCase):
         """审计注册名字串与 audit.py 的 LLM_RECIPES 映射一致。"""
         sys.path.insert(0, str(SERVER))
         from core import audit
-        for title, fname in audit.LLM_RECIPES.items():
+        for key, fname in audit.LLM_RECIPES.items():
             self.assertIn(fname, [n for n, t in recipes.REGISTRY["audit"]],
                           "审计配方 %s 未注册" % fname)
 

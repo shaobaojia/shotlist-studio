@@ -111,6 +111,7 @@ CREATE TABLE blocks (
 -- 审计：规则 + 问题（注解层三态）
 CREATE TABLE audit_rules (
   id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  key     TEXT,                                            -- slug 键（老库由种子迁移回填）
   kind    TEXT NOT NULL CHECK (kind IN ('program','llm')),
   title   TEXT NOT NULL,
   params  TEXT,

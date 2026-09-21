@@ -127,7 +127,7 @@ class TestProgramRules(unittest.TestCase):
         self.assertEqual(len(audit.rules_state(self.con)), 10)
 
     def test_seed_reset_remaps_issues(self):
-        """--reset 重建：存量问题按 title 回迁新规则 id（不留孤儿——回归：曾全变 NULL）。"""
+        """--reset 重建：存量问题按 key 回迁新规则 id（老行回退 title；不留孤儿——回归：曾全变 NULL）。"""
         self.run_audit()
         before = audit.issues_state(self.con, self.sid)["issues"]
         self.assertEqual(len(before), 4)
@@ -138,6 +138,49 @@ class TestProgramRules(unittest.TestCase):
         self.assertTrue(all(r["rule_id"] is not None for r in after))
         self.assertTrue(all(r["rule_title"] != "?" for r in after))
         self.assertEqual(len(audit.rules_state(self.con)), 10)
+
+
+class TestRegistry(unittest.TestCase):
+    """L3 规则注册表单点：key / 引擎 / schema 对账（title 当键退役的守卫）。"""
+
+    def setUp(self):
+        self.con = make_base_db()
+        audit.seed_default_rules(self.con)
+
+    def tearDown(self):
+        self.con.close()
+
+    def test_registry_covers_engines(self):
+        keys = [r["key"] for r in audit.RULES]
+        self.assertEqual(len(keys), len(set(keys)))                     # slug 唯一
+        self.assertEqual(set(audit.PROGRAM_RULES),
+                         {r["key"] for r in audit.RULES if r["kind"] == "program"})
+        self.assertEqual(set(audit.LLM_DIGESTS),
+                         {r["key"] for r in audit.RULES if r["kind"] == "llm"})
+        self.assertEqual(set(audit.LLM_RECIPES),
+                         {r["key"] for r in audit.RULES if r["recipe"]})
+
+    def test_seed_backfills_key(self):
+        """老库迁移（G1 根治）：无 key 的行由种子回填 slug，id 不变（问题挂靠不动）。"""
+        con = make_base_db()
+        con.execute("INSERT INTO audit_rules (kind, title, params)"
+                    " VALUES ('program', '闭环', '{}')")
+        con.commit()
+        rid = con.execute("SELECT id FROM audit_rules WHERE title='闭环'").fetchone()["id"]
+        audit.seed_default_rules(con)
+        row = con.execute("SELECT * FROM audit_rules WHERE id=?", (rid,)).fetchone()
+        self.assertEqual(row["key"], "loop")                            # 原位回填
+        self.assertEqual(len(audit.rules_state(con)), 10)
+        con.close()
+
+    def test_rules_state_exposes_schema(self):
+        rows = {r["key"]: r for r in audit.rules_state(self.con)}
+        d = rows["density"]["params_schema"]["min_shots"]
+        self.assertEqual((d["label"], d["type"], d["min"]), ("最少镜头数", "int", 1))
+        self.assertIsNone(rows["loop"]["recipe"])                      # 程序规则无配方
+        self.assertEqual(rows["camera"]["recipe"], "camera.md")
+        self.assertEqual(rows["loop"]["params"]["require_reaction_shot"], False)   # 值来自 DB
+        self.assertTrue(rows["axis"]["desc"])
 
 
 class TestResolveRef(unittest.TestCase):

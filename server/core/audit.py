@@ -10,39 +10,49 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from core import ai, db, jobs, ops
+from core import ai, db, digest, jobs, ops
 
 CARRIERS = ("scene", "beat", "shot", "seam")
 
-# ── 规则注册表（种子定义唯一点；scripts/seed_audit_rules.py 由此落库） ──
-DEFAULT_RULES = [
-    ("轴线", "llm", {},
-     "相邻镜头越轴检查：视线/位置反转且无过渡镜（seam 载体）。"),
-    ("闭环", "program", {"require_reaction_shot": False},
-     "外界动作→人物反应闭环：节拍字段链完整性。"),
-    ("戏点密度", "program", {"min_shots": 3},
-     "核心戏点（🔴）镜头数下限。"),
-    ("戏点特写", "program", {"sizes": ["特写", "极特"]},
-     "核心戏点至少 1 个特写/极特写（景别铁律）。"),
-    ("节奏曲线", "llm", {},
-     "镜头时长分布与节拍叙事职能的偏差（只报明确问题）。"),
-    ("空间一致性", "llm", {},
-     "角色位置突变无动机/缺过渡。"),
-    ("机位一致性", "llm", {},
-     "机位策略 vs 场景价值：反打连用 / 建立镜误用 / 插入过度。"),
-    ("景别完整", "program", {"require_dof": False},
-     "景别标注完整性（景深已并入摄影机串，抽查为主）。"),
-    ("声音完整性", "program", {},
-     "声音标注完整性：空音频提示（无声请标「—」）。"),
-    ("动作具象化", "llm",
-     {"wordlist": ["看着", "说着", "走着", "笑了笑", "看了看", "望了望",
-                   "盯着", "望着", "望向", "停下脚步", "转过身"]},
-     "模糊词粗筛 + 判定与具象化建议。"),
+# ── 规则注册表（唯一点；scripts/seed_audit_rules.py 由此落库） ──
+# 一条规则一行：key = slug（DB 键，title 不再当键）；kind；recipe = LLM 配方文件名（程序规则 None）；
+# params = 参数 schema（{参数: {type, label, default[, min]}}——前端控件与校验由此派生）；desc。
+RULES = [
+    {"key": "axis", "title": "轴线", "kind": "llm", "recipe": "axis.md", "params": {},
+     "desc": "相邻镜头越轴检查：视线/位置反转且无过渡镜（seam 载体）。"},
+    {"key": "loop", "title": "闭环", "kind": "program", "recipe": None,
+     "params": {"require_reaction_shot": {"type": "bool", "label": "要求反应镜", "default": False}},
+     "desc": "外界动作→人物反应闭环：节拍字段链完整性。"},
+    {"key": "density", "title": "戏点密度", "kind": "program", "recipe": None,
+     "params": {"min_shots": {"type": "int", "label": "最少镜头数", "default": 3, "min": 1}},
+     "desc": "核心戏点（🔴）镜头数下限。"},
+    {"key": "closeup", "title": "戏点特写", "kind": "program", "recipe": None,
+     "params": {"sizes": {"type": "list", "label": "计作特写的景别", "default": ["特写", "极特"]}},
+     "desc": "核心戏点至少 1 个特写/极特写（景别铁律）。"},
+    {"key": "rhythm", "title": "节奏曲线", "kind": "llm", "recipe": "rhythm.md", "params": {},
+     "desc": "镜头时长分布与节拍叙事职能的偏差（只报明确问题）。"},
+    {"key": "space", "title": "空间一致性", "kind": "llm", "recipe": "space.md", "params": {},
+     "desc": "角色位置突变无动机/缺过渡。"},
+    {"key": "camera", "title": "机位一致性", "kind": "llm", "recipe": "camera.md", "params": {},
+     "desc": "机位策略 vs 场景价值：反打连用 / 建立镜误用 / 插入过度。"},
+    {"key": "size", "title": "景别完整", "kind": "program", "recipe": None,
+     "params": {"require_dof": {"type": "bool", "label": "要求景深标注", "default": False}},
+     "desc": "景别标注完整性（景深已并入摄影机串，抽查为主）。"},
+    {"key": "sound", "title": "声音完整性", "kind": "program", "recipe": None, "params": {},
+     "desc": "声音标注完整性：空音频提示（无声请标「—」）。"},
+    {"key": "concrete", "title": "动作具象化", "kind": "llm", "recipe": "concrete.md",
+     "params": {"wordlist": {"type": "list", "label": "模糊词表",
+                             "default": ["看着", "说着", "走着", "笑了笑", "看了看", "望了望",
+                                         "盯着", "望着", "望向", "停下脚步", "转过身"]}},
+     "desc": "模糊词粗筛 + 判定与具象化建议。"},
 ]
-LLM_RECIPES = {"轴线": "axis.md", "节奏曲线": "rhythm.md", "空间一致性": "space.md",
-               "机位一致性": "camera.md", "动作具象化": "concrete.md"}
-FIELD_CN = {"camera_pos": "机位", "spatial": "空间", "blocking": "动作", "shot_size": "景别",
-            "shot_fn": "职能", "camera_move": "运镜", "dialogue": "台词"}
+_TITLE_KEY = {r["title"]: r["key"] for r in RULES}
+LLM_RECIPES = {r["key"]: r["recipe"] for r in RULES if r["recipe"]}   # key → 文件名（派生）
+
+
+def _rule_key(rule):
+    """规则键：key 优先；老行（无 key）按 title 回退（迁移回填后不再需要）。"""
+    return rule.get("key") or _TITLE_KEY.get(rule.get("title"))
 
 
 # ════════ 上下文装载 ════════
@@ -145,18 +155,11 @@ def rule_sound(ctx, p):
     return out
 
 
-PROGRAM_RULES = {"闭环": rule_loop, "戏点密度": rule_density, "戏点特写": rule_closeup,
-                 "景别完整": rule_size, "声音完整性": rule_sound}
+PROGRAM_RULES = {"loop": rule_loop, "density": rule_density, "closeup": rule_closeup,
+                 "size": rule_size, "sound": rule_sound}
 
 
 # ════════ LLM 类规则（digest → 配方 → JSON findings） ════════
-
-def _sc_head(ctx):
-    sc = ctx["scene"]
-    return "场：%s %s ｜ 价值：%s ｜ 弧线：%s → %s" % (
-        sc.get("scene_no") or "?", sc.get("title") or "",
-        sc.get("value") or "—", sc.get("pole_start") or "—", sc.get("pole_end") or "—")
-
 
 def _beats_lines(ctx):
     lines = []
@@ -170,36 +173,31 @@ def _beats_lines(ctx):
     return lines
 
 
-def _shots_lines(ctx, fields, widths):
-    lines = []
-    for s in ctx["shots"]:
-        parts = ["镜%s" % s["shot_no"]]
-        for f, w in zip(fields, widths):
-            v = (s[f] or "").strip().replace("\n", " ")
-            if v:
-                parts.append("%s: %s" % (FIELD_CN[f], v[:w]))
-        lines.append(" ｜ ".join(parts))
-    return lines
-
-
 def digest_axis(ctx, p):
     beats = "；".join("节拍 %s %s" % (b["beat_no"], b["name"] or "") for b in ctx["beats"])
-    return "\n".join([_sc_head(ctx), "节拍：" + beats, "镜头（按顺序）："] +
-                     _shots_lines(ctx, ("camera_pos", "spatial", "blocking"), (16, 60, 90)))
+    return "\n".join([digest.scene_line(ctx["scene"]), "节拍：" + beats, "镜头（按顺序）："] +
+                     digest.shots_lines(ctx["shots"],
+                                        (("camera_pos", 16), ("spatial", 60), ("blocking", 90)),
+                                        colon=": "))
 
 
 def digest_space(ctx, p):
-    return "\n".join([_sc_head(ctx), "镜头（按顺序）："] +
-                     _shots_lines(ctx, ("spatial", "blocking", "camera_pos"), (70, 110, 16)))
+    return "\n".join([digest.scene_line(ctx["scene"]), "镜头（按顺序）："] +
+                     digest.shots_lines(ctx["shots"],
+                                        (("spatial", 70), ("blocking", 110), ("camera_pos", 16)),
+                                        colon=": "))
 
 
 def digest_camera(ctx, p):
-    return "\n".join([_sc_head(ctx), "节拍："] + _beats_lines(ctx) + ["镜头："] +
-                     _shots_lines(ctx, ("camera_pos", "shot_fn", "shot_size", "camera_move"), (20, 10, 24, 30)))
+    return "\n".join([digest.scene_line(ctx["scene"]), "节拍："] + _beats_lines(ctx) + ["镜头："] +
+                     digest.shots_lines(ctx["shots"],
+                                        (("camera_pos", 20), ("shot_fn", 10),
+                                         ("shot_size", 24), ("camera_move", 30)),
+                                        colon=": "))
 
 
 def digest_rhythm(ctx, p):
-    lines = [_sc_head(ctx), "节拍与时长："]
+    lines = [digest.scene_line(ctx["scene"]), "节拍与时长："]
     for b in ctx["beats"]:
         mem = [s for s in ctx["shots"] if s["beat_id"] == b["id"]]
         durs = [str(s["duration"]).strip() if s["duration"] not in (None, "") else "—"
@@ -221,17 +219,17 @@ def digest_concrete(ctx, p):
             cand.append("镜%s ｜ 命中词：%s ｜ 动作原文：%s" % (s["shot_no"], "/".join(hit), bl[:220]))
     if not cand:
         return None  # 无候选：跳过调用
-    return "\n".join([_sc_head(ctx), "候选镜头（疑似模糊表达）："] + cand)
+    return "\n".join([digest.scene_line(ctx["scene"]), "候选镜头（疑似模糊表达）："] + cand)
 
 
-LLM_DIGESTS = {"轴线": digest_axis, "空间一致性": digest_space, "机位一致性": digest_camera,
-               "节奏曲线": digest_rhythm, "动作具象化": digest_concrete}
+LLM_DIGESTS = {"axis": digest_axis, "space": digest_space, "camera": digest_camera,
+               "rhythm": digest_rhythm, "concrete": digest_concrete}
 
 
-def _load_recipe(title):
-    p = db.ROOT / "recipes" / "audit" / LLM_RECIPES[title]
+def _load_recipe(key):
+    p = db.ROOT / "recipes" / "audit" / LLM_RECIPES[key]
     if not p.is_file():
-        raise ValueError("审计配方缺失：%s" % LLM_RECIPES[title])
+        raise ValueError("审计配方缺失：%s" % LLM_RECIPES[key])
     return p.read_text(encoding="utf-8")
 
 
@@ -296,11 +294,11 @@ def _parse_findings(ctx, text):
 
 
 def _run_llm_rule(ctx, rule, cfg, ai_chat):
-    title = rule["title"]
-    body = LLM_DIGESTS[title](ctx, rule["params"])
+    key = _rule_key(rule)
+    body = LLM_DIGESTS[key](ctx, rule["params"])
     if body is None:
         return []
-    system = _load_recipe(title)
+    system = _load_recipe(key)
     text = ai_chat(cfg, [{"role": "system", "content": system},
                          {"role": "user", "content": body}])
     return _parse_findings(ctx, text)
@@ -354,19 +352,20 @@ def run_scene(con, scene_id, only=None, ai_chat=None, progress=None):
     t0 = time.time()
     plan, llm_jobs = [], []
     for r in rules:
-        if r["title"] in PROGRAM_RULES:
+        k = _rule_key(r)
+        if k in PROGRAM_RULES:
             try:
-                plan.append([r, PROGRAM_RULES[r["title"]](ctx, r["params"]), None, 0])
+                plan.append([r, PROGRAM_RULES[k](ctx, r["params"]), None, 0])
             except Exception as e:
                 plan.append([r, None, "程序规则异常：%s" % e, 0])
-        elif r["title"] in LLM_RECIPES:
+        elif k in LLM_DIGESTS:
             llm_jobs.append(r)
             plan.append([r, None, None, 0])
         else:
             plan.append([r, None, "无实现", 0])
     if progress:
         for r, findings, err, ms in plan:
-            if findings is None and err is None and r["title"] in LLM_RECIPES:
+            if findings is None and err is None and _rule_key(r) in LLM_DIGESTS:
                 continue  # LLM 规则待跑
             progress(r, "error" if err else "done", len(findings or []), err, ms)
     if llm_jobs:
@@ -430,13 +429,18 @@ def issues_state(con, scene_id):
 
 
 def rules_state(con):
-    meta = {t: d for t, k, p, d in DEFAULT_RULES}
+    meta = {r["title"]: r for r in RULES}
     out = []
     for r in con.execute("SELECT * FROM audit_rules ORDER BY id"):
         d = dict(r)
         d["enabled"] = bool(d["enabled"])
         d["params"] = _params(d)
-        d["desc"] = meta.get(d["title"], "")
+        reg = meta.get(d["title"]) or {}
+        d["key"] = d.get("key") or reg.get("key")
+        d["desc"] = reg.get("desc", "")
+        d["recipe"] = reg.get("recipe")
+        d["params_schema"] = {k: {kk: v[kk] for kk in ("label", "type", "min") if kk in v}
+                              for k, v in (reg.get("params") or {}).items()}
         out.append(d)
     return out
 
@@ -472,6 +476,7 @@ def unwaive_issue(con, issue_id):
 
 
 def update_rule(con, rid, enabled=None, params=None):
+    _ensure_key_column(con)
     row = con.execute("SELECT * FROM audit_rules WHERE id=?", (rid,)).fetchone()
     if not row:
         raise ValueError("规则不存在")
@@ -486,33 +491,54 @@ def update_rule(con, rid, enabled=None, params=None):
     return rules_state(con)
 
 
+def _ensure_key_column(con):
+    """迁移（幂等）：老库 audit_rules 补 key 列（G1「标题当键」退役）。"""
+    cols = {r[1] for r in con.execute("PRAGMA table_info(audit_rules)")}
+    if "key" not in cols:
+        con.execute("ALTER TABLE audit_rules ADD COLUMN key TEXT")
+        con.commit()
+
+
+def _default_params(r):
+    return {k: v["default"] for k, v in r["params"].items()}
+
+
 def seed_default_rules(con, reset=False):
-    """种子规则：幂等（按 title 查重）。
-    reset=True：重建——删旧前记下存量问题的规则归属，重建后按 title 回迁新 id（不留孤儿）。"""
+    """种子规则：幂等（按 title 查重；老行回填 key——迁移自 G1「标题当键」）。
+    reset=True：重建——存量问题按 key（老行回退 title）回迁新 id（不留孤儿）。
+    返回：reset 时 = 规则总数；否则 = 新增条数（回填不计）。"""
+    _ensure_key_column(con)
     if reset:
-        old = {r["id"]: r["title"] for r in con.execute("SELECT id, title FROM audit_rules")}
+        old = {r["id"]: (r["key"] or r["title"]) for r in con.execute(
+            "SELECT id, title, key FROM audit_rules")}
         links = [(r["id"], r["rule_id"]) for r in con.execute(
             "SELECT id, rule_id FROM audit_issues WHERE rule_id IS NOT NULL")]
         con.execute("DELETE FROM audit_rules")
         new = {}
-        for title, kind, params, _desc in DEFAULT_RULES:
-            cur = con.execute("INSERT INTO audit_rules (kind, title, params) VALUES (?,?,?)",
-                              (kind, title, json.dumps(params, ensure_ascii=False)))
-            new[title] = cur.lastrowid
+        for r in RULES:
+            cur = con.execute(
+                "INSERT INTO audit_rules (key, kind, title, params) VALUES (?,?,?,?)",
+                (r["key"], r["kind"], r["title"],
+                 json.dumps(_default_params(r), ensure_ascii=False)))
+            new[r["key"]] = cur.lastrowid
         for iid, old_rid in links:
-            nid = new.get(old.get(old_rid))
+            ref = old.get(old_rid)
+            nid = new.get(ref) or new.get(_TITLE_KEY.get(ref) or "")
             if nid:
                 con.execute("UPDATE audit_issues SET rule_id=? WHERE id=?", (nid, iid))
         con.commit()
-        return len(DEFAULT_RULES)
-    have = {r["title"] for r in con.execute("SELECT title FROM audit_rules")}
+        return len(RULES)
+    have = {r["title"]: r for r in con.execute("SELECT * FROM audit_rules")}
     added = 0
-    for title, kind, params, _desc in DEFAULT_RULES:
-        if title in have:
-            continue
-        con.execute("INSERT INTO audit_rules (kind, title, params) VALUES (?,?,?)",
-                    (kind, title, json.dumps(params, ensure_ascii=False)))
-        added += 1
+    for r in RULES:
+        row = have.get(r["title"])
+        if row is None:
+            con.execute("INSERT INTO audit_rules (key, kind, title, params) VALUES (?,?,?,?)",
+                        (r["key"], r["kind"], r["title"],
+                         json.dumps(_default_params(r), ensure_ascii=False)))
+            added += 1
+        elif (dict(row).get("key") or "") != r["key"]:
+            con.execute("UPDATE audit_rules SET key=? WHERE id=?", (r["key"], row["id"]))
     con.commit()
     return added
 
