@@ -520,7 +520,7 @@ class JobManager:
             cur = self._jobs.get(scene_id)
             if cur and cur["running"]:
                 return self._snap(cur)
-        con = db.connect()
+        con = connect_factory() if connect_factory else db.connect()
         try:
             rules = [dict(r) for r in con.execute("SELECT * FROM audit_rules ORDER BY id")]
         finally:
