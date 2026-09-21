@@ -8,6 +8,7 @@ import { recordUndo, undo as globalUndo } from './edit.js';
 import { buildShelf, storeAsBlock, byPosition } from './blocks.js';
 import { writeClipboard } from './clipboard.js';
 import { openManager } from './blockman.js';
+import { aiTextMenu } from './aiwrite.js';
 import {
   EDITOR_MIN_H, editorReset, editorPush, editorMark, editorUndo, editorRedo,
   editorHasUndo, editorOnInput, insertInto,
@@ -129,6 +130,7 @@ function activateBox(pb) {
     if (t && pb.contains(t)) return;
     const m = menuEl();
     if (m && m.contains(t)) return;    // 菜单内点选不算点外
+    if (t.closest && t.closest('.ai-diff, .ai-cmd')) return;   // AI 预览卡不算点外（M4b-2）
     collapseBox(pb, true);
   };
   pb._state.docMouse = onDocMouse;
@@ -215,6 +217,7 @@ function wireEditorEvents(pb, refs, s, data) {
     const pt = { x: e.clientX, y: e.clientY };
     openMenu(pt, [
       { key: 'mk', label: '添加到提示词块…', disabled: !hasSel },
+      { key: 'ai', label: '✦ AI 改写选中段…', disabled: !hasSel },
       { sep: true },
       { key: 'all', label: '拷上组全文' },
       { sep: true },
@@ -225,6 +228,20 @@ function wireEditorEvents(pb, refs, s, data) {
       if (k === 'mk') {
         if (!hasSel) { toast('先选中要添加的文字'); return; }
         storeAsBlock(pt, selText().trim());
+      } else if (k === 'ai') {
+        if (!hasSel) { toast('先选中要改写的文字'); return; }
+        const seg = selText();
+        const sPos = ta.selectionStart;
+        aiTextMenu(pt, seg, ta.value, (after) => {
+          editorPush(ta);
+          ta.value = ta.value.slice(0, sPos) + after + ta.value.slice(sPos + seg.length);
+          const pos = sPos + after.length;
+          ta.focus();
+          ta.setSelectionRange(pos, pos);
+          growTextarea(ta, EDITOR_MIN_H);
+          editorMark(ta);
+          toast('已替换选段（Ctrl+Z 可撤）');
+        });
       } else if (k === 'all') {
         copyPrevInto(pb, ta, s, data);
       } else if (k === 'copy') {

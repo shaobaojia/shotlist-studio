@@ -48,4 +48,7 @@ export const api = {
   aiSettings: () => get('/api/ai/settings'),
   aiSave: (payload) => post('/api/ai/settings', payload),
   aiTest: () => post('/api/ai/test', {}),
+  aiPreview: (payload) => post('/api/ai/preview', payload),
+  aiJob: (id) => get('/api/ai/job?id=' + id),
+  aiApply: (jobId, itemIds) => post('/api/ai/apply', { job_id: jobId, item_ids: itemIds }),
 };

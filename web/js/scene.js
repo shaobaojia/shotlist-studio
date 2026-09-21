@@ -16,6 +16,7 @@ import { toggleHistory, closeHistory, refreshHistoryIfOpen } from './history.js'
 import { initHotbox, releaseComposer } from './hotbox.js';
 import { initAudit, onPainted as auditOnPainted } from './audit.js';
 import { bindAuditBtn, toggleAuditPanel, closeAuditPanel } from './auditpanel.js';
+import { initAiWrite, closeAiCards } from './aiwrite.js';
 
 const PREFS_KEY = 'shotlist_prefs_v1';
 let prefs = loadPrefs();   // { wrap, hidden:{key:true=隐藏}, widths:{key:px} }
@@ -85,6 +86,10 @@ export async function renderScene(view, sceneNo) {
   initAudit({
     getData: () => currentData,
     refresh: refreshCurrentView,
+  });
+  initAiWrite({
+    getShot: (id) => (currentData ? allShots(currentData).find((s) => s.id === id) : null),
+    sceneId: () => (currentData ? currentData.scene.id : null),
   });
   paintScene(view);
 }
@@ -161,6 +166,7 @@ function paintScene(view) {
   const data = currentData;
   if (!data) return;
   releaseComposer();               // 重绘前释放编辑面（防悬空 activeBox / 陈旧上下文写库；订阅与点外监听一并清）
+  closeAiCards();                  // 重绘前收起 AI 预览卡（M4b-2）
   clearSel();
   view.textContent = '';
   view.classList.toggle('wrap-off', !prefs.wrap);

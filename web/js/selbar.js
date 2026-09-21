@@ -5,6 +5,7 @@ import { openMenu } from './menu.js';
 import { onChange, current, clearSel, rectOf, copySelectionTSV, clearSelectionCells, applyFieldValue } from './selection.js';
 import { deleteSelectedRows } from './cellmenu.js';
 import { mergeShotsByIds, detachShotsByIds } from './hotbox.js';
+import { runCmdbarFromSel } from './aiwrite.js';
 
 // 可批量设值的字段（枚举优先排前；镜号/景深/虚拟列不进）
 const BATCH_KEYS = ['camera_pos', 'shot_size', 'focal', 'shot_fn', 'camera_move', 'spatial', 'blocking', 'dialogue', 'duration', 'audio', 'director_note', 'pov'];
@@ -16,6 +17,7 @@ let delBtn = null;
 let mergeBtn = null;
 let pick = { field: null, value: null };
 let sig = '';
+let aiDraft = '';
 
 export function initSelBar() {
   onChange(onSel);
@@ -153,6 +155,19 @@ function build() {
   cl.title = '清空选中格（可撤销）';
   cl.addEventListener('click', () => clearSelectionCells());
   bar.appendChild(cl);
+  const aiIn = document.createElement('input');
+  aiIn.className = 'sbar-ai';
+  aiIn.placeholder = '✦ 说一句人话（如：都具象化）';
+  aiIn.value = aiDraft;
+  aiIn.addEventListener('input', () => { aiDraft = aiIn.value; });
+  aiIn.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); runCmdbarFromSel(aiDraft.trim()); }
+  });
+  bar.appendChild(aiIn);
+  const aiBtn = el('button', 'tool-btn', '预览');
+  aiBtn.title = '按指令对选中格出改写预览（零写入 · 先过目再应用）';
+  aiBtn.addEventListener('click', () => runCmdbarFromSel(aiDraft.trim()));
+  bar.appendChild(aiBtn);
   const xx = el('button', 'tool-btn', '✕');
   xx.title = '取消选择（Esc）';
   xx.addEventListener('click', () => clearSel());

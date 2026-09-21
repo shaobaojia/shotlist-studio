@@ -6,6 +6,7 @@ import { cellContent } from './cells.js';
 import { attachEditable, attachCamEditor, parseCam, recordUndo } from './edit.js';
 import { api } from './api.js';
 import { buildPromptBox, toggleComposer } from './hotbox.js';
+import { isAiField, aiOpenFor } from './aiwrite.js';
 
 const MULTILINE_TYPES = new Set(['spatial', 'dialogue', 'audio', 'notes', 'camera']);
 const MULTILINE_KEYS = new Set(['blocking']);
@@ -226,6 +227,7 @@ function shotCell(s, f, groups, data) {
     table: 'shots', id: s.id, field: f.key, label: f.label,
     multiline: isMultiline(f),
     select: f.options || undefined,
+    aiOpen: isAiField(f.key) ? aiOpenFor : undefined,
     getValue: () => s[f.key],
     onLocal: (v) => { s[f.key] = v; },
     renderCell: () => { renderShotField(td, s, f); refreshDetailValue(s, f.key); },
@@ -334,6 +336,7 @@ function detailBox(s, groups, data) {
         table: 'shots', id: s.id, field: f.key, label: f.label,
         multiline: isMultiline(f),
         select: f.options || undefined,
+        aiOpen: isAiField(f.key) ? aiOpenFor : undefined,
         getValue: () => s[f.key],
         onLocal: (val) => { s[f.key] = val; },
         renderCell: () => { v.textContent = fmt(s[f.key]); refreshTableValue(s, f.key); },
@@ -383,6 +386,7 @@ export function beatSection(b, data, opts) {
     renderBeatAction(act, b);
     attachEditable(act, {
       table: 'beats', id: b.id, field: 'beat_action', label: '节拍概述', multiline: true,
+      aiOpen: aiOpenFor,
       getValue: () => b.beat_action,
       onLocal: (v) => { b.beat_action = v; },
       renderCell: () => {
@@ -479,6 +483,14 @@ function renderBeatAction(act, b) {
   text.split('\n').forEach((line, i) => {
     if (i) act.appendChild(document.createElement('br'));
     act.appendChild(document.createTextNode(line));
+  });
+}
+
+// 节拍概述单处重画（AI 改写原地回显）
+export function refreshBeatAction(b) {
+  document.querySelectorAll('section.beat[data-beat-id="' + b.id + '"] .beat-action').forEach((act) => {
+    act.classList.toggle('empty', !b.beat_action);
+    renderBeatAction(act, b);
   });
 }
 

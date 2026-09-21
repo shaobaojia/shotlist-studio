@@ -90,6 +90,19 @@ function openEditor(host, cfg) {
   host.classList.add('editing');
   host.textContent = '';
   host.appendChild(ed);
+  if (cfg.aiOpen) {
+    const wand = document.createElement('span');
+    wand.className = 'ai-wand';
+    wand.textContent = '✦';
+    wand.title = 'AI 改写…（改写 / 具象化 / 强化 / 扩写）';
+    wand.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
+    wand.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      cfg.aiOpen(cfg, ed, wand);
+    });
+    host.appendChild(wand);
+  }
   fitEditorOpen(ed, host);
   ed.focus();
   if (ed.tagName === 'INPUT') {

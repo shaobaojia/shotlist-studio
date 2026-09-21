@@ -5,7 +5,8 @@ import { toast } from './ui.js';
 import { openMenu } from './menu.js';
 import { recordUndo } from './edit.js';
 import { writeClipboard, pasteBlock, toTSV, tableFieldKeys } from './clipboard.js';
-import { refreshShotCell } from './table.js';
+import { refreshShotCell, refreshBeatAction } from './table.js';
+import { isAiField, aiMenu, aiMenuForBeat } from './aiwrite.js';
 import { current as selCurrent, inCell, copySelectionTSV, clearSelectionCells, tlCell, rectOf } from './selection.js';
 
 let shotsOf = null;
@@ -54,6 +55,8 @@ function openCellMenu(td, tr, e) {
     { key: 'copyRow', label: '复制整行（本表列）' },
     { key: 'paste', label: '粘贴（从此格起）' },
     { sep: true },
+    { key: 'ai', label: isAiField(key) ? '✦ AI 改写…' : '✦ AI 改写…（本列不支持）', disabled: !isAiField(key) },
+    { sep: true },
     { key: 'duplicate', label: '创建行副本' },
     { key: 'insertAbove', label: '上方插入空行' },
     { key: 'insertBelow', label: '下方插入空行' },
@@ -61,7 +64,7 @@ function openCellMenu(td, tr, e) {
     { key: 'clear', label: '清空本格' },
     { key: 'deleteRow', label: '删除本行' },
   ];
-  openMenu({ x: e.clientX, y: e.clientY }, items, (k) => onCellMenuPick(k, td, tr, s, key, table));
+  openMenu({ x: e.clientX, y: e.clientY }, items, (k) => onCellMenuPick(k, td, tr, s, key, table, e));
 }
 
 // 选区内的右键菜单（多一套选区动作）
@@ -70,11 +73,25 @@ function openSelMenu(td, tr, e) {
   const rc = rectOf();
   const n = (rc.r2 - rc.r1 + 1) * (rc.c2 - rc.c1 + 1);
   const mrows = rc.r2 - rc.r1 + 1;
+  const aiT = [];
+  const sCur = selCurrent();
+  if (sCur) {
+    for (let r = rc.r1; r <= rc.r2; r++) {
+      const trI = sCur.rows[r];
+      if (!trI) continue;
+      const sid = Number(trI.dataset.id);
+      for (let c = rc.c1; c <= rc.c2; c++) {
+        if (isAiField(sCur.cols[c])) aiT.push({ table: 'shots', id: sid, field: sCur.cols[c] });
+      }
+    }
+  }
   const items = [
     { key: 'copySel', label: '复制选区（' + n + ' 格）' },
     { key: 'copyCell', label: '复制本格' },
     { key: 'copyRow', label: '复制整行（本表列）' },
     { key: 'paste', label: '粘贴（从选区左上起）' },
+    { sep: true },
+    { key: 'ai', label: aiT.length ? (aiT.length > 1 ? ('✦ AI 改写…（选中 ' + aiT.length + ' 格）') : '✦ AI 改写…') : '✦ AI 改写…（选区无可改字段）', disabled: !aiT.length },
     { sep: true },
     { key: 'duplicate', label: '创建行副本' },
     { key: 'insertAbove', label: '上方插入空行' },
@@ -85,6 +102,7 @@ function openSelMenu(td, tr, e) {
     { key: 'deleteRows', label: '删除选中行（' + mrows + '）' },
   ];
   openMenu({ x: e.clientX, y: e.clientY }, items, (k) => {
+    if (k === 'ai') { aiMenu({ x: e.clientX, y: e.clientY }, aiT); return; }
     if (k === 'copySel') { copySelectionTSV(); return; }
     if (k === 'clearSel') { clearSelectionCells(); return; }
     if (k === 'deleteRows') { deleteSelectedRows(); return; }
@@ -97,11 +115,15 @@ function openSelMenu(td, tr, e) {
       if (tlc) armPaste({ td: tlc.td, tr: tlc.tr, field: tlc.field });
       return;
     }
-    onCellMenuPick(k, td, tr, findShot(Number(tr.dataset.id)), td.dataset.field, td.closest('table'));
+    onCellMenuPick(k, td, tr, findShot(Number(tr.dataset.id)), td.dataset.field, td.closest('table'), e);
   });
 }
 
-async function onCellMenuPick(k, td, tr, s, key, table) {
+async function onCellMenuPick(k, td, tr, s, key, table, e) {
+  if (k === 'ai') {
+    aiMenu({ x: e.clientX, y: e.clientY }, [{ table: 'shots', id: s.id, field: key }]);
+    return;
+  }
   if (k === 'copyCell') {
     const ok = await writeClipboard(s[key] == null ? '' : String(s[key]));
     toast(ok ? '已复制本格' : '复制失败：浏览器限制', ok ? '' : 'err');
@@ -280,12 +302,15 @@ function openBeatMenu(sec, e) {
   const items = [
     { key: 'dupBeat', label: '创建节拍副本（含 ' + n + ' 镜）' },
     { sep: true },
+    { key: 'ai', label: '✦ AI 改写…（节拍概述）' },
+    { sep: true },
     { key: 'delBeat', label: '删除节拍' },
   ];
-  openMenu({ x: e.clientX, y: e.clientY }, items, (k) => onBeatMenuPick(k, b));
+  openMenu({ x: e.clientX, y: e.clientY }, items, (k) => onBeatMenuPick(k, b, e));
 }
 
-async function onBeatMenuPick(k, b) {
+async function onBeatMenuPick(k, b, e) {
+  if (k === 'ai') { aiMenuForBeat({ x: e.clientX, y: e.clientY }, b, () => refreshBeatAction(b)); return; }
   try {
     if (k === 'dupBeat') {
       const res = await api.duplicate('beats', b.id);
