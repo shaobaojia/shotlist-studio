@@ -123,6 +123,15 @@ def lock_scene(con, scene_id, lock=True, snap_root=None):
             "snapshot": snap}
 
 
+def _guarded_set(con, table, field, row_id, old, value):
+    """条件写：仅当现值仍等于 old 才落笔（防 check-then-act 丢更新）。返回是否写入。"""
+    cur = con.execute(
+        "UPDATE %s SET %s=?, updated_at=datetime('now','localtime') "
+        "WHERE id=? AND ifnull(%s,'')=?" % (table, field, field),
+        (value, row_id, "" if old is None else old))
+    return cur.rowcount > 0
+
+
 def _apply_field(con, table, row_id, field, value, source="manual"):
     """单字段更新（不 commit）：白名单校验 → 写行 → 记痕迹。返回 (row, changed)。"""
     if field not in write_keys(table):
@@ -133,9 +142,8 @@ def _apply_field(con, table, row_id, field, value, source="manual"):
     old = row[field]
     if (old if old is not None else "") == (value if value is not None else ""):
         return dict(row), False
-    con.execute(
-        "UPDATE %s SET %s=?, updated_at=datetime('now','localtime') WHERE id=?" % (table, field),
-        (value, row_id))
+    if not _guarded_set(con, table, field, row_id, old, value):
+        raise ValueError("该字段已被其他操作修改（%s #%s），请刷新后重试" % (table, row_id))
     record_history(con, _scene_of(con, table, row_id), table, row_id, field, old, value, source)
     fresh = con.execute("SELECT * FROM %s WHERE id=?" % table, (row_id,)).fetchone()
     return dict(fresh), True

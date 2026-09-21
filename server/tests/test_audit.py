@@ -135,6 +135,19 @@ class TestProgramRules(unittest.TestCase):
         self.assertEqual(len(audit.rules_state(self.con)), 10)
 
 
+class TestResolveRef(unittest.TestCase):
+    def test_norm_ref_prefixes(self):
+        """引用归一（L4）：模型回「节拍2」「Beat 2」「镜头1」等前缀也要落位——回归：曾静默丢弃。"""
+        ctx = {"scene": {"id": 9}, "shot_by_no": {"1": {"id": 101}, "2": {"id": 102}},
+               "beat_by_no": {"2": {"id": 7}}}
+        self.assertEqual(audit._resolve_ref(ctx, "beat", "节拍2"), "7")
+        self.assertEqual(audit._resolve_ref(ctx, "beat", "Beat 2"), "7")
+        self.assertEqual(audit._resolve_ref(ctx, "shot", "镜01"), "101")
+        self.assertEqual(audit._resolve_ref(ctx, "shot", "镜头1"), "101")
+        self.assertEqual(audit._resolve_ref(ctx, "seam", "镜1→镜2"), "101>102")
+        self.assertEqual(audit._resolve_ref(ctx, "scene", ""), "9")
+
+
 class TestLlmRules(unittest.TestCase):
     def setUp(self):
         self.con = make_audit_db()

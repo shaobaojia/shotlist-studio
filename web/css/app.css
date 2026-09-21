@@ -453,6 +453,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
   border-radius: 6px; padding: 1.5px 4px; font-weight: 600;
 }
 td.cell-toggle { position: relative; }
+#view.wrap-off table.shots td.cell-toggle { overflow: visible; }   /* 「不换行」接缝灯防裁（M2） */
 tr.shot.has-lamp .drag-dots { left: 10px; top: 24px; }
 .audit-lamp.seam { top: 100%; transform: none; }
 .beat-head { position: relative; }

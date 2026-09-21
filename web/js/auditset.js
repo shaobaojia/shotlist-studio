@@ -10,6 +10,8 @@ let panel = null, bodyEl = null;
 
 export function openAuditSettings() {
   if (!panel) build();
+  const c = document.getElementById('settings-card');   // 浮卡互斥：顶栏设置若开着先收起（F8）
+  if (c) c.hidden = true;
   panel.hidden = false;
   load();
 }

@@ -16,6 +16,8 @@ export function toggleSettings() {
 }
 
 export function openSettings() {
+  const s = document.getElementById('audit-set');       // 浮卡互斥：审计设置若开着先收起（F8）
+  if (s) s.hidden = true;
   if (!card) build();
   card.hidden = false;
   loadAll();

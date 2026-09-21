@@ -99,8 +99,12 @@ export function applyFilter(ctx) {
     const ok = !active || shotMatches(s, groups);
     if (ok) shown++;
     tr.style.display = ok ? '' : 'none';
-    const det = tr.nextElementSibling;
-    if (det && det.classList.contains('detail')) det.style.display = ok ? '' : 'none';
+    // 同行附加行联动（详情行 + 审计问题卡行 + 未来同类）：跟着本行一起藏/显（M6）
+    let n = tr.nextElementSibling;
+    while (n && (n.classList.contains('detail') || n.classList.contains('audit-card-tr'))) {
+      n.style.display = ok ? '' : 'none';
+      n = n.nextElementSibling;
+    }
   });
   view.querySelectorAll('section.beat').forEach((sec) => {
     const rows = sec.querySelectorAll('tr.shot');

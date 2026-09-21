@@ -13,6 +13,9 @@ let cur = null;        // { sceneId, issues, counts, job, rules }
 let fetchedAt = 0;
 let pollTimer = null;
 let openKey = null;    // 'carrier:target' 当前展开的问题卡
+let seq = 0;           // 读序号：在飞读取遇更新的读/本地写即作废（M5 乱序覆盖）
+let inFlight = false;  // 轮询单飞（上一拍未回不叠发）
+let lastKey = '';      // 状态指纹：无变化不 notify（省徽标/清单重刷）
 
 export function initAudit(c) { ctx = c; }
 export function getState() { return cur; }
@@ -21,7 +24,7 @@ export function getData() { return ctx && ctx.getData(); }
 export function onPainted(data) {
   if (!data || !data.scene) return;
   const changed = !cur || cur.sceneId !== data.scene.id;
-  if (changed) { cur = null; openKey = null; }
+  if (changed) { cur = null; openKey = null; lastKey = ''; stopPoll(); }   // 换场即停旧轮询
   decorate(data);
   fetchState(data.scene.id, changed);   // 换场强制重拉（限流闸门不得吃掉换场那一次）
 }
@@ -30,37 +33,72 @@ function fetchState(sid, force) {
   const now = Date.now();
   if (!force && now - fetchedAt < 2500) return Promise.resolve();
   fetchedAt = now;
+  const my = ++seq;
   return api.audit(sid).then((res) => {
+    if (my !== seq) return;                       // 已有更新的读/本地写：本包作废
     const d = ctx && ctx.getData();
     if (!d || d.scene.id !== sid) return;
-    cur = { sceneId: sid, issues: res.issues || [], counts: res.counts || { open: 0, fixed: 0, waived: 0 },
-            job: res.job || null, rules: res.rules || [] };
+    const st = applyRead(res, sid);
     decorate(d);
-    notify();
+    if (st.changed) notify();
     if (cur.job && cur.job.running) startPoll();
   }).catch(() => {});
 }
 
 function notify() { window.dispatchEvent(new CustomEvent('shotlist:audit-changed')); }
 
+// 读取落地（fetchState/tick 共用）：返回 { changed, wasRunning }
+function applyRead(res, sid) {
+  const wasRunning = !!(cur && cur.job && cur.job.running);
+  cur = { sceneId: sid, issues: res.issues || [], counts: res.counts || { open: 0, fixed: 0, waived: 0 },
+          job: res.job || null, rules: res.rules || [] };
+  const key = stateKey();
+  const changed = key !== lastKey;
+  lastKey = key;
+  return { changed: changed, wasRunning: wasRunning };
+}
+
+function stateKey() {
+  if (!cur) return '';
+  const j = cur.job;
+  const jk = j ? [j.running ? 1 : 0, (j.rules || []).map((r) => r.title + '.' + r.state).join(',')].join('|') : '';
+  const ik = cur.issues.map((i) => [i.id, i.status, i.updated_at || '', i.waive_note || ''].join('.')).join(';');
+  const c = cur.counts || {};
+  return jk + '##' + ik + '##' + [c.open, c.fixed, c.waived].join('/');
+}
+
 // ── 灯 ──
 function splitKey(k) { const i = k.indexOf(':'); return [k.slice(0, i), k.slice(i + 1)]; }
 function shotIdOf(carrier, target) { return carrier === 'seam' ? String(target).split('>')[0] : String(target); }
 
-function findAnchor(carrier, target, data) {
-  if (carrier === 'scene') return document.querySelector('.scene-freeze .scene-head') || document.querySelector('.scene-head');
+// 载体解析（单点）：灯 / 卡 / 清单跳转 / 去改 全走这里——平铺视图节拍回退「首镜行」（G4）
+function resolveCarrier(carrier, target, data) {
+  if (carrier === 'scene') {
+    const node = document.querySelector('.scene-freeze .scene-head') || document.querySelector('.scene-head');
+    return node ? { node: node, lamp: node, head: node, row: null, sec: null } : null;
+  }
   if (carrier === 'beat') {
     const sec = document.querySelector('section.beat[data-beat-id="' + target + '"]');
-    return sec ? sec.querySelector('.beat-head') : null;
+    if (sec) {
+      const head = sec.querySelector('.beat-head');
+      return { node: sec, lamp: head || sec, head: head, row: null, sec: sec };
+    }
+    const b = ((data && data.beats) || []).find((x) => String(x.id) === String(target));
+    const first = b && b.shots && b.shots[0];
+    const row = first && document.querySelector('tr.shot[data-id="' + first.id + '"]');
+    if (!row) return null;
+    return { node: row, lamp: row.querySelector('td.cell-toggle') || row, head: null, row: row, sec: null,
+             hidden: row.style.display === 'none' };
   }
   const row = document.querySelector('tr.shot[data-id="' + shotIdOf(carrier, target) + '"]');
-  return row ? row.querySelector('td.cell-toggle') : null;
+  if (!row) return null;
+  return { node: row, lamp: row.querySelector('td.cell-toggle') || row, head: null, row: row, sec: null,
+           hidden: row.style.display === 'none' };
 }
 
 function decorate(data) {
   document.querySelectorAll('.audit-lamp').forEach((n) => n.remove());
-  document.querySelectorAll('tr.audit-card-tr').forEach((n) => n.remove());
-  document.querySelectorAll('.audit-card').forEach((n) => n.remove());
+  clearCards();
   document.querySelectorAll('tr.shot.has-lamp').forEach((n) => n.classList.remove('has-lamp'));
   if (!cur || cur.sceneId !== data.scene.id) { openKey = null; return; }
   const by = {};
@@ -71,13 +109,12 @@ function decorate(data) {
   }
   for (const k of Object.keys(by)) {
     const [carrier, target] = splitKey(k);
-    const anchor = findAnchor(carrier, target, data);
-    if (!anchor) continue;
-    anchor.appendChild(buildLamp(k, by[k].length, by[k][0].message || ''));
-    const tr = anchor.closest('tr.shot');
-    if (tr) tr.classList.add('has-lamp');
+    const r = resolveCarrier(carrier, target, data);
+    if (!r) continue;
+    r.lamp.appendChild(buildLamp(k, by[k].length, by[k][0].message || ''));
+    if (r.row) r.row.classList.add('has-lamp');
   }
-  if (openKey && !openCard(openKey, data, true)) openKey = null;
+  if (openKey && openCard(openKey, data, true) === 'gone') openKey = null;   // 暂时隐藏（筛选）不清 openKey
 }
 
 function buildLamp(key, count, msg) {
@@ -101,41 +138,44 @@ function buildLamp(key, count, msg) {
 }
 
 // ── 问题卡（行下就地展开 / 节拍头下 / 场头下）──
-export function closeCard() {
+function clearCards() {
   document.querySelectorAll('tr.audit-card-tr').forEach((n) => n.remove());
   document.querySelectorAll('.audit-card').forEach((n) => n.remove());
+}
+
+export function closeCard() {
+  clearCards();
   openKey = null;
+  window.dispatchEvent(new Event('resize'));   // 场级卡收起：吸顶区高度重算（M3）
   notify();
 }
 
 function openCard(key, data, silent) {
-  document.querySelectorAll('tr.audit-card-tr').forEach((n) => n.remove());
-  document.querySelectorAll('.audit-card').forEach((n) => n.remove());
+  clearCards();
   const [carrier, target] = splitKey(key);
   const list = (cur ? cur.issues : []).filter(
     (i) => i.carrier === carrier && String(i.target_id) === String(target));
-  if (!list.length) { openKey = null; return false; }
+  if (!list.length) { openKey = null; return 'gone'; }
+  const r = resolveCarrier(carrier, target, data);
+  if (!r) { openKey = null; return 'gone'; }
+  if (r.hidden) {   // 行被筛选隐藏：暂时态——静默重绘不弹 toast（L7）
+    if (!silent) toast('该行被筛选隐藏了');
+    return 'hidden';
+  }
   const card = buildCard(carrier, target, list, data);
   let host = null;
   if (carrier === 'scene') {
-    const head = findAnchor(carrier, target, data);
-    if (head) { head.parentNode.insertBefore(card, head.nextSibling); host = card; }
-  } else if (carrier === 'beat') {
-    const head = findAnchor(carrier, target, data);
-    const sec = head && head.closest('section.beat');
-    if (head && sec) { sec.insertBefore(card, head.nextSibling); host = card; }
-    else {   // 平铺视图：挂在该节拍第一镜行下
-      const b = (data.beats || []).find((x) => String(x.id) === String(target));
-      const first = b && b.shots && b.shots[0];
-      const row = first && document.querySelector('tr.shot[data-id="' + first.id + '"]');
-      if (row) host = insertCardTr(row, card);
-    }
-  } else {
-    const row = document.querySelector('tr.shot[data-id="' + shotIdOf(carrier, target) + '"]');
-    if (row && row.style.display === 'none') { toast('该行被筛选隐藏了'); return false; }
-    if (row) host = insertCardTr(row, card);
+    r.node.parentNode.insertBefore(card, r.node.nextSibling);
+    host = card;
+  } else if (carrier === 'beat' && r.sec) {
+    const ref = r.head || r.sec.querySelector('.space-label');
+    if (ref) r.sec.insertBefore(card, ref.nextSibling);
+    else r.sec.insertBefore(card, r.sec.firstChild);
+    host = card;
+  } else {   // 平铺节拍 / 镜 / 接缝：行下卡
+    host = insertCardTr(r.row, card);
   }
-  if (!host) { openKey = null; return false; }
+  if (!host) { openKey = null; return 'gone'; }
   openKey = key;
   if (carrier === 'scene') window.dispatchEvent(new Event('resize'));   // 吸顶区高度重算
   if (!silent) notify();
@@ -144,6 +184,7 @@ function openCard(key, data, silent) {
 
 function insertCardTr(row, card) {
   const tr = el('tr', 'audit-card-tr');
+  tr.dataset.for = String(row.dataset.id);   // 同行标记（筛选隐藏联动，M6）
   const td = document.createElement('td');
   const table = row.closest('table');
   td.colSpan = table ? table.querySelectorAll('colgroup col').length : 99;
@@ -181,7 +222,7 @@ function issueRow(i, data) {
   row.appendChild(txt);
   const acts = el('div', 'ac-acts');
   if (i.status === 'open') {
-    acts.appendChild(qb('去改', () => goEdit(i, data)));
+    if (i.carrier === 'shot' || i.carrier === 'beat') acts.appendChild(qb('去改', () => goEdit(i, data)));
     acts.appendChild(qb('重检', () => recheckIssue(i)));
     acts.appendChild(qb('豁免', () => doWaive(i)));
   } else if (i.status === 'waived') {
@@ -204,26 +245,13 @@ export function jumpToIssue(issue, opts) {
   if (!data) return null;
   const key = issue.carrier + ':' + issue.target_id;
   const [carrier, target] = splitKey(key);
-  let node = null, row = null;
-  if (carrier === 'scene') {
-    node = document.querySelector('.scene-freeze .scene-head') || document.querySelector('.scene-head');
-  } else if (carrier === 'beat') {
-    node = document.querySelector('section.beat[data-beat-id="' + target + '"]');
-    if (!node) {
-      const b = (data.beats || []).find((x) => String(x.id) === String(target));
-      const first = b && b.shots && b.shots[0];
-      row = first && document.querySelector('tr.shot[data-id="' + first.id + '"]');
-      node = row;
-    }
-  } else {
-    row = document.querySelector('tr.shot[data-id="' + shotIdOf(carrier, target) + '"]');
-    if (row && row.style.display === 'none') { toast('该处被筛选隐藏了'); return null; }
-    node = row;
-  }
-  if (node) flash(node);
+  const r = resolveCarrier(carrier, target, data);
+  if (!r) { toast('未找到该问题对应位置——可能已被删除或不在当前视图'); return null; }
+  if (r.hidden) { toast('该处被筛选隐藏了'); return null; }
+  flash(r.node);
   if (!(opts && opts.noCard)) openCard(key, data);
-  if (node && node.scrollIntoView) node.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  return { carrier, target, row };
+  if (r.node.scrollIntoView) r.node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  return { carrier, target, row: r.row };
 }
 
 function flash(node) {
@@ -235,8 +263,9 @@ function goEdit(i, data) {
   const res = jumpToIssue(i, { noCard: true });
   closeCard();
   if (!res) return;
-  const field = FIELD_HINT[i.rule_title];
-  if (res.carrier === 'shot' && field) {
+  if (res.carrier === 'shot') {
+    const field = FIELD_HINT[i.rule_title];
+    if (!field) return;   // 无对应列：已定位并闪烁，交由手动修改
     setTimeout(() => {
       const td = document.querySelector('tr.shot[data-id="' + res.target + '"] td[data-field="' + field + '"]');
       if (td) td.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
@@ -246,6 +275,7 @@ function goEdit(i, data) {
     setTimeout(() => {
       const act = document.querySelector('section.beat[data-beat-id="' + res.target + '"] .beat-action');
       if (act) act.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      else toast('平铺视图下不能直接改节拍栏——切回「分组」视图再改');
     }, 320);
   }
 }
@@ -255,6 +285,7 @@ export async function runAudit() {
   if (!data) return;
   try {
     const res = await api.auditRun(data.scene.id);
+    seq++;                       // 本地权威写：作废在飞旧读
     if (cur && cur.sceneId === data.scene.id) cur.job = res.job;
     else cur = { sceneId: data.scene.id, issues: [], counts: { open: 0, fixed: 0, waived: 0 }, job: res.job, rules: [] };
     notify();
@@ -266,6 +297,7 @@ export async function runAudit() {
 export async function recheckIssue(i) {
   try {
     const res = await api.auditIssue({ id: i.id, action: 'recheck' });
+    seq++;                       // 本地权威写：作废在飞旧读
     if (cur && res.job) cur.job = res.job;
     notify();
     startPoll();
@@ -321,6 +353,7 @@ function editWaiveNote(i, rowEl) {
 
 function applyIssues(res) {
   if (!cur) return;
+  seq++;                       // 本地权威写：作废在飞旧读（防旧快照复活）
   cur.issues = res.issues || [];
   cur.counts = res.counts || cur.counts;
   const data = ctx && ctx.getData();
@@ -329,7 +362,7 @@ function applyIssues(res) {
   refreshHistoryIfOpen();
 }
 
-// ── 轮询 ──
+// ── 轮询（M5：单飞 + 序号防乱序；换场停；页面隐藏不拉）──
 function startPoll() { if (!pollTimer) { pollTimer = setInterval(tick, 2000); tick(); } }
 function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 
@@ -337,27 +370,33 @@ async function tick() {
   if (!cur) return stopPoll();
   const data = ctx && ctx.getData();
   if (!data || data.scene.id !== cur.sceneId) return stopPoll();
+  if (document.hidden) return;                 // 后台页不拉；回前台立即补一拍
+  if (inFlight) return;                        // 单飞：上一拍未回不叠发
+  inFlight = true;
   const sid = cur.sceneId;
+  const my = ++seq;
   try {
     const res = await api.audit(sid);
+    if (my !== seq) return;                    // 期间有更新的读/本地写：旧快照作废（防复活一拍）
     if (!cur || cur.sceneId !== sid) return stopPoll();
-    const wasRunning = !!(cur.job && cur.job.running);
-    cur.job = res.job || null;
-    cur.issues = res.issues || [];
-    cur.counts = res.counts || cur.counts;
-    cur.rules = res.rules || cur.rules;
+    const st = applyRead(res, sid);
     const d = ctx && ctx.getData();
     if (!d || d.scene.id !== sid) return stopPoll();
     if (cur.job && cur.job.running) {
-      notify();
+      if (st.changed) notify();
     } else {
       stopPoll();
       decorate(d);
       notify();
-      if (wasRunning) onDone(cur.job);
+      if (st.wasRunning) onDone(cur.job);
     }
   } catch (err) { /* 网络抖动：下一拍再试 */ }
+  finally { inFlight = false; }
 }
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && pollTimer) tick();   // 回前台补一拍（隐藏期间不耗请求）
+});
 
 function onDone(job) {
   if (job && job.error) { toast('审计失败：' + job.error, 'err'); return; }

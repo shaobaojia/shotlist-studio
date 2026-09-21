@@ -61,6 +61,22 @@ class TestUpdateField(unittest.TestCase):
         self.assertEqual(con.execute("SELECT kind FROM beats WHERE id=1").fetchone()["kind"], "🔴 戏点")
         self.assertEqual(con.execute("SELECT value FROM scenes WHERE id=1").fetchone()["value"], "失控")
 
+    def test_conditional_write_guards_lost_update(self):
+        """P5 条件写：迟到者不得静默覆盖新值；守卫失败走 ValueError（不写、不记痕）。"""
+        import unittest.mock as mock
+        con = make_db()
+        ops.update_field(con, "shots", 1, "director_note", "甲")
+        ops.update_field(con, "shots", 1, "director_note", "乙")     # 另一写者先行落笔
+        self.assertFalse(ops._guarded_set(con, "shots", "director_note", 1, "甲", "丙"))  # 携旧值 → 被拒
+        self.assertEqual(con.execute("SELECT director_note FROM shots WHERE id=1").fetchone()["director_note"], "乙")
+        self.assertTrue(ops._guarded_set(con, "shots", "director_note", 1, "乙", "丙"))   # 现值相符 → 照写
+        h0 = len(ops.history_of(con, scene_id=1))
+        with mock.patch.object(ops, "_guarded_set", return_value=False):
+            with self.assertRaises(ValueError):
+                ops.update_field(con, "shots", 1, "director_note", "丁")
+        self.assertEqual(len(ops.history_of(con, scene_id=1)), h0)
+        self.assertEqual(con.execute("SELECT director_note FROM shots WHERE id=1").fetchone()["director_note"], "丙")
+
 
 class TestRenumber(unittest.TestCase):
     def test_renumber_by_position(self):

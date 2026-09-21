@@ -7,6 +7,7 @@ import { renderScene, refreshCurrentView } from './scene.js';
 import { undo, recordUndo } from './edit.js';
 import { openMenu } from './menu.js';
 import { bindSettingsBtn } from './settings.js';
+import { closeAuditPanel } from './auditpanel.js';
 
 let navBound = false;
 let dragChip = null;
@@ -220,7 +221,7 @@ function route() {
   const view = document.getElementById('view');
   const m = cur.match(/^#\/(.+)$/);
   if (m) renderScene(view, m[1]);
-  else renderFilm(view);
+  else { closeAuditPanel(); renderFilm(view); }   // 离场去「全片」：清单不留浮（M4）
 }
 
 function syncTopbarVar() {

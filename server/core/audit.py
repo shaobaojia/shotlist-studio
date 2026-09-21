@@ -250,10 +250,16 @@ def _extract_json(text):
     return obj
 
 
+def _norm_ref(ref):
+    """引用归一：剥「镜头 / 镜 / 节拍 / beat」前缀与空白（模型常回「节拍2」「Beat 3」）。"""
+    t = (ref or "").replace("镜头", "").replace("镜", "").replace("节拍", "").replace(" ", "")
+    return t.replace("beat", "").replace("Beat", "").replace("BEAT", "")
+
+
 def _resolve_ref(ctx, carrier, ref):
     if carrier == "scene":
         return str(ctx["scene"]["id"])
-    r = (ref or "").replace("镜", "").replace(" ", "")
+    r = _norm_ref(ref)
     if carrier == "shot":
         s = _lookup(ctx["shot_by_no"], r)
         return str(s["id"]) if s else None
