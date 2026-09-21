@@ -57,10 +57,40 @@ def public_config(cfg):
             "base_url": cfg["ai_base_url"], "has_key": cfg["has_key"]}
 
 
+def require_key(cfg):
+    """key 预检单点（L2）：无 key 抛 AiError——文案与 api 层一致。"""
+    if not (cfg or {}).get("api_key"):
+        raise AiError("未配置 API Key（先去设置里填）")
+    return cfg
+
+
+def reply_text(reply):
+    """回包归一单点（L2）：dict → text 字段（缺则空串）；str 原样；None → 空串。"""
+    if isinstance(reply, dict):
+        return reply.get("text") or ""
+    return reply or ""
+
+
+def channel(con, chat_fn=None, precheck=True):
+    """任务通道单点（L2）：读配置 + key 预检 → 返回 (cfg, chat)。
+
+    chat(cfg, messages) 直出归一文本文（dict→text / str 原样）；
+    chat_fn = 测试注入桩（同形状）；注入时不预检（测试无需真 key）。"""
+    cfg = get_config(con)
+    if precheck and chat_fn is None:
+        require_key(cfg)
+
+    def talk(c, messages):
+        if chat_fn is not None:
+            return reply_text(chat_fn(c, messages))
+        return reply_text(chat(c, messages))
+
+    return cfg, talk
+
+
 def chat(cfg, messages, temperature=0.2, timeout=180):
     """一次对话调用（非流式）。失败抛 AiError。返回 {text, ms, model}。"""
-    if not cfg.get("api_key"):
-        raise AiError("未配置 API Key")
+    require_key(cfg)
     url = cfg["ai_base_url"].rstrip("/") + "/chat/completions"
     body = json.dumps({"model": cfg["ai_model"], "messages": messages,
                        "temperature": temperature, "stream": False}).encode("utf-8")

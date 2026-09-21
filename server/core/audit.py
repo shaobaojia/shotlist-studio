@@ -10,7 +10,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from core import ai, db, ops
+from core import ai, db, jobs, ops
 
 CARRIERS = ("scene", "beat", "shot", "seam")
 
@@ -295,19 +295,14 @@ def _parse_findings(ctx, text):
     return out
 
 
-def _default_chat(cfg, messages):
-    return ai.chat(cfg, messages)
-
-
 def _run_llm_rule(ctx, rule, cfg, ai_chat):
     title = rule["title"]
     body = LLM_DIGESTS[title](ctx, rule["params"])
     if body is None:
         return []
     system = _load_recipe(title)
-    reply = ai_chat(cfg, [{"role": "system", "content": system},
-                          {"role": "user", "content": body}])
-    text = reply["text"] if isinstance(reply, dict) else reply
+    text = ai_chat(cfg, [{"role": "system", "content": system},
+                         {"role": "user", "content": body}])
     return _parse_findings(ctx, text)
 
 
@@ -355,8 +350,7 @@ def run_scene(con, scene_id, only=None, ai_chat=None, progress=None):
         rules = [r for r in rules if r["enabled"]]
     for r in rules:
         r["params"] = _params(r)
-    cfg = ai.get_config(con)
-    chat = ai_chat or _default_chat
+    cfg, chat = ai.channel(con, ai_chat, precheck=False)  # 无 key 不拦整场：LLM 规则各自报错（语义照旧）
     t0 = time.time()
     plan, llm_jobs = [], []
     for r in rules:
@@ -525,31 +519,23 @@ def seed_default_rules(con, reset=False):
 
 # ════════ 审计任务（后台跑，前端轮询进度） ════════
 
-class JobManager:
-    """内存级审计任务：每场同一时刻至多一个；服务重启即清（进度不是持久数据）。"""
+class JobManager(jobs.JobBoard):
+    """内存级审计任务（基类 = core/jobs.py）：每场同一时刻至多一个；服务重启即清。"""
 
     def __init__(self):
-        self._lock = threading.Lock()
-        self._jobs = {}  # scene_id -> job dict
-
-    def _snap(self, job):
-        return json.loads(json.dumps(job, ensure_ascii=False))
+        super().__init__(gate=None)          # 审计任务不在并发闸内（拍板语义）
 
     def status(self, scene_id):
-        with self._lock:
-            job = self._jobs.get(scene_id)
-            return self._snap(job) if job else None
+        return self.get(scene_id)
 
     def start(self, scene_id, only=None, chat=None, connect_factory=None):
         """启动（或加入进行中的）任务，立即返回任务快照。
         joined=True = 并入既有任务（此时 only 不生效，前端应如实提示）；
         规则读取与登记同临界区——并发 start 只放行一份，不双跑。"""
         with self._lock:
-            cur = self._jobs.get(scene_id)
-            if cur and cur["running"]:
-                snap = self._snap(cur)
-                snap["joined"] = True
-                return snap
+            joined = self._find_running(lambda j: j.get("scene_id") == scene_id)
+            if joined:
+                return joined
             con = connect_factory() if connect_factory else db.connect()
             try:
                 rules = [dict(r) for r in con.execute("SELECT * FROM audit_rules ORDER BY id")]
@@ -567,7 +553,7 @@ class JobManager:
                 "rules": [{"id": r["id"], "title": r["title"], "kind": r["kind"],
                            "state": "pending", "found": 0, "error": None, "ms": 0} for r in rules],
             }
-            self._jobs[scene_id] = job
+            self._register(scene_id, job)
             snap = self._snap(job)
             snap["joined"] = False
         threading.Thread(target=self._run, args=(scene_id, only, chat, connect_factory),
@@ -590,12 +576,7 @@ class JobManager:
         try:
             con = (connect_factory or (lambda: db.connect(rw=True)))()
         except Exception as e:
-            with self._lock:
-                job = self._jobs.get(scene_id)
-                if job:
-                    job["running"] = False
-                    job["error"] = "连接失败：%s" % e
-                    job["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            self._finish(scene_id, "连接失败：%s" % e)
             return
         try:
             summary, _state = run_scene(con, scene_id, only=only, ai_chat=chat,
@@ -603,16 +584,10 @@ class JobManager:
             with self._lock:
                 job = self._jobs.get(scene_id)
                 if job:
-                    job["running"] = False
-                    job["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                     job["found_total"] = summary["found"]
+            self._finish(scene_id)
         except Exception as e:
-            with self._lock:
-                job = self._jobs.get(scene_id)
-                if job:
-                    job["running"] = False
-                    job["error"] = str(e)
-                    job["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            self._finish(scene_id, str(e))
         finally:
             con.close()
 

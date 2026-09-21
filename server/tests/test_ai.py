@@ -33,8 +33,8 @@ def stub_items(mapping, inbox=None):
     def stub(cfg, messages):
         if inbox is not None:
             inbox.append(messages)
-        return json.dumps({"items": [{"i": i, "after": a} for i, a in mapping.items()]},
-                          ensure_ascii=False)
+        return {"text": json.dumps({"items": [{"i": i, "after": a} for i, a in mapping.items()]},
+                                   ensure_ascii=False)}
     return stub
 
 
@@ -240,7 +240,7 @@ class TestGates(Base):
         def slow(cfg, messages):
             calls.append(1)
             _t.sleep(0.6)
-            return '{"items":[{"i":0,"after":"慢稿"}]}'
+            return {"text": '{"items":[{"i":0,"after":"慢稿"}]}'}
 
         j1 = m.start(1, [self.tshot("01")], action="rewrite",
                      chat=slow, connect_factory=self.factory)
@@ -253,26 +253,26 @@ class TestGates(Base):
         self.assertEqual(j["items"][0]["after"], "慢稿")
 
     def test_global_cap_and_release(self):
-        """全通道并发上限（M10）：占满即拒、跑完释放；跨任务簿同闸。"""
-        from unittest import mock
+        """全通道并发上限（M10→L1）：占满即拒、跑完释放；跨任务簿同闸（core/jobs 单点）。"""
         from core import draft as _draft
-        m = rewrite.PreviewJobs()
+        from core import jobs as _jobs
+        g = _jobs.Gate(1)                            # 独立闸：不碰进程单例
+        m = rewrite.PreviewJobs(gate=g)
 
         def slow(cfg, messages):
             _t.sleep(0.5)
-            return '{"items":[{"i":0,"after":"x"}]}'
+            return {"text": '{"items":[{"i":0,"after":"x"}]}'}
 
-        with mock.patch.object(rewrite, "TASKS_MAX", 1):
-            j1 = m.start(1, [self.tshot("01")], action="rewrite",
-                         chat=slow, connect_factory=self.factory)
-            self.assertFalse(rewrite._task_acquire())    # 名额已占满
-            dm = _draft.DraftJobs()
-            with self.assertRaises(ValueError):
-                dm.start_scene(1, "很长的台本。" * 12, chat=slow,
-                               connect_factory=self.factory)
-            self.wait_job(m, j1["id"])
-            self.assertTrue(rewrite._task_acquire())     # 跑完已释放
-            rewrite._task_release()
+        j1 = m.start(1, [self.tshot("01")], action="rewrite",
+                     chat=slow, connect_factory=self.factory)
+        self.assertFalse(g.acquire())                # 名额已占满（不消耗）
+        dm = _draft.DraftJobs(gate=g)
+        with self.assertRaises(ValueError):
+            dm.start_scene(1, "很长的台本。" * 12, chat=slow,
+                           connect_factory=self.factory)
+        self.wait_job(m, j1["id"])
+        self.assertTrue(g.acquire())                 # 跑完已释放
+        g.release()
 
     def test_prune_keeps_running(self):
         """剪枝只淘汰完成件（M9）：在跑绝不剪，不够删就允许超 keep。"""
@@ -297,7 +297,7 @@ class TestGates(Base):
 
         def slow(cfg, messages):
             _t.sleep(0.6)
-            return '{"items":[{"i":0,"after":"A"}]}'
+            return {"text": '{"items":[{"i":0,"after":"A"}]}'}
 
         j = m.start(1, [self.tshot("01")], action="rewrite",
                     chat=slow, connect_factory=self.factory)
@@ -308,6 +308,34 @@ class TestGates(Base):
         full = self.wait_job(m, j["id"])
         self.assertEqual(full["items"][0]["before"], "男人看着手机")
         self.assertEqual(full["items"][0]["after"], "A")
+
+
+class TestChannel(Base):
+    """通道契约单点（L2）：归一 / 预检 / 注入桩。"""
+
+    def test_reply_text_shapes(self):
+        self.assertEqual(core_ai.reply_text({"text": "甲"}), "甲")
+        self.assertEqual(core_ai.reply_text("乙"), "乙")
+        self.assertEqual(core_ai.reply_text(None), "")
+        self.assertEqual(core_ai.reply_text({}), "")
+
+    def test_require_key(self):
+        with self.assertRaises(core_ai.AiError) as cm:
+            core_ai.require_key({})
+        self.assertIn("未配置 API Key", str(cm.exception))
+        core_ai.require_key({"api_key": "sk-x"})
+
+    def test_channel_precheck_and_normalize(self):
+        con = self.factory()
+        try:
+            with self.assertRaises(core_ai.AiError):
+                core_ai.channel(con)                 # 无 key + 真通道 → 预检拦
+            _, talk = core_ai.channel(con, lambda c, m: {"text": "甲"}, precheck=False)
+            self.assertEqual(talk({}, []), "甲")
+            _, talk = core_ai.channel(con, lambda c, m: "乙", precheck=False)
+            self.assertEqual(talk({}, []), "乙")     # 旧桩形状兼容（归一宽进）
+        finally:
+            con.close()
 
 
 class TestApply(Base):
@@ -398,7 +426,7 @@ class TestApply(Base):
 
             def slow(cfg, messages):
                 _t.sleep(0.6)
-                return '{"items":[{"i":0,"after":"慢稿"}]}'
+                return {"text": '{"items":[{"i":0,"after":"慢稿"}]}'}
             j2 = m2.start(1, [self.tshot("01")], action="rewrite",
                           chat=slow, connect_factory=self.factory)
             with self.assertRaises(ValueError):

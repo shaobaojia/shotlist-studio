@@ -37,7 +37,7 @@ class TestAiPreviewGuard(unittest.TestCase):
 
     def test_no_key(self):
         with self._no_db(), mock.patch.object(core_ai, "get_config",
-                                              return_value={"has_key": False}):
+                                              return_value={"api_key": "", "has_key": False}):
             res, code = api_ai.preview(None, {"scene_id": 1, "action": "rewrite",
                                               "targets": [{"table": "shots", "id": 1,
                                                            "field": "blocking"}]}, {})
@@ -46,7 +46,7 @@ class TestAiPreviewGuard(unittest.TestCase):
 
     def test_core_error_maps_400(self):
         with self._no_db(), mock.patch.object(core_ai, "get_config",
-                                              return_value={"has_key": True}), \
+                                              return_value={"api_key": "sk-test", "has_key": True}), \
              mock.patch.object(rewrite.JOBS, "start",
                                side_effect=ValueError("未知 action：zzz")):
             res, code = api_ai.preview(None, {"scene_id": 1, "action": "zzz",
@@ -57,7 +57,7 @@ class TestAiPreviewGuard(unittest.TestCase):
 
     def test_ok_shape(self):
         with self._no_db(), mock.patch.object(core_ai, "get_config",
-                                              return_value={"has_key": True}), \
+                                              return_value={"api_key": "sk-test", "has_key": True}), \
              mock.patch.object(rewrite.JOBS, "start",
                                return_value={"id": 7, "running": True}):
             res, code = api_ai.preview(None, {"scene_id": 1, "action": "rewrite",

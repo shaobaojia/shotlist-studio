@@ -6,13 +6,13 @@
 - 配方 = recipes/ai/*.md（一份配方一个动作）；每次调用现读——改了立即生效、无需重启。
 - 单次 ≤ 30 条；只改写既有文本——不增行、不删行、不动未选中项。
 - 预览任务在内存（重启即清，进度不是持久数据）；apply 前校验「原值未变」，防误覆盖手工改动。
-- 闸门（M10，批3）：同场在跑 → 并入（快照带 joined=True）；全通道并发 ≤ TASKS_MAX，防连点刷外呼。
+- 闸门（M10→L1）：同场在跑 → 并入（快照带 joined=True）；全通道并发 ≤ TASKS_MAX（core/jobs.py 单点），防连点刷外呼。
 """
 import json
 import threading
 import time
 
-from core import ai, db, fields, ops, recipes
+from core import ai, db, fields, jobs, ops, recipes
 
 ACTIONS = {"rewrite": "rewrite.md", "concretize": "concretize.md",
            "strengthen": "strengthen.md", "expand": "expand.md"}
@@ -22,24 +22,7 @@ AI_FIELDS = fields.AI_FIELDS              # 单源：core/fields.py（批4/P8）
 FIELD_LABELS = {f["key"]: f["label"] for f in (fields.SHOT_FIELDS + fields.BEAT_FIELDS)}
 _BRIEF = (("shot_size", "景别"), ("camera_pos", "机位"), ("blocking", "动作"))
 
-TASKS_MAX = 4                 # 全通道同时进行的外呼上限（草稿/改写共用；审计任务不在内）
-_tasks_lock = threading.Lock()
-_tasks_active = 0
-
-
-def _task_acquire():
-    global _tasks_active
-    with _tasks_lock:
-        if _tasks_active >= TASKS_MAX:
-            return False
-        _tasks_active += 1
-        return True
-
-
-def _task_release():
-    global _tasks_active
-    with _tasks_lock:
-        _tasks_active = max(0, _tasks_active - 1)
+# 并发闸门与任务簿机制：core/jobs.py 单点（L1）——本域只留条目形状与 _run
 
 
 def load_recipe(name):
@@ -174,35 +157,25 @@ def parse_items(text, want):
 
 # ════════ 预览任务（内存级；轮询出稿） ════════
 
-class PreviewJobs:
+class PreviewJobs(jobs.JobBoard):
     """改写预览任务：一次调用出一版全稿；预览零写入（items 只活在内存，apply 时才落库）。"""
 
-    def __init__(self, keep=40):
-        self._lock = threading.Lock()
-        self._jobs = {}
-        self._seq = 0
-        self._keep = keep
-
-    def _snap(self, job):
-        return json.loads(json.dumps(job, ensure_ascii=False))
+    def __init__(self, keep=40, gate=jobs.TASKS):
+        super().__init__(keep=keep, gate=gate)
 
     @staticmethod
     def _done(job):
         return sum(1 for it in job["items"] if it["error"] or it["after"])
 
-    def get(self, job_id):
-        with self._lock:
-            job = self._jobs.get(job_id)
-            if not job:
-                return None
-            job["done"] = self._done(job)
-            if job.get("running"):               # 轮询期轻载（P7）：大文本不进快照
-                snap = dict(job)
-                snap["items"] = [{"i": it["i"], "label": it["label"],
-                                  "error": it["error"], "ms": it["ms"]}
-                                 for it in job["items"]]
-                return snap
-            return self._snap(job)
+    def _touch(self, job):
+        job["done"] = self._done(job)
+
+    def _light(self, job):
+        snap = dict(job)                     # 轮询期轻载（P7）：大文本不进快照
+        snap["items"] = [{"i": it["i"], "label": it["label"],
+                          "error": it["error"], "ms": it["ms"]}
+                         for it in job["items"]]
+        return snap
 
     def start(self, scene_id, targets, action=None, instruction=None,
               chat=None, connect_factory=None):
@@ -226,15 +199,14 @@ class PreviewJobs:
         finally:
             con.close()
         with self._lock:
-            for j in self._jobs.values():        # 同场去重（M10）：连点/双击不重复外呼
-                if j.get("running") and j.get("scene_id") == scene_id:
-                    snap = self._snap(j)
-                    snap["joined"] = True
-                    return snap
-            if not _task_acquire():
-                raise ValueError("生成任务过多（同时最多 %d 个）——请等一个跑完再试" % TASKS_MAX)
-            self._seq += 1
-            job_id = self._seq
+            joined = self._find_running(          # 同场去重（M10）：连点/双击不重复外呼
+                lambda j: j.get("scene_id") == scene_id)
+            if joined:
+                return joined
+            if not self._gate_acquire():
+                raise ValueError("生成任务过多（同时最多 %d 个）——请等一个跑完再试"
+                                 % self._gate.limit)
+            job_id = self._seq_id()
             job = {"id": job_id, "scene_id": scene_id,
                    "mode": "action" if action else "cmdbar",
                    "action": action, "instruction": instruction,
@@ -242,64 +214,33 @@ class PreviewJobs:
                    "finished_at": None, "error": None, "ms": 0,
                    "total": len(items), "done": 0, "items": items}
             job["done"] = self._done(job)
-            self._jobs[job_id] = job
-            self._prune()
+            self._register(job_id, job)
             snap = self._snap(job)
         threading.Thread(target=self._run,
                          args=(job_id, sc, beats, shots, items, action, instruction,
                                chat, connect_factory), daemon=True).start()
         return snap
 
-    def _prune(self):
-        """只淘汰已完成任务（M9）：在跑任务绝不剪——不够删就允许超 keep。"""
-        if len(self._jobs) <= self._keep:
-            return
-        room = len(self._jobs) - self._keep
-        for old in sorted(self._jobs):
-            if room <= 0:
-                break
-            j = self._jobs.get(old)
-            if j and j.get("running"):
-                continue
-            self._jobs.pop(old, None)
-            room -= 1
-
     def _run(self, job_id, sc, beats, shots, items, action, instruction,
              chat, connect_factory):
-        released = [False]
-
-        def finish(err=None):
-            with self._lock:
-                job = self._jobs.get(job_id)
-                if job:
-                    job["running"] = False
-                    job["error"] = err
-                    job["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-                    job["done"] = self._done(job)
-            if not released[0]:                      # 释放并发名额（恰好一次）
-                released[0] = True
-                _task_release()
-
         send = [it for it in items if not it["error"]]
         if not send:
-            finish()
+            self._finish(job_id)
             return
         try:
             con = connect_factory() if connect_factory else db.connect()
             try:
-                cfg = ai.get_config(con)
+                cfg, ai_chat = ai.channel(con, chat)
             finally:
                 con.close()
             recipe = load_recipe(ACTIONS[action] if action else CMDBAR_RECIPE)
             user = build_user(sc, beats, shots, send)
             if instruction:
                 user += "\n\n【用户命令】%s" % instruction
-            ai_chat = chat or (lambda c, m: ai.chat(c, m))
             t0 = time.time()
-            reply = ai_chat(cfg, [{"role": "system", "content": recipe},
-                                  {"role": "user", "content": user}])
+            text = ai_chat(cfg, [{"role": "system", "content": recipe},
+                                 {"role": "user", "content": user}])
             ms = int((time.time() - t0) * 1000)
-            text = reply["text"] if isinstance(reply, dict) else reply
             got = parse_items(text, {it["i"] for it in send})
             with self._lock:
                 job = self._jobs.get(job_id)
@@ -312,7 +253,7 @@ class PreviewJobs:
                         if not it["after"]:
                             it["error"] = "模型未返回该条（可「再来一版」）"
                     job["ms"] = ms
-            finish()
+            self._finish(job_id)
         except Exception as e:
             with self._lock:
                 job = self._jobs.get(job_id)
@@ -320,7 +261,7 @@ class PreviewJobs:
                     for it in job["items"]:
                         if not it["error"]:
                             it["error"] = "生成失败：%s" % e
-            finish("生成失败：%s" % e)
+            self._finish(job_id, "生成失败：%s" % e)
 
 
 # ════════ 应用落库 ════════

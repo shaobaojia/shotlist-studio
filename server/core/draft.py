@@ -6,12 +6,11 @@
 - 组级初稿只出稿（文本），进编辑面与否由前端决定；不自动保存。
 - 配方现读（recipes/ai/draft_*.md）——与四动作同口径。
 """
-import json
 import re
 import threading
 import time
 
-from . import ai, db, ops, rewrite
+from . import ai, db, jobs, ops
 from .rewrite import _extract_json, load_recipe
 
 DRAFT_BEATS_RECIPE = "draft_beats.md"
@@ -87,11 +86,6 @@ def _strip_fence(t):
     return t
 
 
-def _reply_text(reply):
-    """真 chat 返回 {text,...}·测试桩返回 str——同 rewrite.py 口径归一。"""
-    return (reply.get("text") or "") if isinstance(reply, dict) else (reply or "")
-
-
 def _scene_line(sc):
     parts = ["场：%s %s" % (sc.get("scene_no") or "?", sc.get("title") or "")]
     if sc.get("value"):
@@ -103,44 +97,20 @@ def _scene_line(sc):
 
 # ── 任务（内存级；重启即清） ────────────────────────────────────
 
-class DraftJobs:
-    def __init__(self, keep=30):
-        self._lock = threading.Lock()
-        self._jobs = {}
-        self._seq = 0
-        self._keep = keep
+class DraftJobs(jobs.JobBoard):
+    """草稿任务簿：场级草稿（两段生成）+ 组级初稿；轮询期轻载（P7）。"""
 
-    def _snap(self, job):
-        return json.loads(json.dumps(job, ensure_ascii=False))
+    def __init__(self, keep=30, gate=jobs.TASKS):
+        super().__init__(keep=keep, gate=gate)
 
-    def get(self, job_id):
-        with self._lock:
-            job = self._jobs.get(job_id)
-            if not job:
-                return None
-            if job.get("running"):               # 轮询期轻载（P7）：骨架正文不随轮询回传
-                snap = dict(job)
-                snap["beats"] = []
-                snap["shots"] = []
-                snap["text"] = None
-                snap["beats_n"] = len(job.get("beats") or [])
-                snap["shots_n"] = len(job.get("shots") or [])
-                return snap
-            return self._snap(job)
-
-    def _prune(self):
-        """只淘汰已完成任务（M9）：在跑任务绝不剪——不够删就允许超 keep。"""
-        if len(self._jobs) <= self._keep:
-            return
-        room = len(self._jobs) - self._keep
-        for old in sorted(self._jobs):
-            if room <= 0:
-                break
-            j = self._jobs.get(old)
-            if j and j.get("running"):
-                continue
-            self._jobs.pop(old, None)
-            room -= 1
+    def _light(self, job):
+        snap = dict(job)                     # 轮询期轻载（P7）：骨架正文不随轮询回传
+        snap["beats"] = []
+        snap["shots"] = []
+        snap["text"] = None
+        snap["beats_n"] = len(job.get("beats") or [])
+        snap["shots_n"] = len(job.get("shots") or [])
+        return snap
 
     # ── 场级：从台本出草稿 ──
 
@@ -159,54 +129,37 @@ class DraftJobs:
         finally:
             con.close()
         with self._lock:
-            for j in self._jobs.values():        # 同场去重（M10）：连点并入同一任务
-                if (j.get("kind") == "scene" and j.get("running")
-                        and j.get("scene_id") == scene_id):
-                    snap = self._snap(j)
-                    snap["joined"] = True
-                    return snap
-            if not rewrite._task_acquire():
+            joined = self._find_running(          # 同场去重（M10）：连点并入同一任务
+                lambda j: j.get("kind") == "scene" and j.get("scene_id") == scene_id)
+            if joined:
+                return joined
+            if not self._gate_acquire():
                 raise ValueError("生成任务过多（同时最多 %d 个）——请等一个跑完再试"
-                                 % rewrite.TASKS_MAX)
-            self._seq += 1
-            job_id = self._seq
+                                 % self._gate.limit)
+            job_id = self._seq_id()
             job = {"id": job_id, "kind": "scene", "scene_id": scene_id, "running": True,
                    "stage": "beats", "error": None, "ms": 0,
                    "started_at": time.strftime("%Y-%m-%d %H:%M:%S"), "finished_at": None,
                    "beats": [], "shots": [], "applied": False}
-            self._jobs[job_id] = job
-            self._prune()
+            self._register(job_id, job)
             snap = self._snap(job)
         threading.Thread(target=self._run_scene, args=(
             job_id, sc, script, chat, connect_factory), daemon=True).start()
         return snap
 
     def _run_scene(self, job_id, sc, script, chat, connect_factory):
-        released = [False]
-
-        def finish(err=None):
-            with self._lock:
-                j = self._jobs.get(job_id)
-                if j:
-                    j["running"] = False
-                    j["error"] = err
-                    j["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            if not released[0]:                      # 释放并发名额（恰好一次）
-                released[0] = True
-                rewrite._task_release()
         try:
             con = connect_factory() if connect_factory else db.connect()
             try:
-                cfg = ai.get_config(con)
+                cfg, ai_chat = ai.channel(con, chat)
             finally:
                 con.close()
-            ai_chat = chat or (lambda c, m: ai.chat(c, m))
             t0 = time.time()
             scene_line = _scene_line(sc)
-            reply1 = ai_chat(cfg, [
+            text1 = ai_chat(cfg, [
                 {"role": "system", "content": load_recipe(DRAFT_BEATS_RECIPE)},
                 {"role": "user", "content": scene_line + "\n\n【台本】\n" + script}])
-            beats = parse_beats(_reply_text(reply1))
+            beats = parse_beats(text1)
             if not beats:
                 raise ValueError("节拍骨架生成为空——可「重来」")
             with self._lock:
@@ -218,10 +171,10 @@ class DraftJobs:
             for i, b in enumerate(beats):
                 lines.append("%d ｜ %s ｜ %s ｜ 外界动作:%s ｜ 反应:%s ｜ 闭环:%s" % (
                     i + 1, b["name"], b["kind"], b["outside_action"], b["reaction"], b["closed_loop"]))
-            reply2 = ai_chat(cfg, [
+            text2 = ai_chat(cfg, [
                 {"role": "system", "content": load_recipe(DRAFT_SHOTS_RECIPE)},
                 {"role": "user", "content": "\n".join(lines)}])
-            shots = parse_shots(_reply_text(reply2), len(beats))
+            shots = parse_shots(text2, len(beats))
             if not shots:
                 raise ValueError("镜头行生成为空——可「重来」")
             with self._lock:
@@ -230,9 +183,9 @@ class DraftJobs:
                     j["shots"] = shots
                     j["stage"] = "done"
                     j["ms"] = int((time.time() - t0) * 1000)
-            finish()
+            self._finish(job_id)
         except Exception as e:      # noqa: BLE001 —— 任务错误留给前端展示
-            finish(str(e)[:300])
+            self._finish(job_id, str(e)[:300])
 
     # ── 组级：提示词初稿 ──
 
@@ -258,48 +211,31 @@ class DraftJobs:
         finally:
             con.close()
         with self._lock:
-            for j in self._jobs.values():        # 同一镜头的初稿在跑 → 并入（M10）
-                if (j.get("kind") == "prompt" and j.get("running")
-                        and j.get("shot_id") == shot_id):
-                    snap = self._snap(j)
-                    snap["joined"] = True
-                    return snap
-            if not rewrite._task_acquire():
+            joined = self._find_running(          # 同一镜头的初稿在跑 → 并入（M10）
+                lambda j: j.get("kind") == "prompt" and j.get("shot_id") == shot_id)
+            if joined:
+                return joined
+            if not self._gate_acquire():
                 raise ValueError("生成任务过多（同时最多 %d 个）——请等一个跑完再试"
-                                 % rewrite.TASKS_MAX)
-            self._seq += 1
-            job_id = self._seq
+                                 % self._gate.limit)
+            job_id = self._seq_id()
             job = {"id": job_id, "kind": "prompt", "scene_id": scene_id, "shot_id": shot_id,
                    "running": True, "stage": "prompt", "error": None, "ms": 0,
                    "started_at": time.strftime("%Y-%m-%d %H:%M:%S"), "finished_at": None,
                    "text": None, "members": [m["shot_no"] for m in members]}
-            self._jobs[job_id] = job
-            self._prune()
+            self._register(job_id, job)
             snap = self._snap(job)
         threading.Thread(target=self._run_prompt, args=(
             job_id, sc, members, blocks, chat, connect_factory), daemon=True).start()
         return snap
 
     def _run_prompt(self, job_id, sc, members, blocks, chat, connect_factory):
-        released = [False]
-
-        def finish(err=None):
-            with self._lock:
-                j = self._jobs.get(job_id)
-                if j:
-                    j["running"] = False
-                    j["error"] = err
-                    j["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            if not released[0]:                      # 释放并发名额（恰好一次）
-                released[0] = True
-                rewrite._task_release()
         try:
             con = connect_factory() if connect_factory else db.connect()
             try:
-                cfg = ai.get_config(con)
+                cfg, ai_chat = ai.channel(con, chat)
             finally:
                 con.close()
-            ai_chat = chat or (lambda c, m: ai.chat(c, m))
             t0 = time.time()
             lines = [_scene_line(sc), "", "【组内镜头（%d 镜）】" % len(members)]
             for m in members:
@@ -317,10 +253,9 @@ class DraftJobs:
                 t = " ".join(str(t).split())
                 if t:
                     lines.append("- " + t[:80])
-            reply = ai_chat(cfg, [
+            text = _strip_fence(ai_chat(cfg, [
                 {"role": "system", "content": load_recipe(DRAFT_PROMPT_RECIPE)},
-                {"role": "user", "content": "\n".join(lines)}])
-            text = _strip_fence(_reply_text(reply))
+                {"role": "user", "content": "\n".join(lines)}]))
             if not text:
                 raise ValueError("初稿生成为空——可「再来一版」")
             with self._lock:
@@ -328,9 +263,9 @@ class DraftJobs:
                 if j:
                     j["text"] = text[:8000]
                     j["ms"] = int((time.time() - t0) * 1000)
-            finish()
+            self._finish(job_id)
         except Exception as e:      # noqa: BLE001
-            finish(str(e)[:300])
+            self._finish(job_id, str(e)[:300])
 
     # ── 落入（同步；只新增 + 痕迹 source=ai） ──
 

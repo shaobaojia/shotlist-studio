@@ -13,16 +13,16 @@ from _fixture import make_base_db  # noqa: E402
 
 
 def stub_empty(cfg, messages):
-    return '{"findings": []}'
+    return {"text": '{"findings": []}'}
 
 
 def _stub_axis(msg=None):
     def stub(cfg, messages):
         if "审计配方 · 轴线" in messages[0]["content"]:
             if msg is None:
-                return '{"findings": []}'
-            return '{"findings":[{"carrier":"seam","ref":"01->02","message":"%s"}]}' % msg
-        return '{"findings": []}'
+                return {"text": '{"findings": []}'}
+            return {"text": '{"findings":[{"carrier":"seam","ref":"01->02","message":"%s"}]}' % msg}
+        return {"text": '{"findings": []}'}
     return stub
 
 
@@ -176,7 +176,7 @@ class TestLlmRules(unittest.TestCase):
 
     def test_llm_garbage_and_bad_ref(self):
         def garbage(cfg, messages):
-            return "抱歉，我无法完成。not json"
+            return {"text": "抱歉，我无法完成。not json"}
         summary, _ = audit.run_scene(self.con, self.sid, ai_chat=garbage)
         self.assertEqual(len(_issues(self.con, self.sid, "轴线")), 0)
         axis = [x for x in summary["rules"] if x["title"] == "轴线"][0]
@@ -185,8 +185,8 @@ class TestLlmRules(unittest.TestCase):
 
         def bad_ref(cfg, messages):
             if "审计配方 · 轴线" in messages[0]["content"]:
-                return '{"findings":[{"carrier":"seam","ref":"99->01","message":"x"}]}'
-            return '{"findings": []}'
+                return {"text": '{"findings":[{"carrier":"seam","ref":"99->01","message":"x"}]}'}
+            return {"text": '{"findings": []}'}
         audit.run_scene(self.con, self.sid, ai_chat=bad_ref)
         self.assertEqual(len(_issues(self.con, self.sid, "轴线")), 0)
 
@@ -206,7 +206,7 @@ class TestLlmRules(unittest.TestCase):
         self.assertEqual(_issues(self.con, self.sid, "轴线")[0]["status"], "open")
 
         def garbage(cfg, messages):
-            return "不知道。"
+            return {"text": "不知道。"}
         audit.run_scene(self.con, self.sid, ai_chat=garbage)
         self.assertEqual(_issues(self.con, self.sid, "轴线")[0]["status"], "open")
 
@@ -232,7 +232,7 @@ class TestJobManager(unittest.TestCase):
 
             def slow_stub(cfg, messages):
                 _t.sleep(0.15)
-                return '{"findings": []}'
+                return {"text": '{"findings": []}'}
 
             m = audit.JobManager()
             job = m.start(1, chat=slow_stub, connect_factory=factory)
@@ -290,7 +290,7 @@ class TestJobManager(unittest.TestCase):
             snaps = {}
 
             def go(name):
-                snaps[name] = m.start(1, chat=lambda cfg, ms: '{"findings": []}',
+                snaps[name] = m.start(1, chat=lambda cfg, ms: {"text": '{"findings": []}'},
                                       connect_factory=factory)
 
             t1 = threading.Thread(target=go, args=("starter-1",), name="starter-1")

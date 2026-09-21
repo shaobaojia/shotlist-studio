@@ -41,10 +41,10 @@ def stub(payloads, inbox=None):
             inbox.append(messages)
         sysc = messages[0]["content"]
         if "草稿·节拍骨架" in sysc:
-            return json.dumps(payloads.get("beats", {}), ensure_ascii=False)
+            return {"text": json.dumps(payloads.get("beats", {}), ensure_ascii=False)}
         if "草稿·镜头行" in sysc:
-            return json.dumps(payloads.get("shots", {}), ensure_ascii=False)
-        return payloads.get("text", "初稿正文")
+            return {"text": json.dumps(payloads.get("shots", {}), ensure_ascii=False)}
+        return {"text": payloads.get("text", "初稿正文")}
     return fn
 
 

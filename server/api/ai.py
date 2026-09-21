@@ -57,8 +57,10 @@ def preview(m, body, q):
         cfg = ai.get_config(con)
     finally:
         con.close()
-    if not cfg["has_key"]:
-        return {"error": "未配置 API Key（先去设置里填）"}, 400
+    try:
+        ai.require_key(cfg)
+    except ai.AiError as e:
+        return {"error": str(e)}, 400
     try:
         job = rewrite.JOBS.start(sid, targets=body.get("targets"),
                                  action=body.get("action"),
