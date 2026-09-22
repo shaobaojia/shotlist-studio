@@ -7,6 +7,7 @@ import { recordUndo } from './edit.js';
 import { writeClipboard, pasteBlock, toTSV, tableFieldKeys } from './clipboard.js';
 import { refreshShotCell, refreshBeatAction } from './table.js';
 import { isAiField, aiMenu, aiMenuForBeat, targetsFromSel } from './aiwrite.js';
+import { joinPrevGroup, canJoinPrev } from './hotbox.js';
 import { current as selCurrent, inCell, copySelectionTSV, clearSelectionCells, tlCell, rectOf } from './selection.js';
 
 let shotsOf = null;
@@ -69,6 +70,8 @@ function openCellMenu(td, tr, e) {
     { key: 'copyCell', label: '复制本格' },
     { key: 'copyRow', label: '复制整行（本表列）' },
     { key: 'paste', label: '粘贴（从此格起）' },
+    { sep: true },
+    { key: 'joinPrev', label: '并入上一组', disabled: !canJoinPrev(s.id) },
     { sep: true },
     { key: 'ai', label: isAiField(key) ? '✦ AI 改写…' : '✦ AI 改写…（本列不支持）', disabled: !isAiField(key) },
     { sep: true },
@@ -143,6 +146,8 @@ async function onCellMenuPick(k, td, tr, s, key, table, e) {
     await insertBlank(s, 'below');
   } else if (k === 'deleteRow') {
     await removeRow(s);
+  } else if (k === 'joinPrev') {
+    await joinPrevGroup(s.id);
   } else if (k === 'paste') {
     armPaste({ td, tr, field: key });
   } else if (k === 'clear') {

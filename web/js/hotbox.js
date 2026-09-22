@@ -267,6 +267,17 @@ function renderView(bodyEl, s, g, data) {
     wrap.appendChild(el('div', 'pd-tips', '点「编辑」修改 · 「复制」自动过滤 [镜XX] 注释'));
   }
   if (g && g.member_shots.length > 1) {
+    const mem = el('div', 'pd-members');
+    mem.appendChild(el('span', 'pd-mem-label', '成员：'));
+    for (let i = 0; i < g.member_ids.length; i++) {
+      const mid = g.member_ids[i];
+      const chip = el('button', 'pd-mem-chip' + (mid === s.id ? ' cur' : ''), String(g.member_shots[i]));
+      chip.title = (mid === s.id ? '本镜' : '点此跳到镜 ' + g.member_shots[i]);
+      chip.addEventListener('mousedown', (e) => e.preventDefault());
+      if (mid !== s.id) chip.addEventListener('click', () => jumpToShot(mid));
+      mem.appendChild(chip);
+    }
+    wrap.appendChild(mem);
     const ops = el('div', 'pd-ops');
     const b1 = el('button', 'tool-btn small', '本镜独立');
     b1.title = '本镜拆出、单独成组（可 Ctrl+Z）';
@@ -279,6 +290,7 @@ function renderView(bodyEl, s, g, data) {
     ops.appendChild(b1);
     ops.appendChild(b2);
     wrap.appendChild(ops);
+    wrap.appendChild(el('div', 'pd-tips', '换成员：选区条「并为一组 / 独立成组」 · 右键「并入上一组」'));
   }
   bodyEl.appendChild(wrap);
 }
@@ -478,10 +490,12 @@ async function saveText(s, text, original) {
 
 async function commitClose() {
   if (!dr || !dr.isOpen()) return;
+  const at = S.shotId;
   if (S.mode === 'edit' && S.ta) {
     const r = await saveCurrent();
     if (!r.ok) return;                          // 保存失败：留在编辑面（内容不丢）
   }
+  if (S.shotId !== at) return;                  // 关闭期间已切到别的镜：不补关
   dr.close();
 }
 
@@ -620,13 +634,25 @@ function refreshDrawerSoft() {
   if (dr && dr.isOpen() && S.mode === 'view') renderDrawer('view');
 }
 
-function updatePromptCell(s, g) {
+// 提示词格渲染（初始表 + 组态刷新共用；成组多镜出徽标「组N · x镜」）
+export function paintPromptCell(td, g, data) {
+  const multi = !!(g && g.member_shots.length > 1);
   const label = g ? g.member_shots.join(' / ') : '—';
-  document.querySelectorAll('tr.shot[data-id="' + s.id + '"] td.cell-prompt').forEach((td) => {
-    td.textContent = label;
-    if (g) td.title = '提示词组：' + label + '（点击打开）';
-    else td.removeAttribute('title');
-  });
+  td.textContent = '';
+  if (multi && data) {
+    const n = groupOrdinal(g, data);
+    const b = el('span', 'pg-badge', n ? ('组' + n + ' · ' + g.member_shots.length + '镜') : (g.member_shots.length + '镜'));
+    b.title = '提示词组 ' + label;
+    td.appendChild(b);
+  }
+  td.appendChild(document.createTextNode(label));
+  if (g) td.title = '提示词组：' + label + '（点击打开）';
+  else td.removeAttribute('title');
+}
+
+function updatePromptCell(s, g) {
+  const data = ctx.getData();
+  document.querySelectorAll('tr.shot[data-id="' + s.id + '"] td.cell-prompt').forEach((td) => paintPromptCell(td, g, data));
 }
 
 // 写响应就地套用：组态 + 各镜归属 + 提示词格 + 只读预览 + 抽屉（查看态）+ 筛选重评
@@ -745,6 +771,61 @@ export async function mergeShotsByIds(ids) {
 export async function detachShotsByIds(ids) {
   if (!ids || !ids.length) return;
   await promptOpUI('detach', { shot_ids: ids }, ids[0]);
+}
+
+// ── N4：分组标识与「并入上一组」──
+
+// 跳镜：滚到该行并闪烁（成员 chips 用）
+function jumpToShot(shotId) {
+  const tr = document.querySelector('tr.shot[data-id="' + shotId + '"]');
+  if (!tr) { toast('该镜不在当前视图（可能被筛选隐藏）'); return; }
+  try { tr.scrollIntoView({ block: 'nearest' }); } catch (e) { /* ignore */ }
+  tr.classList.add('flash');
+  setTimeout(() => tr.classList.remove('flash'), 1600);
+}
+
+// 组序号（按场序：全部组一起数）
+function groupOrdinal(g, data) {
+  const list = (data.prompt_groups || []).slice().sort(byPosition);
+  const i = list.findIndex((x) => x.id === g.id);
+  return i >= 0 ? i + 1 : null;
+}
+
+// 本镜能否并入上一组（上方存在其它提示词组）
+export function canJoinPrev(shotId) {
+  const data = ctx.getData();
+  if (!data) return false;
+  const shots = ctx.allShots() || [];
+  const i = shots.findIndex((x) => x.id === shotId);
+  if (i <= 0) return false;
+  const map = ctx.groupsMap ? ctx.groupsMap() : null;
+  const g = groupOf(shots[i], map);
+  for (let k = i - 1; k >= 0; k--) {
+    const pg = groupOf(shots[k], map);
+    if (pg && (!g || pg.id !== g.id)) return true;
+  }
+  return false;
+}
+
+// 并入上一组：本镜所在组整体并入上方最近的另一组（上一组为主组）
+export async function joinPrevGroup(shotId) {
+  const data = ctx.getData();
+  if (!data) return false;
+  const shots = ctx.allShots() || [];
+  const i = shots.findIndex((x) => x.id === shotId);
+  if (i <= 0) { toast('上方没有可并入的组'); return false; }
+  const map = ctx.groupsMap ? ctx.groupsMap() : null;
+  const g = groupOf(shots[i], map);
+  let prev = null;
+  for (let k = i - 1; k >= 0; k--) {
+    const pg = groupOf(shots[k], map);
+    if (pg && (!g || pg.id !== g.id)) { prev = pg; break; }
+  }
+  if (!prev) { toast('上方没有可并入的提示词组'); return false; }
+  const ids = [prev.member_ids[0]];
+  for (const mid of (g ? g.member_ids : [shotId])) if (!ids.includes(mid)) ids.push(mid);
+  await promptOpUI('merge', { shot_ids: ids }, ids[0], ids.length);
+  return true;
 }
 
 // ── 拷上组：整组拷「上一条提示词组」全文（提示词单一概念，不拆声明段） ──

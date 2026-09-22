@@ -754,3 +754,12 @@ td.editing, .beat-action.editing, .kv-value.editing { position: relative; }
 .sd-imp-empty { font-size: 12px; color: var(--dim); padding: 2px 0; }
 
 .sd-imp-applybar { margin-top: 2px; }
+
+/* ── N4 分组标识（M5 批3c）── */
+.pg-badge { font-size: 10px; line-height: 1.5; background: rgba(188, 63, 44, 0.10); color: var(--accent); border: 1px solid rgba(188, 63, 44, 0.35); border-radius: 8px; padding: 0 5px; margin-right: 5px; white-space: nowrap; }
+.pd-members { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pd-mem-label { font-size: 11px; color: var(--dim); }
+.pd-mem-chip { font-size: 11px; padding: 2px 8px; border: 1px solid var(--rule); border-radius: 10px; background: #fff; cursor: pointer; color: var(--ink2); font-family: inherit; }
+.pd-mem-chip:hover { border-color: var(--accent); color: var(--accent); }
+.pd-mem-chip.cur { background: var(--accent); border-color: var(--accent); color: #fff; cursor: default; }
+

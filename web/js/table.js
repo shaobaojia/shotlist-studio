@@ -5,7 +5,7 @@ import { el, fmt, toast } from './ui.js';
 import { cellContent } from './cells.js';
 import { attachEditable, attachCamEditor, parseCam, recordUndo } from './edit.js';
 import { api } from './api.js';
-import { buildPromptBox, openPromptDrawer } from './hotbox.js';
+import { buildPromptBox, openPromptDrawer, paintPromptCell } from './hotbox.js';
 import { isAiField, aiOpenFor } from './aiwrite.js';
 
 const MULTILINE_TYPES = new Set(['spatial', 'dialogue', 'audio', 'notes', 'camera']);
@@ -192,8 +192,7 @@ function shotCell(s, f, groups, data) {
   if (f.type === 'prompt') {
     const g = s.prompt_group_id != null ? groups[s.prompt_group_id] : null;
     td.classList.add('prompt-cell');
-    td.textContent = g ? g.member_shots.join(' / ') : '—';
-    if (g) td.title = '提示词组：' + g.member_shots.join(' / ') + '（点击展开）';
+    paintPromptCell(td, g, data);
     return td;
   }
 
