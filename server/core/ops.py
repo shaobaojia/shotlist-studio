@@ -255,6 +255,61 @@ def move_shot(con, shot_id, target_beat_id, index):
             "old_beat_id": shot["beat_id"], "old_index": shot["position"]}
 
 
+def move_shots(con, shot_ids, target_beat_id, index):
+    """多行整组搬家（M5 批2）：连续块整体搬到目标节拍第 index 位（index 基于去掉整组后的目标序）。
+    组按当前场序去重排列（入参顺序无关）；镜号不动；逐行留痕（drag）。"""
+    want = []
+    for x in shot_ids:
+        xi = int(x)
+        if xi not in want:
+            want.append(xi)
+    if not want:
+        raise ValueError("未指定要搬家的镜头")
+    scene_ids = set()
+    for sid in want:
+        r = con.execute("SELECT * FROM shots WHERE id=?", (sid,)).fetchone()
+        if not r:
+            raise ValueError("镜头不存在：%s" % sid)
+        scene_ids.add(r["scene_id"])
+    if len(scene_ids) > 1:
+        raise ValueError("不能跨场搬家")
+    scene_id = scene_ids.pop()
+    beats = _scene_beats(con, scene_id)
+    tgt = next((b for b in beats if b["id"] == target_beat_id), None)
+    if not tgt:
+        raise ValueError("目标节拍不存在或不属于本场")
+    want_set = set(want)
+    all_rows = _scene_shots(con, scene_id)
+    group = [r for r in all_rows if r["id"] in want_set]
+    rows = [r for r in all_rows if r["id"] not in want_set]
+    tgt_ids = [r["id"] for r in rows if r["beat_id"] == target_beat_id]
+    idx = max(0, min(int(index), len(tgt_ids)))
+    if tgt_ids:
+        anchor = next(r for r in rows if r["id"] == (tgt_ids[idx] if idx < len(tgt_ids) else tgt_ids[-1]))
+        pos = rows.index(anchor) + (0 if idx < len(tgt_ids) else 1)
+    else:
+        bi = beats.index(tgt)
+        prev_ids = {b["id"] for b in beats[:bi]}
+        pos = 0
+        for i, r in enumerate(rows):
+            if r["beat_id"] in prev_ids:
+                pos = i + 1
+    order = rows[:pos] + group + rows[pos:]
+    before = [r["id"] for r in all_rows]
+    if [r["id"] for r in order] == before and all(r["beat_id"] == target_beat_id for r in group):
+        return {"changed": False, "ids": [r["id"] for r in group]}
+    for r in group:
+        old_beat_no = next((b["beat_no"] for b in beats if b["id"] == r["beat_id"]), "?")
+        record_history(con, scene_id, "shots", r["id"], "drag",
+                       "beat%s#%s" % (old_beat_no, r["position"]),
+                       "beat%s#%s" % (tgt["beat_no"], idx))
+    con.execute("UPDATE shots SET beat_id=?, updated_at=datetime('now','localtime') WHERE id IN (%s)"
+                % ",".join("?" * len(want)), [target_beat_id] + want)
+    reseq(con, "shots", [r["id"] for r in order])
+    con.commit()
+    return {"changed": True, "ids": [r["id"] for r in group], "beat_id": target_beat_id, "index": idx}
+
+
 def move_beat(con, beat_id, index):
     """节拍整体拖动：重排 beats.position（index 基于去掉自身后的节拍序），
     镜头 position 跟随节拍顺序重排（节拍内相对顺序不变）。"""

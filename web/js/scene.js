@@ -6,7 +6,7 @@ import { el, fmt, toast } from './ui.js';
 import { JIWEI_LEGEND } from './cells.js';
 import { buildTable, beatSection } from './table.js';
 import { bindCellMenu } from './cellmenu.js';
-import { bindSelection, clearSel } from './selection.js';
+import { bindSelection, clearSel, current as selCurrent, rectOf } from './selection.js';
 import { initSelBar } from './selbar.js';
 import { attachEditable, recordUndo } from './edit.js';
 import { bindDrag } from './drag.js';
@@ -109,15 +109,34 @@ function bindDragOnce(view) {
   bindDrag(view, {
     data: () => currentData,
     enabled: () => !sortState && !filterActive() && prefs.viewMode !== 'flat',
-    onMoveShot: async (shotId, beatId, index) => {
-      const info = shotDragInfo(shotId);
+    // 多选整组（M5 批2）：拖的行在选区内（且选区跨≥2行、同表）→ 整组搬家
+    rowGroup: (tr) => {
+      const s = selCurrent();
+      const rc = rectOf();
+      if (!s || !rc || s.table !== tr.closest('table') || rc.r1 === rc.r2) return null;
+      const ids = [];
+      for (let r = rc.r1; r <= rc.r2; r++) {
+        const row = s.rows[r];
+        if (row) ids.push(Number(row.dataset.id));
+      }
+      if (ids.length < 2 || ids.indexOf(Number(tr.dataset.id)) === -1) return null;
+      return ids;
+    },
+    onMoveShot: async (shotId, beatId, index, groupIds) => {
+      const group = groupIds && groupIds.length > 1 ? groupIds : null;
+      const info = group ? groupDragInfo(group) : shotDragInfo(shotId);
       try {
-        const res = await api.move('shots', shotId, { beat_id: beatId, index: index });
+        const res = group
+          ? await api.moveMany('shots', group, { beat_id: beatId, index: index })
+          : await api.move('shots', shotId, { beat_id: beatId, index: index });
         if (res.moved && res.moved.changed) {
           if (info) {
             recordUndo({
-              type: 'custom', label: '拖动',
-              undo: async () => { await api.move('shots', shotId, { beat_id: info.beatId, index: info.index }); },
+              type: 'custom', label: group ? ('搬家 ' + group.length + ' 行') : '拖动',
+              undo: async () => {
+                if (group) await api.moveMany('shots', group, { beat_id: info.beatId, index: info.index });
+                else await api.move('shots', shotId, { beat_id: info.beatId, index: info.index });
+              },
             });
           }
           await refreshCurrentView();
@@ -148,6 +167,17 @@ function shotDragInfo(shotId) {
   if (!currentData) return null;
   for (const b of currentData.beats) {
     const i = b.shots.findIndex((x) => x.id === shotId);
+    if (i !== -1) return { beatId: b.id, index: i };
+  }
+  return null;
+}
+
+// 整组原址（撤销用）：组按表序连续，起始位=搬回插入位。
+function groupDragInfo(ids) {
+  if (!currentData) return null;
+  const first = ids[0];
+  for (const b of currentData.beats) {
+    const i = (b.shots || []).findIndex((x) => x.id === first);
     if (i !== -1) return { beatId: b.id, index: i };
   }
   return null;

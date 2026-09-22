@@ -165,6 +165,84 @@ class TestMove(unittest.TestCase):
         self.assertFalse(r["changed"])
 
 
+class TestMoveShots(unittest.TestCase):
+    """M5 批2：多行整组搬家（move_shots）。"""
+
+    def make(self):
+        con = make_db()  # 基准：beat id1；shots 1/2/3 全在 beat1（position 0/1/2）
+        return con
+
+    def make2(self):
+        con = make_db()
+        con.execute("UPDATE beats SET position=0, beat_no='b1', name='b1' WHERE id=1")
+        con.execute("INSERT INTO beats (scene_id, position, beat_no, name) VALUES (1, 1, 'b2', 'b2')")
+        con.execute("UPDATE shots SET beat_id=1, position=0 WHERE id=1")
+        con.execute("UPDATE shots SET beat_id=1, position=1 WHERE id=2")
+        con.execute("UPDATE shots SET beat_id=2, position=2 WHERE id=3")
+        con.commit()
+        return con
+
+    def order(self, con):
+        return [x["id"] for x in con.execute("SELECT id FROM shots WHERE scene_id=1 ORDER BY position")]
+
+    def bids(self, con):
+        return [x["beat_id"] for x in con.execute("SELECT beat_id FROM shots WHERE scene_id=1 ORDER BY position")]
+
+    def b2id(self, con):
+        return con.execute("SELECT id FROM beats WHERE beat_no='b2'").fetchone()["id"]
+
+    def test_group_within_beat(self):
+        con = self.make()
+        r = ops.move_shots(con, [1, 2], 1, 1)   # 组[1,2] 挪到 s3 之后（去掉组后 b1=[3]）
+        self.assertTrue(r["changed"])
+        self.assertEqual(self.order(con), [3, 1, 2])
+
+    def test_group_cross_beat(self):
+        con = self.make2()
+        b2 = self.b2id(con)
+        r = ops.move_shots(con, [1, 2], b2, 1)  # 整组插到 s3 之后
+        self.assertTrue(r["changed"])
+        self.assertEqual(self.order(con), [3, 1, 2])
+        self.assertEqual(self.bids(con), [b2, b2, b2])
+
+    def test_group_noop(self):
+        con = self.make2()
+        r = ops.move_shots(con, [1, 2], 1, 0)   # 组已在 b1 原位
+        self.assertFalse(r["changed"])
+
+    def test_group_order_and_dupes(self):
+        con = self.make2()
+        b2 = self.b2id(con)
+        r = ops.move_shots(con, [2, 1, 1], b2, 1)  # 乱序+重复入参：组按场序去重
+        self.assertTrue(r["changed"])
+        self.assertEqual(r["ids"], [1, 2])
+        self.assertEqual(self.order(con), [3, 1, 2])
+
+    def test_group_round_trip_undo(self):
+        con = self.make2()
+        b2 = self.b2id(con)
+        before = self.order(con)
+        before_bids = self.bids(con)
+        ops.move_shots(con, [1, 2], b2, 1)
+        ops.move_shots(con, [1, 2], 1, 0)          # 撤销：搬回 b1 起始位
+        self.assertEqual(self.order(con), before)
+        self.assertEqual(self.bids(con), before_bids)
+
+    def test_group_history_rows(self):
+        con = self.make2()
+        b2 = self.b2id(con)
+        ops.move_shots(con, [1, 2], b2, 1)
+        hist = con.execute("SELECT * FROM history WHERE field='drag'").fetchall()
+        self.assertEqual(len(hist), 2)
+        self.assertTrue(all(h["source"] == "manual" for h in hist))
+
+    def test_group_missing_shot(self):
+        con = self.make2()
+        b2 = self.b2id(con)
+        with self.assertRaises(ValueError):
+            ops.move_shots(con, [1, 999], b2, 0)
+
+
 class TestBatch(unittest.TestCase):
     def test_batch_mixed(self):
         con = make_db()

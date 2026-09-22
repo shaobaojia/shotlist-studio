@@ -13,6 +13,20 @@ export function bindDrag(container, ctx) {
     container.querySelectorAll('.dragging').forEach((n) => n.classList.remove('dragging'));
   };
 
+  // 整组拖拽 ghost：整行克隆 + 「搬家 N 行」角标（一次性，setDragImage 后即撤）
+  const makeGhost = (tr, n) => {
+    const ghost = tr.cloneNode(true);
+    ghost.classList.add('drag-ghost');
+    ghost.classList.remove('dragging');
+    const pill = document.createElement('span');
+    pill.className = 'drag-count';
+    pill.textContent = '搬家 ' + n + ' 行';
+    ghost.appendChild(pill);
+    document.body.appendChild(ghost);
+    setTimeout(() => { ghost.remove(); }, 0);
+    return ghost;
+  };
+
   const rowOf = (t) => {
     if (!t || !t.closest) return null;
     const tr = t.closest('tr.shot');
@@ -36,9 +50,17 @@ export function bindDrag(container, ctx) {
     if (!ctx.enabled()) { e.preventDefault(); return; }
     if (dots) {
       const tr = dots.closest('tr.shot');
-      payload = { kind: 'shot', id: Number(tr.dataset.id) };
-      tr.classList.add('dragging');
-      try { e.dataTransfer.setDragImage(tr, 24, 12); } catch (err) { /* ignore */ }
+      const groupIds = ctx.rowGroup ? ctx.rowGroup(tr) : null;   // 多选整组搬家（M5 批2）
+      payload = { kind: 'shot', id: Number(tr.dataset.id), ids: groupIds && groupIds.length > 1 ? groupIds : null };
+      if (payload.ids) {
+        container.querySelectorAll('tr.shot').forEach((row) => {
+          if (payload.ids.indexOf(Number(row.dataset.id)) !== -1) row.classList.add('dragging');
+        });
+        try { e.dataTransfer.setDragImage(makeGhost(tr, payload.ids.length), 24, 12); } catch (err) { /* ignore */ }
+      } else {
+        tr.classList.add('dragging');
+        try { e.dataTransfer.setDragImage(tr, 24, 12); } catch (err) { /* ignore */ }
+      }
     } else {
       payload = { kind: 'beat', id: Number(sec.dataset.beatId) };
       sec.classList.add('dragging');
@@ -56,7 +78,8 @@ export function bindDrag(container, ctx) {
       const tr = rowOf(t);
       clearDrop();
       if (tr) {
-        if (Number(tr.dataset.id) === payload.id) return; // 悬在自己行上：不显示落点
+        const rid = Number(tr.dataset.id);
+        if (payload.ids ? payload.ids.indexOf(rid) !== -1 : rid === payload.id) return; // 悬在自身/组内：不显示落点
         const r = tr.getBoundingClientRect();
         tr.classList.add((e.clientY - r.top) < r.height / 2 ? 'drop-before' : 'drop-after');
         return;
@@ -82,25 +105,27 @@ export function bindDrag(container, ctx) {
     clearAll();
     const t = e.target;
     if (pl.kind === 'shot') {
+      const ids = pl.ids && pl.ids.length ? pl.ids : [pl.id];
       const tr = rowOf(t);
       if (tr) {
-        if (Number(tr.dataset.id) === pl.id) return; // 放回自己 = 原地不动
+        const rid = Number(tr.dataset.id);
+        if (ids.indexOf(rid) !== -1) return; // 放回自身/组内 = 原地不动
         const r = tr.getBoundingClientRect();
         const before = (e.clientY - r.top) < r.height / 2;
         const beatId = Number(tr.dataset.beatId);
         if (!beatId) return;
         const beat = beatById(beatId);
-        const arr = (beat ? beat.shots : []).filter((x) => x.id !== pl.id);
-        const ti = arr.findIndex((x) => x.id === Number(tr.dataset.id));
+        const arr = (beat ? beat.shots : []).filter((x) => ids.indexOf(x.id) === -1);
+        const ti = arr.findIndex((x) => x.id === rid);
         const index = ti === -1 ? arr.length : (before ? ti : ti + 1);
-        ctx.onMoveShot(pl.id, beatId, index);
+        ctx.onMoveShot(pl.id, beatId, index, pl.ids || null);
       } else {
         const sec = t.closest ? t.closest('section.beat') : null;
         if (!sec || !sec.dataset.beatId) return;
         const beatId = Number(sec.dataset.beatId);
         const beat = beatById(beatId);
-        const arr = (beat ? beat.shots : []).filter((x) => x.id !== pl.id);
-        ctx.onMoveShot(pl.id, beatId, arr.length);
+        const arr = (beat ? beat.shots : []).filter((x) => ids.indexOf(x.id) === -1);
+        ctx.onMoveShot(pl.id, beatId, arr.length, pl.ids || null);
       }
     } else {
       const sec = t.closest ? t.closest('section.beat') : null;

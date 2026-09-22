@@ -125,8 +125,10 @@ def batch(m, body, q):
 def move(m, body, q):
     table = (body or {}).get("table")
     rid = (body or {}).get("id")
+    ids = (body or {}).get("ids")
     index = (body or {}).get("index", 0)
-    if table not in ("shots", "beats", "scenes") or not isinstance(rid, int):
+    ok_ids = isinstance(ids, list) and len(ids) >= 1 and all(isinstance(x, int) for x in ids)
+    if table not in ("shots", "beats", "scenes") or not (isinstance(rid, int) or ok_ids):
         return {"error": "参数不完整（table/id/index）"}, 400
     con = db.connect(rw=True)
     try:
@@ -134,10 +136,17 @@ def move(m, body, q):
             bid = (body or {}).get("beat_id")
             if not isinstance(bid, int):
                 return {"error": "缺少目标节拍 beat_id"}, 400
-            res = ops.move_shot(con, rid, bid, index)
+            if ok_ids:
+                res = ops.move_shots(con, ids, bid, index)   # 多行整组（M5 批2）
+            else:
+                res = ops.move_shot(con, rid, bid, index)
         elif table == "beats":
+            if not isinstance(rid, int):
+                return {"error": "参数不完整（table/id/index）"}, 400
             res = ops.move_beat(con, rid, index)
         else:
+            if not isinstance(rid, int):
+                return {"error": "参数不完整（table/id/index）"}, 400
             res = ops.move_scene(con, rid, index)
         return {"ok": True, "moved": res}, 200
     except ValueError as e:

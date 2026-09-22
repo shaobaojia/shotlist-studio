@@ -207,6 +207,8 @@ td.cell-shot_no { position: relative; }
 }
 tbody tr.shot:hover .drag-dots { opacity: .9; }
 tbody tr.shot.dragging td { opacity: .4; }
+.drag-ghost { position: fixed; left: -2000px; top: 0; opacity: .92; pointer-events: none; }
+.drag-ghost .drag-count { position: absolute; right: -8px; top: -10px; background: var(--accent); color: #fff; font-size: 11px; line-height: 16px; padding: 0 7px; border-radius: 9px; box-shadow: 0 2px 6px rgba(80, 30, 20, .25); }
 tbody tr.shot.drop-before td { box-shadow: inset 0 2px 0 0 var(--accent); }
 tbody tr.shot.drop-after td { box-shadow: inset 0 -2px 0 0 var(--accent); }
 section.beat.drop-end { border-bottom: 2px solid var(--accent); }
