@@ -218,6 +218,8 @@ function route() {
   document.querySelectorAll('#scene-nav .chip').forEach((chip) => {
     chip.classList.toggle('on', decHash(chip.getAttribute('href') || '') === cur);
   });
+  const onChip = document.querySelector('#scene-nav .chip.on');
+  if (onChip && onChip.scrollIntoView) onChip.scrollIntoView({ inline: 'nearest', block: 'nearest' });
   const view = document.getElementById('view');
   const m = cur.match(/^#\/(.+)$/);
   if (m) renderScene(view, m[1]);

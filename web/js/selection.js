@@ -32,6 +32,12 @@ export function bindSelection(view, c) {
     if (!td || !tr) return;
     const table = tr.closest('table');
     if (!table) return;
+    if (e.shiftKey) {
+      // Shift 点选：拦掉浏览器原生文字选择（蓝斑），并清掉存量原生选区
+      e.preventDefault();
+      const s0 = window.getSelection && window.getSelection();
+      if (s0 && s0.removeAllRanges && s0.rangeCount) s0.removeAllRanges();
+    }
     const shift = !!(e.shiftKey && sel && sel.table === table);
     if (!shift) clearSel();
     const rc = cellsOf(table);
@@ -150,24 +156,38 @@ export function tlCell() {
   return td ? { td: td, tr: td.closest('tr.shot'), field: td.dataset.field } : null;
 }
 
-function paint() {
-  if (!sel) return;
-  const wrap = sel.table.closest('.table-wrap');
-  if (!wrap) return;
-  const rc = rectOf();
-  const tl = cellTd(rc.r1, rc.c1);
-  const br = cellTd(rc.r2, rc.c2);
-  if (!tl || !br) return;
-  if (!box) box = document.createElement('div');
-  box.className = 'sel-box';
-  if (box.parentNode !== wrap) wrap.appendChild(box);
-  const wr = wrap.getBoundingClientRect();
-  const a = tl.getBoundingClientRect();
-  const b = br.getBoundingClientRect();
-  box.style.left = (a.left - wr.left + wrap.scrollLeft - 1) + 'px';
-  box.style.top = (a.top - wr.top - 1) + 'px';
-  box.style.width = (b.right - a.left + 1) + 'px';
-  box.style.height = (b.bottom - a.top + 1) + 'px';
+// 画框 + 稳定帧复绘（M5 批1·N2）：点击同步窗口内首绘可能吃到重排前坐标
+// （分组模式复现：框偏左 ~6.9px，平铺平态不复现），下一帧按定稿布局补绘一次统一归位。
+let stabilizeQueued = false;
+function queueStabilize() {
+  if (stabilizeQueued) return;
+  stabilizeQueued = true;
+  requestAnimationFrame(() => {
+    stabilizeQueued = false;
+    if (sel) paint(false);
+  });
+}
+
+function paint(stabilize) {
+  if (sel) {
+    const wrap = sel.table.closest('.table-wrap');
+    const rc = wrap ? rectOf() : null;
+    const tl = rc ? cellTd(rc.r1, rc.c1) : null;
+    const br = rc ? cellTd(rc.r2, rc.c2) : null;
+    if (wrap && tl && br) {
+      if (!box) box = document.createElement('div');
+      box.className = 'sel-box';
+      if (box.parentNode !== wrap) wrap.appendChild(box);
+      const wr = wrap.getBoundingClientRect();
+      const a = tl.getBoundingClientRect();
+      const b = br.getBoundingClientRect();
+      box.style.left = (a.left - wr.left + wrap.scrollLeft - 1) + 'px';
+      box.style.top = (a.top - wr.top - 1) + 'px';
+      box.style.width = (b.right - a.left + 1) + 'px';
+      box.style.height = (b.bottom - a.top + 1) + 'px';
+    }
+  }
+  if (stabilize !== false) queueStabilize();
 }
 
 function emit() {

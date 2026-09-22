@@ -186,13 +186,19 @@ function paintScene(view) {
   const topts = { prefs: prefs, sortState: sortState, onSort: cycleSort, refresh: refreshCurrentView, savePrefs: savePrefs, groups: promptGroupsMap };
   const flat = !!sortState || prefs.viewMode === 'flat';
   if (flat) {
-    const fwrap = buildTable(sortState ? sortedShots(shots) : shots, {
-      beatCol: true, sortable: true, data: data,
-      prefs: topts.prefs, sortState: topts.sortState, onSort: topts.onSort,
-      savePrefs: topts.savePrefs, groups: promptGroupsMap,
-    });
-    fwrap.classList.add('holdhead');
-    view.appendChild(fwrap);
+    if (shots.length) {
+      const fwrap = buildTable(sortState ? sortedShots(shots) : shots, {
+        beatCol: true, sortable: true, data: data,
+        prefs: topts.prefs, sortState: topts.sortState, onSort: topts.onSort,
+        savePrefs: topts.savePrefs, groups: promptGroupsMap,
+      });
+      fwrap.classList.add('holdhead');
+      view.appendChild(fwrap);
+    } else {
+      // 平铺空场（有心跳但尚无镜头）：引导别白页（M5 批1·A1）
+      view.appendChild(el('div', 'empty', '本场暂无镜头——切到「分组」视图可逐节拍添加镜头（＋ 镜头）；或「＋ 添加节拍」继续搭骨架。'));
+      view.appendChild(addBeatBar());
+    }
   } else {
     for (const b of data.beats) view.appendChild(beatSection(b, data, topts));
     if (data.orphan_shots && data.orphan_shots.length) {

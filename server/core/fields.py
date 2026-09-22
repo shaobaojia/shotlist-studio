@@ -7,7 +7,7 @@ type 对应前端渲染器（web/js/cells.js）：text / spatial / camera / jiwe
 options = 类型化控件的预设清单（下拉）：
   - shot_size：景别档位（★ 与档位一一对应，属编码非手填；前端摄影机列 = 两段景别 + 焦段复合控件）
   - focal：焦段档位；camera_pos：机位五色（单选）；shot_fn：镜头职能
-  运镜（camera_move）刻意不设 options——你的值是创作型描述（拉跟→停、弧移+仰），下拉会锁死创作。
+  运镜（camera_move）不设 options（下拉锁创作）；配 presets 常用档——一键落值，仍可自由手写（自定义）。
 写白名单由 core/ops.py 从各表清单派生（prompt 为虚拟列不进写白名单；position/id/时间戳不直改）。
 """
 CAM_TIERS = ["全景 ★", "中全 ★★", "中景 ★★★", "中近 ★★★", "近景 ★★★★", "特写 ★★★★★", "极特 ★★★★★"]
@@ -19,7 +19,8 @@ BLOCK_WRITE_KEYS = set(BLOCK_FIELDS)
 
 SHOT_FIELDS = [
     {"key": "shot_no",       "label": "#",        "type": "text",     "w": 42,  "in_table": True},
-    {"key": "camera_move",   "label": "运镜",     "type": "text",     "w": 72,  "in_table": True},
+    {"key": "camera_move",   "label": "运镜",     "type": "text",     "w": 72,  "in_table": True,
+     "presets": ["固定", "手持", "缓推", "微推", "拉跟", "上摇", "横移", "跟拍", "弧移", "环绕", "滑动变焦"]},
     {"key": "spatial",       "label": "空间关系", "type": "spatial",  "w": 160, "in_table": True},
     {"key": "shot_size",     "label": "摄影机",   "type": "camera",   "w": 110, "in_table": True, "options": CAM_TIERS},
     {"key": "camera_pos",    "label": "机位",     "type": "jiwei",    "w": 90,  "in_table": True, "options": ["🔴 正打", "🟡 反打", "🟢 第三人称", "🔵 空间环境", "🟣 插入/切出"]},

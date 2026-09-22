@@ -118,6 +118,32 @@ function openEditor(host, cfg) {
     });
     host.appendChild(wand);
   }
+  if (cfg.presets && cfg.presets.length) {
+    const strip = document.createElement('div');
+    strip.className = 'cell-presets';
+    cfg.presets.forEach((p) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'preset' + (p === base ? ' on' : '');
+      b.textContent = p;
+      b.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });  // 保住输入焦点，不触发 blur 提交
+      b.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        ed.value = p;
+        close(true);   // 一键落值并收（同单选菜单语义）
+      });
+      strip.appendChild(b);
+    });
+    host.appendChild(strip);
+    // 兜底翻转：表底行时条悬出 .table-wrap（overflow 纵裁不可点）→ 翻到格子上方
+    const wrapEl = host.closest ? host.closest('.table-wrap') : null;
+    if (wrapEl) {
+      const wr = wrapEl.getBoundingClientRect();
+      const hr = host.getBoundingClientRect();
+      if (hr.bottom + strip.offsetHeight + 6 > wr.bottom + 1) strip.classList.add('above');
+    }
+  }
   fitEditorOpen(ed, host);
   ed.focus();
   if (ed.tagName === 'INPUT') {
