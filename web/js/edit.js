@@ -75,6 +75,7 @@ export function attachEditable(host, cfg) {
     ev.stopPropagation();
     if (cfg.dbl) ev.preventDefault();
     if (cfg.select) {
+      host._seedText = null;
       openSelectMenu(host, cfg);
       return;
     }
@@ -96,9 +97,11 @@ function openSelectMenu(host, cfg) {
 }
 
 function openEditor(host, cfg) {
+  const seed = host._seedText;      // 打字即编种子（M5 批2，一次性）
+  host._seedText = null;
   let base = cfg.getValue() == null ? '' : String(cfg.getValue());
   const ed = document.createElement(cfg.multiline ? 'textarea' : 'input');
-  ed.value = base;
+  ed.value = seed != null ? String(seed) : base;
   ed._syncBaseline = (v) => { base = v; };   // 外部落库（AI 接受）后同步基线（L9）
   ed.title = cfg.multiline ? 'Ctrl+Enter 保存 · Tab 走格 · Esc 取消' : 'Enter 保存并下移 · Tab 走格 · Esc 取消';
   ed.className = 'cell-editor';
@@ -147,7 +150,8 @@ function openEditor(host, cfg) {
   fitEditorOpen(ed, host);
   ed.focus();
   if (ed.tagName === 'INPUT') {
-    ed.select();
+    if (seed != null) ed.setSelectionRange(ed.value.length, ed.value.length);
+    else ed.select();
   } else {
     ed.setSelectionRange(ed.value.length, ed.value.length);
   }
@@ -254,6 +258,7 @@ export function attachCamEditor(host, cfg) {
 }
 
 function openCamForm(host, cfg) {
+  host._seedText = null;
   const cam = cfg.getCam();
   const opts = cfg.camOptions();
   const p = parseCam(cam.raw);

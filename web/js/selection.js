@@ -113,7 +113,8 @@ export function bindSelection(view, c) {
     clearSel();
   }, true);
 
-  // 键盘：方向键走格 / Shift 扩选 / Tab 右移 / Enter 开编 / Esc 取消
+  // 键盘：方向键走格 / Shift 扩选 / Tab 右移 / Enter·F2 开编 / Esc 取消
+  // + Excel 对齐（M5 批2）：Delete 清格 / Home·End / Ctrl+C·X·A·D / 打字即编
   document.addEventListener('keydown', (e) => {
     if (!sel) return;
     const t = e.target;
@@ -121,10 +122,26 @@ export function bindSelection(view, c) {
     if (document.querySelector('.cell-editor, .cam-editor')) return;
     if (menuOpen()) return;
     if (e.key === 'Escape') { clearSel(); return; }
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && !e.altKey) {
+      const k = String(e.key).toLowerCase();
+      if (k === 'c') { e.preventDefault(); copySelectionTSV(); return; }
+      if (k === 'x') { e.preventDefault(); cutSelection(); return; }
+      if (k === 'a') { e.preventDefault(); selectAllCells(); return; }
+      if (k === 'd') { e.preventDefault(); fillDown(); return; }
+      // 其余 Ctrl 组合维持原行为（不拦截；Ctrl+V 交给 document 'paste' 直连）
+    }
     const mv = { ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0], ArrowDown: [1, 0] }[e.key];
     if (mv) { e.preventDefault(); moveFocus(mv[0], mv[1], e.shiftKey); return; }
     if (e.key === 'Tab') { e.preventDefault(); moveFocus(0, e.shiftKey ? -1 : 1, false); return; }
-    if (e.key === 'Enter') { e.preventDefault(); openFocus(); }
+    if (e.key === 'Enter' || e.key === 'F2') { e.preventDefault(); openFocus(); return; }
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); clearSelectionCells(); return; }
+    if (e.key === 'Home') { e.preventDefault(); moveFocusAbs(sel.fr, 0, e.shiftKey); return; }
+    if (e.key === 'End') { e.preventDefault(); moveFocusAbs(sel.fr, sel.cols.length - 1, e.shiftKey); return; }
+    if (e.key === 'Process' || e.keyCode === 229) { tryTypeEdit(''); return; }   // IME 首键开编
+    if (!mod && !e.altKey && e.key && e.key.length === 1) {
+      if (tryTypeEdit(e.key)) e.preventDefault();   // 打字即编（可编辑格才吞按键）
+    }
   });
 }
 
@@ -212,8 +229,13 @@ export function inCell(td) {
 
 function moveFocus(dr, dc, extend) {
   if (!sel) return;
-  const nr = Math.max(0, Math.min(sel.rows.length - 1, sel.fr + dr));
-  const nc = Math.max(0, Math.min(sel.cols.length - 1, sel.fc + dc));
+  moveFocusAbs(sel.fr + dr, sel.fc + dc, extend);
+}
+
+function moveFocusAbs(r, c, extend) {
+  if (!sel) return;
+  const nr = Math.max(0, Math.min(sel.rows.length - 1, r));
+  const nc = Math.max(0, Math.min(sel.cols.length - 1, c));
   if (nr === sel.fr && nc === sel.fc) return;
   if (!extend) { sel.ar = nr; sel.ac = nc; }
   sel.fr = nr; sel.fc = nc;
@@ -232,12 +254,25 @@ function openFocus() {
   td.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
 }
 
+// 打字即编（M5 批2）：可编辑格 → 种子值直进编辑（首字替换态）；编辑引擎经 td._seedText 取用。
+function tryTypeEdit(ch) {
+  if (!sel) return false;
+  const td = cellTd(sel.fr, sel.fc);
+  if (!td || !td.classList.contains('editable') || td.classList.contains('cell-prompt')) return false;
+  sel.ar = sel.fr; sel.ac = sel.fc;
+  paint();
+  emit();
+  td._seedText = ch;
+  td.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+  return true;
+}
+
 function shotById(id) {
   return ctx && ctx.getShot ? ctx.getShot(id) : null;
 }
 
-export function copySelectionTSV() {
-  if (!sel) return;
+export function copySelection() {
+  if (!sel) return Promise.resolve(false);
   const rc = rectOf();
   const vals = [];
   for (let r = rc.r1; r <= rc.r2; r++) {
@@ -249,9 +284,20 @@ export function copySelectionTSV() {
     }
     vals.push(row);
   }
-  writeClipboard(toTSV(vals)).then((ok) => {
+  return writeClipboard(toTSV(vals)).then((ok) => {
     toast(ok ? ('已复制 ' + vals.length + ' 行 × ' + (rc.c2 - rc.c1 + 1) + ' 列') : '复制失败：浏览器限制', ok ? '' : 'err');
+    return ok;
   });
+}
+
+export function copySelectionTSV() { copySelection(); }
+
+// 剪切（M5 批2）：复制成功才清格（防丢数据）；清空走既有批量写（一步撤销）
+export async function cutSelection() {
+  if (!sel) return;
+  const ok = await copySelection();
+  if (!ok) return;
+  clearSelectionCells();
 }
 
 // 批量写（L7 泛化）：一个写口、一步撤销；默认 shots 域（ctx.getShot + refreshShotCell）。
@@ -324,6 +370,46 @@ export function clearSelectionCells() {
   if (!ops.length) { toast('选中的格子本来就是空的'); return; }
   if (ops.length > 400) { toast('一次最多 400 格（本次 ' + ops.length + '）', 'err'); return; }
   batchWrite(ops, '清空选区');
+}
+
+// Ctrl+A 全选本表（M5 批2）
+function selectAllCells() {
+  if (!sel) return;
+  sel.ar = 0; sel.ac = 0;
+  sel.fr = sel.rows.length - 1; sel.fc = sel.cols.length - 1;
+  paint();
+  emit();
+}
+
+// Ctrl+D 向下填充（M5 批2）：多行选区=首行铺满下方；单格=取上方值填入
+function fillDown() {
+  if (!sel) return;
+  const rc = rectOf();
+  let src = rc.r1;
+  let from = rc.r1 + 1;
+  if (rc.r1 === rc.r2) {
+    if (rc.r1 === 0) { toast('上方没有可引用的行'); return; }
+    src = rc.r1 - 1;
+    from = rc.r1;
+  }
+  const sSrc = shotById(Number(sel.rows[src].dataset.id));
+  if (!sSrc) return;
+  const ops = [];
+  for (let r = from; r <= rc.r2; r++) {
+    const s = shotById(Number(sel.rows[r].dataset.id));
+    if (!s) continue;
+    for (let c = rc.c1; c <= rc.c2; c++) {
+      const k = sel.cols[c];
+      if (k === 'prompt' || k === '__beat') continue;   // 非直写列跳过
+      const nv = sSrc[k] == null ? '' : String(sSrc[k]);
+      const cur = s[k] == null ? '' : String(s[k]);
+      if (nv === cur) continue;
+      ops.push({ id: s.id, field: k, value: nv });
+    }
+  }
+  if (!ops.length) { toast('没有需要填充的变化'); return; }
+  if (ops.length > 400) { toast('一次最多 400 格（本次 ' + ops.length + '）', 'err'); return; }
+  batchWrite(ops, '向下填充');
 }
 
 export function applyFieldValue(field, value, label) {

@@ -2,7 +2,7 @@
 // 挂在 #view 上（事件委托）；复制走 execCommand 兜底（局域 http 下无 clipboard API）。
 import { api } from './api.js';
 import { toast } from './ui.js';
-import { openMenu } from './menu.js';
+import { openMenu, menuOpen } from './menu.js';
 import { recordUndo } from './edit.js';
 import { writeClipboard, pasteBlock, toTSV, tableFieldKeys } from './clipboard.js';
 import { refreshShotCell, refreshBeatAction } from './table.js';
@@ -38,6 +38,21 @@ export function bindCellMenu(view, ctx) {
       openBeatMenu(sec, e);
     }
   });
+
+  // 直接粘贴（M5 批2）：选区就位时 Ctrl+V 即贴（菜单待命锚点优先）；编辑态/浮层内不劫持。
+  document.addEventListener('paste', (e) => {
+    if (menuOpen()) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (document.querySelector('.cell-editor, .cam-editor')) return;
+    const anchor = pasteAnchor || (selCurrent() ? tlCell() : null);
+    if (!anchor) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (pasteArmed) pasteArmed();
+    const text = e.clipboardData ? e.clipboardData.getData('text/plain') : '';
+    pasteBlock(anchor, text, pasteCtx);
+  }, true);
 }
 
 function findShot(id) {
@@ -165,19 +180,15 @@ async function duplicateRow(s) {
   }
 }
 
-// 粘贴待命：菜单点了「粘贴」后，等用户 Ctrl+V（局域 http 下无法程序化读取剪贴板）
-let pasteArmed = null;
+// 粘贴待命（菜单发起）：登记锚点，等用户 Ctrl+V 时由直连监听取用；
+// 直连路径（M5 批2）锚点未登记时取选区左上——选区就位直接 Ctrl+V 即贴。
+let pasteArmed = null;    // disarm 回调
+let pasteAnchor = null;   // 菜单登记的待命锚点
 
 function armPaste(anchor) {
   if (pasteArmed) pasteArmed();
+  pasteAnchor = anchor;
   toast('粘贴就绪：按 Ctrl+V（Esc 取消）');
-  const onPaste = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    disarm();
-    const t = e.clipboardData ? e.clipboardData.getData('text/plain') : '';
-    pasteBlock(anchor, t, pasteCtx);
-  };
   const onKey = (e) => {
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -188,13 +199,12 @@ function armPaste(anchor) {
   };
   const tmr = setTimeout(() => { disarm(); }, 6000);
   function disarm() {
-    document.removeEventListener('paste', onPaste, true);
     document.removeEventListener('keydown', onKey, true);
     clearTimeout(tmr);
     pasteArmed = null;
+    pasteAnchor = null;
   }
   pasteArmed = disarm;
-  document.addEventListener('paste', onPaste, true);
   document.addEventListener('keydown', onKey, true);
 }
 
