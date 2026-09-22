@@ -2,13 +2,16 @@
 import { state, fieldOf } from './state.js';
 import { el } from './ui.js';
 import { openMenu } from './menu.js';
-import { onChange, current, clearSel, rectOf, copySelectionTSV, clearSelectionCells, applyFieldValue } from './selection.js';
+import { onChange, current, clearSel, rectOf, copySelectionTSV, clearSelectionCells, applyFieldValue, applyBeatFieldValue, applySceneFieldValue, selBeatIds } from './selection.js';
 import { deleteSelectedRows } from './cellmenu.js';
 import { mergeShotsByIds, detachShotsByIds } from './hotbox.js';
 import { runCmdbarFromSel } from './aiwrite.js';
 
 // 可批量设值的字段（枚举优先排前；镜号/景深/虚拟列不进）
 const BATCH_KEYS = ['camera_pos', 'shot_size', 'focal', 'shot_fn', 'camera_move', 'spatial', 'blocking', 'dialogue', 'duration', 'audio', 'director_note', 'pov'];
+// 节拍字段（M5 批2c；节拍序号不进——批量改名无意义）与场景字段（场号不进——唯一性/路由）
+const BEAT_BATCH_KEYS = ['name', 'kind', 'beat_action', 'outside_action', 'reaction', 'closed_loop', 'rhythm_section', 'rhythm_note', 'mood_temp', 'shot_estimate', 'rhythm_density', 'beat_attr', 'note', 'pov'];
+const SCENE_BATCH_KEYS = ['title', 'value', 'pole_start', 'pole_end', 'turn', 'pov'];
 const CLEAR = '（清空）';
 
 let bar = null;
@@ -82,15 +85,30 @@ function build() {
 
   const mid = el('span', 'sbar-mid');
   bar.appendChild(mid);
-  const f = fieldOf(pick.field) || null;
+  const pf = pickField();
+  const f = pf ? pf.f : null;
+  const optsList = (pf && pf.dom === 'beats' && pf.key === 'kind')
+    ? ((state.meta && state.meta.beat_kinds) || [])
+    : (f && f.options && f.options.length ? f.options : null);
 
-  const fbtn = el('button', 'tool-btn', f ? f.label : '设值…');
-  fbtn.title = '选择要批量设置的字段';
+  const fbtn = el('button', 'tool-btn',
+    f ? (pf.dom === 'beats' ? '节拍·' : (pf.dom === 'scenes' ? '场景·' : '')) + f.label : '设值…');
+  fbtn.title = '选择要批量设置的字段（镜头 / 节拍 / 场景）';
   fbtn.addEventListener('click', () => {
     const items = BATCH_KEYS.map((k) => {
       const ff = fieldOf(k);
       return ff ? { key: k, label: ff.label, current: k === pick.field } : null;
     }).filter(Boolean);
+    items.push({ sep: true }, { label: '— 节拍字段（套到所选行所在节拍）—', disabled: true });
+    BEAT_BATCH_KEYS.forEach((k) => {
+      const ff = fieldOf(k, 'beats');
+      if (ff) items.push({ key: 'b:' + k, label: ff.label, current: pick.field === 'b:' + k });
+    });
+    items.push({ sep: true }, { label: '— 场景字段（套到本场）—', disabled: true });
+    SCENE_BATCH_KEYS.forEach((k) => {
+      const ff = fieldOf(k, 'scenes');
+      if (ff) items.push({ key: 's:' + k, label: ff.label, current: pick.field === 's:' + k });
+    });
     openMenu(fbtn, items, (k) => {
       pick = { field: k, value: null };
       build();
@@ -99,24 +117,23 @@ function build() {
   mid.appendChild(fbtn);
 
   if (f) {
-    if (f.options && f.options.length) {
+    if (optsList && optsList.length) {
       const vbtn = el('button', 'tool-btn', pick.value == null ? '值…' : (pick.value === '' ? CLEAR : pick.value));
       vbtn.title = '选值（拾取即套用）';
       vbtn.addEventListener('click', () => {
-        const items = f.options.map((o) => ({ key: o, label: o, current: o === pick.value }))
+        const items = optsList.map((o) => ({ key: o, label: o, current: o === pick.value }))
           .concat([{ sep: true }, { key: '', label: CLEAR, current: pick.value === '' }]);
         openMenu(vbtn, items, (v) => {
           pick.value = v;
           build();
-          applyFieldValue(f.key, v, '批量设值 · ' + f.label);
+          applyPicked(pf, v, f);
         });
       });
       mid.appendChild(vbtn);
     } else {
-      const rc0 = rectOf();
       const inp = document.createElement('input');
       inp.className = 'sbar-input';
-      inp.placeholder = '值…（回车套到 ' + (rc0 ? rc0.r2 - rc0.r1 + 1 : 0) + ' 镜）';
+      inp.placeholder = '值…（回车' + (pf.dom === 'scenes' ? '套到本场' : '套到 ' + applyTargetText(pf)) + '）';
       inp.value = pick.value == null ? '' : pick.value;
       inp.addEventListener('input', () => { pick.value = inp.value; });
       inp.addEventListener('keydown', (e) => {
@@ -124,7 +141,7 @@ function build() {
           e.preventDefault();
           pick.value = inp.value;
           sig = JSON.stringify([pick.field, pick.value]);
-          applyFieldValue(f.key, pick.value, '批量设值 · ' + f.label);
+          applyPicked(pf, pick.value, f);
         }
       });
       mid.appendChild(inp);
@@ -175,4 +192,26 @@ function build() {
 
   const s = current();
   if (s) updateCount(s);
+}
+
+// —— 批量设值·域选择（M5 批2c）：'b:' 节拍 / 's:' 场景 / 裸键=镜头 ——
+function pickField() {
+  if (!pick.field) return null;
+  if (pick.field.indexOf('b:') === 0) { const k = pick.field.slice(2); return { dom: 'beats', key: k, f: fieldOf(k, 'beats') }; }
+  if (pick.field.indexOf('s:') === 0) { const k = pick.field.slice(2); return { dom: 'scenes', key: k, f: fieldOf(k, 'scenes') }; }
+  return { dom: 'shots', key: pick.field, f: fieldOf(pick.field) };
+}
+
+function applyTargetText(pf) {
+  const rc0 = rectOf();
+  if (pf.dom === 'beats') return selBeatIds().length + ' 个节拍';
+  if (pf.dom === 'scenes') return '本场';
+  return (rc0 ? rc0.r2 - rc0.r1 + 1 : 0) + ' 镜';
+}
+
+function applyPicked(pf, v, f) {
+  const label = '批量设值 · ' + f.label;
+  if (pf.dom === 'beats') applyBeatFieldValue(pf.key, v, label);
+  else if (pf.dom === 'scenes') applySceneFieldValue(pf.key, v, label);
+  else applyFieldValue(pf.key, v, label);
 }

@@ -76,7 +76,12 @@ export async function renderScene(view, sceneNo) {
     sceneId: () => (currentData ? currentData.scene.id : null),
     refresh: refreshCurrentView,
   });
-  bindSelection(view, { getShot: (id) => (currentData ? allShots(currentData).find((s) => s.id === id) : null) });
+  bindSelection(view, {
+    getShot: (id) => (currentData ? allShots(currentData).find((s) => s.id === id) : null),
+    getBeat: (id) => (currentData ? (currentData.beats || []).find((b) => b.id === id) : null),
+    getScene: () => (currentData ? currentData.scene : null),
+    refreshScene: refreshSceneSoon,
+  });
   initHotbox({
     getData: () => currentData,
     refresh: refreshCurrentView,
@@ -90,6 +95,16 @@ export async function renderScene(view, sceneNo) {
     sceneId: () => (currentData ? currentData.scene.id : null),
   });
   paintScene(view);
+}
+
+// 批量改期节拍/场景字段后：合并到一帧重绘（apply 与撤销路径共用；重绘会清选区，符合重绘纪律）
+let _sceneSoon = null;
+export function refreshSceneSoon() {
+  if (_sceneSoon) return;
+  _sceneSoon = setTimeout(async () => {
+    _sceneSoon = null;
+    await refreshCurrentView();
+  }, 30);
 }
 
 export async function refreshCurrentView() {

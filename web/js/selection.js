@@ -429,3 +429,62 @@ export function applyFieldValue(field, value, label) {
   if (ops.length > 400) { toast('一次最多 400 行', 'err'); return; }
   batchWrite(ops, label || '批量设值');
 }
+
+// 选区命中的节拍（M5 批2c）：所选行去重后的节拍 id（表序；平铺跨节拍时为多个）
+export function selBeatIds() {
+  if (!sel) return [];
+  const rc = rectOf();
+  const ids = [];
+  for (let r = rc.r1; r <= rc.r2; r++) {
+    const tr = sel.rows[r];
+    const s = tr ? shotById(Number(tr.dataset.id)) : null;
+    if (!s || s.beat_id == null) continue;
+    if (ids.indexOf(s.beat_id) === -1) ids.push(s.beat_id);
+  }
+  return ids;
+}
+
+// 批量设值·节拍字段（M5 批2c）：套到所选行所在节拍；一步撤销；完成后合并重绘
+export function applyBeatFieldValue(field, value, label) {
+  const ids = selBeatIds();
+  if (!ids.length) { toast('选中的镜头不在任何节拍内'); return; }
+  const ops = [];
+  for (const bid of ids) {
+    const b = ctx && ctx.getBeat ? ctx.getBeat(bid) : null;
+    if (!b) continue;
+    const cur = b[field] == null ? '' : String(b[field]);
+    const nv = value == null ? '' : String(value);
+    if (cur === nv) continue;
+    ops.push({ id: bid, field: field, value: nv });
+  }
+  if (!ops.length) { toast('选中的节拍本来就是这个值'); return; }
+  batchWrite(ops, (label || '批量设值') + ' · 节拍', {
+    table: 'beats',
+    resolve: (o) => (ctx && ctx.getBeat ? ctx.getBeat(o.id) : null),
+    refresh: () => { if (ctx && ctx.refreshScene) ctx.refreshScene(); },
+    done: (n2, errs) => {
+      if (n2) toast('已改 ' + n2 + ' 个节拍（Ctrl+Z 可撤）');
+      else toast('没有变化');
+      if (errs.length) toast(errs.length + ' 项被拒绝', 'err');
+    },
+  });
+}
+
+// 批量设值·场景字段（M5 批2c）：套到本场；一步撤销
+export function applySceneFieldValue(field, value, label) {
+  const sc = ctx && ctx.getScene ? ctx.getScene() : null;
+  if (!sc) { toast('当前没有场'); return; }
+  const cur = sc[field] == null ? '' : String(sc[field]);
+  const nv = value == null ? '' : String(value);
+  if (cur === nv) { toast('本场本来就是这个值'); return; }
+  batchWrite([{ id: sc.id, field: field, value: nv }], (label || '批量设值') + ' · 场景', {
+    table: 'scenes',
+    resolve: () => (ctx && ctx.getScene ? ctx.getScene() : null),
+    refresh: () => { if (ctx && ctx.refreshScene) ctx.refreshScene(); },
+    done: (n2, errs) => {
+      if (n2) toast('已改本场 1 处（Ctrl+Z 可撤）');
+      else toast('没有变化');
+      if (errs.length) toast(errs.length + ' 项被拒绝', 'err');
+    },
+  });
+}
