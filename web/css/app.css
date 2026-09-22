@@ -666,3 +666,71 @@ td.editing, .beat-action.editing, .kv-value.editing { position: relative; }
 .dz-draft-text { white-space: pre-wrap; font: inherit; font-size: 12px; line-height: 1.6; color: var(--ink2);
   background: #fffdf6; border: 1px solid rgba(60, 50, 30, 0.18); border-radius: 7px;
   padding: 8px 10px; margin: 0 0 8px; max-height: 40vh; overflow: auto; }
+
+/* ═══ M5 批3 · 浮层抽屉（drawer 基件 + 提示词抽屉） ═══ */
+.drawer {
+  position: fixed; display: flex; flex-direction: column;
+  background: var(--card); border: 1px solid var(--accent);
+  border-radius: 8px; z-index: 43;
+  box-shadow: -4px 8px 30px rgba(50, 38, 20, 0.28);
+}
+.drawer[hidden] { display: none; }
+.drawer.open { animation: drawerIn .35s cubic-bezier(.34, 1.56, .64, 1); }
+@keyframes drawerIn { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
+.drawer.dragging { box-shadow: -4px 12px 38px rgba(50, 38, 20, 0.42); }
+.drawer.snap-bounce { animation: snapBounce .32s ease; }
+@keyframes snapBounce { 0% { transform: scale(.985); } 55% { transform: scale(1.008); } 100% { transform: scale(1); } }
+.drawer-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border-bottom: 1px solid var(--rule);
+  cursor: grab; user-select: none;
+}
+.drawer-head:active { cursor: grabbing; }
+.drawer-title {
+  font-size: 13px; font-weight: 600; color: var(--head);
+  margin-right: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.drawer-btns { display: flex; align-items: center; gap: 6px; flex: none; }
+.drawer-body {
+  flex: 1; min-height: 0; overflow: auto;
+  padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px;
+}
+/* 面板按钮（用户定则：红底白字 11px 中文全词，禁混搭） */
+.panel-btn {
+  font-size: 11px; padding: 4px 8px; line-height: 1.4; font-family: inherit;
+  border: 1px solid var(--accent); border-radius: 4px;
+  background: var(--accent); color: #fff; cursor: pointer;
+  transition: all .15s ease; white-space: nowrap;
+}
+.panel-btn:hover { background: transparent; color: var(--accent); transform: translateY(-1px); }
+.panel-btn.pinned { opacity: .7; }
+.panel-btn.btn-close { font-size: 13px; padding: 2px 7px; }
+/* 八向缩放手柄 */
+.rz { position: absolute; z-index: 2; }
+.rz-n, .rz-s { left: 10px; right: 10px; height: 6px; }
+.rz-e, .rz-w { top: 10px; bottom: 10px; width: 6px; }
+.rz-n { top: -3px; cursor: ns-resize; }
+.rz-s { bottom: -3px; cursor: ns-resize; }
+.rz-e { right: -3px; cursor: ew-resize; }
+.rz-w { left: -3px; cursor: ew-resize; }
+.rz-ne, .rz-nw, .rz-se, .rz-sw { width: 12px; height: 12px; }
+.rz-ne { top: -4px; right: -4px; cursor: nesw-resize; }
+.rz-nw { top: -4px; left: -4px; cursor: nwse-resize; }
+.rz-se { bottom: -4px; right: -4px; cursor: nwse-resize; }
+.rz-sw { bottom: -4px; left: -4px; cursor: nesw-resize; }
+/* 抽屉内拼装台微调 */
+.drawer .hotbox { margin-top: 0; }
+.drawer .hotbox-foot { flex-wrap: wrap; row-gap: 6px; }
+.drawer .hotbox-shelf { margin-top: 2px; }
+.drawer .pd-rich { max-height: none; }
+/* 查看态（徽标着色） */
+.pd-view { display: flex; flex-direction: column; gap: 8px; }
+.pd-rich { min-height: 60px; }
+.pd-rich .pline { min-height: 1.2em; }
+.pd-rich .pline:empty::before { content: '\00a0'; }
+.pd-rich .pdot { font-size: 9px; margin-right: 3px; vertical-align: 1px; }
+.pd-rich .pl { font-weight: 600; }
+.pd-rich .pann { color: var(--accent); }
+.pd-empty { color: var(--dim); }
+.pd-tips { font-size: 11px; color: var(--dim); opacity: .85; }
+.pd-ops { display: flex; gap: 8px; }

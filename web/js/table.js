@@ -5,7 +5,7 @@ import { el, fmt, toast } from './ui.js';
 import { cellContent } from './cells.js';
 import { attachEditable, attachCamEditor, parseCam, recordUndo } from './edit.js';
 import { api } from './api.js';
-import { buildPromptBox, toggleComposer } from './hotbox.js';
+import { buildPromptBox, openPromptDrawer } from './hotbox.js';
 import { isAiField, aiOpenFor } from './aiwrite.js';
 
 const MULTILINE_TYPES = new Set(['spatial', 'dialogue', 'audio', 'notes', 'camera']);
@@ -157,7 +157,7 @@ function shotRows(s, cols, groups, data) {
   const tc = tr.querySelector('.cell-toggle');
   if (tc) tc.addEventListener('click', (e) => { e.stopPropagation(); flip(); });
   const pc = tr.querySelector('.cell-prompt');
-  if (pc) pc.addEventListener('click', (e) => { e.stopPropagation(); toggleComposer(det, s); });
+  if (pc) pc.addEventListener('click', (e) => { e.stopPropagation(); openPromptDrawer(s.id, { toggle: true }); });
 
   const frag = document.createDocumentFragment();
   frag.appendChild(tr);
