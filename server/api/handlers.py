@@ -191,12 +191,15 @@ def duplicate(m, body, q):
 
 
 def delete_row(m, body, q):
-    """M2-6 删除：镜头行（可多行）/ 节拍（镜头落未归或连删）/ 场次（整场级联）；返回快照供撤销。"""
-    table = (body or {}).get("table") or "shots"
+    """M2-6 删除：镜头行（可多行）/ 节拍（镜头落未归或连删）/ 场次（整场级联）；返回快照供撤销。
+    防呆：table 必填显式（不再默认 shots——误删事故根因，2026-09-22 收口）。"""
+    table = (body or {}).get("table")
+    if table not in ("shots", "beats", "scenes"):
+        return {"error": "缺少或非法 table（不默认 shots）"}, 400
     ids = (body or {}).get("ids")
     if ids is None and isinstance((body or {}).get("id"), int):
         ids = [(body or {}).get("id")]
-    if table not in ("shots", "beats", "scenes") or not isinstance(ids, list) or not ids \
+    if not isinstance(ids, list) or not ids \
             or not all(isinstance(x, int) for x in ids):
         return {"error": "参数不完整（table + id/ids）"}, 400
     if len(ids) > 200:

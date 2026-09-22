@@ -14,6 +14,7 @@ from api import ai as api_ai  # noqa: E402
 from api import audit as api_audit  # noqa: E402
 from api import draft as api_draft  # noqa: E402
 from api import prompts as api_prompts  # noqa: E402
+from api import handlers as api_handlers  # noqa: E402
 from core import ai as core_ai  # noqa: E402
 from core import audit as core_audit  # noqa: E402
 from core import db as core_db  # noqa: E402
@@ -383,6 +384,21 @@ class TestAuditThinLayer(unittest.TestCase):
             res, code = api_audit.summary(None, {})
         self.assertEqual(code, 200)
         self.assertEqual(res["open_by_scene"], {"1": 2})
+
+
+class TestDeleteGuards(unittest.TestCase):
+    def test_delete_requires_explicit_table(self):
+        """防呆（M5 收口）：无/非法 table 直接 400——删除绝不默认 shots（坏请求不触达写连接）。"""
+        bad = ({"ids": [1]},                    # 缺 table（旧默认 shots，误删根因）
+               {"id": 1},                       # 缺 table + id 形态
+               {"table": "zzz", "ids": [1]},    # 非法表名
+               {"table": "shots"})              # 有 table 缺 id/ids
+        with mock.patch.object(core_db, "connect",
+                               side_effect=AssertionError("坏请求触达了写连接")):
+            for body in bad:
+                res, code = api_handlers.delete_row(None, dict(body), {})
+                self.assertEqual(code, 400, "body=%r" % (body,))
+                self.assertIn("table", res["error"])
 
 
 if __name__ == "__main__":
