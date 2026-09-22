@@ -34,6 +34,7 @@ export function createDrawer(opts) {
   frame.appendChild(body);
 
   const st = { open: false, pinned: false, dock: null };
+  let tIn = null, tBn = null;
 
   // ── 八向缩放手柄 ──
   const DIRS = [['n', 0, -1], ['s', 0, 1], ['e', 1, 0], ['w', -1, 0],
@@ -94,11 +95,21 @@ export function createDrawer(opts) {
     if (!silent) { saveState(); bounce(); }
   }
 
+  // 入场动画：一次性 .enter（播完即摘——常驻会导致回弹类摘除时动画重播=「多闪一次」）
+  function playIn() {
+    frame.classList.remove('enter', 'snap-bounce');
+    void frame.offsetWidth;
+    frame.classList.add('enter');
+    clearTimeout(tIn);
+    tIn = setTimeout(() => frame.classList.remove('enter'), 400);
+  }
+
   function bounce() {
-    frame.classList.remove('snap-bounce');
+    frame.classList.remove('enter', 'snap-bounce');   // 先清入场类：回弹结束摘类时无动画可回退，防重播
     void frame.offsetWidth;
     frame.classList.add('snap-bounce');
-    setTimeout(() => frame.classList.remove('snap-bounce'), 340);
+    clearTimeout(tBn);
+    tBn = setTimeout(() => frame.classList.remove('snap-bounce'), 360);
   }
 
   // ── 拖拽（标题栏；按钮不触发）──
@@ -217,9 +228,8 @@ export function createDrawer(opts) {
     st.open = true;
     frame.hidden = false;
     applyRect();
-    frame.classList.remove('open');
-    void frame.offsetWidth;
     frame.classList.add('open');
+    playIn();
     document.addEventListener('mousedown', onDoc, true);
     if (opts.onOpen) opts.onOpen();
   }
@@ -230,7 +240,7 @@ export function createDrawer(opts) {
     st.open = false;
     st.pinned = false;
     if (pinBtn) pinBtn.classList.remove('pinned');
-    frame.classList.remove('open');
+    frame.classList.remove('open', 'enter', 'snap-bounce');
     frame.hidden = true;
     document.removeEventListener('mousedown', onDoc, true);
     if (opts.onClose) opts.onClose();

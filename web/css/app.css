@@ -675,7 +675,8 @@ td.editing, .beat-action.editing, .kv-value.editing { position: relative; }
   box-shadow: -4px 8px 30px rgba(50, 38, 20, 0.28);
 }
 .drawer[hidden] { display: none; }
-.drawer.open { animation: drawerIn .35s cubic-bezier(.34, 1.56, .64, 1); }
+/* 入场=.enter 一次性类（勿挂 .open：状态类常驻会让回弹后动画重播）*/
+.drawer.enter { animation: drawerIn .35s cubic-bezier(.34, 1.56, .64, 1); }
 @keyframes drawerIn { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
 .drawer.dragging { box-shadow: -4px 12px 38px rgba(50, 38, 20, 0.42); }
 .drawer.snap-bounce { animation: snapBounce .32s ease; }
