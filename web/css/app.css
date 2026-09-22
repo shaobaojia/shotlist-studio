@@ -734,3 +734,23 @@ td.editing, .beat-action.editing, .kv-value.editing { position: relative; }
 .pd-empty { color: var(--dim); }
 .pd-tips { font-size: 11px; color: var(--dim); opacity: .85; }
 .pd-ops { display: flex; gap: 8px; }
+
+/* ═══ M5 批3b · 剧本抽屉 + 导入卡 ═══ */
+.sd-view { min-height: 120px; }
+.sd-editor { min-height: 300px; }
+#script-import-card { position: fixed; right: 14px; top: 56px; width: 560px; max-width: 94vw; max-height: 82vh;
+  background: var(--card); border: 1px solid rgba(90, 78, 55, 0.30); border-radius: 10px;
+  z-index: 48; display: flex; flex-direction: column; box-shadow: var(--shadow-float); }
+#script-import-card[hidden] { display: none; }
+#script-import-card .sc-body { overflow: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.sd-imp-list { border: 1px solid var(--rule); border-radius: 8px; padding: 8px 10px; max-height: 40vh; overflow: auto;
+  background: #fffefa; display: flex; flex-direction: column; gap: 5px; }
+.sd-imp-row { display: flex; align-items: baseline; gap: 8px; font-size: 12px; color: var(--ink2); cursor: pointer; }
+.sd-imp-row input { margin: 0; }
+.sd-imp-no { font-weight: 600; color: var(--head); min-width: 44px; }
+.sd-imp-meta { color: var(--dim); font-size: 11px; margin-left: auto; }
+.sd-imp-warn { color: var(--accent); font-size: 11px; }
+.sd-imp-stat { font-size: 11px; color: var(--dim); margin-left: auto; }
+.sd-imp-empty { font-size: 12px; color: var(--dim); padding: 2px 0; }
+
+.sd-imp-applybar { margin-top: 2px; }

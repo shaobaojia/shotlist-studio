@@ -580,3 +580,28 @@ class TestAppendRows(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestSceneScript(unittest.TestCase):
+    """M5 批3b：scenes.script（台本）写白名单与痕迹。"""
+
+    def test_script_writable_only_for_scenes(self):
+        self.assertIn("script", ops.write_keys("scenes"))
+        self.assertNotIn("script", ops.write_keys("shots"))
+        self.assertNotIn("script", ops.write_keys("beats"))
+
+    def test_script_update_and_history(self):
+        con = make_db()
+        row, changed = ops.update_field(con, "scenes", 1, "script", "s010 商场过道\n内景 商场 白天")
+        self.assertTrue(changed)
+        self.assertEqual(row["script"], "s010 商场过道\n内景 商场 白天")
+        h = ops.history_of(con, scene_id=1)
+        self.assertEqual(h[0]["entity"], "scenes")
+        self.assertEqual(h[0]["field"], "script")
+
+    def test_script_noop_no_history(self):
+        con = make_db()
+        ops.update_field(con, "scenes", 1, "script", "同一段")
+        n = len(ops.history_of(con, scene_id=1))
+        ops.update_field(con, "scenes", 1, "script", "同一段")
+        self.assertEqual(len(ops.history_of(con, scene_id=1)), n)

@@ -18,6 +18,7 @@ import { initAudit, onPainted as auditOnPainted } from './audit.js';
 import { bindAuditBtn, toggleAuditPanel, closeAuditPanel } from './auditpanel.js';
 import { initAiWrite, closeAiCards } from './aiwrite.js';
 import { openSceneDraft, closeDraftCards } from './draft.js';
+import { initScriptDrawer, openScriptDrawer, openScriptImport, scriptsOnRepaint } from './scriptdrawer.js';
 
 const PREFS_KEY = 'shotlist_prefs_v1';
 let prefs = loadPrefs();   // { wrap, hidden:{key:true=隐藏}, widths:{key:px} }
@@ -88,6 +89,9 @@ export async function renderScene(view, sceneNo) {
     allShots: () => (currentData ? allShots(currentData) : []),
     groupsMap: () => promptGroupsMap,
     reapply: () => { clearSel(); applyFilter(fctx); },
+  });
+  initScriptDrawer({
+    getScene: () => (currentData ? currentData.scene : null),
   });
   initAudit({ getData: () => currentData });   // refresh 注入为死件，批4 删
   initAiWrite({
@@ -211,6 +215,7 @@ function paintScene(view) {
   releaseComposer();               // 重绘前释放编辑面（防悬空 activeBox / 陈旧上下文写库；订阅与点外监听一并清）
   closeAiCards();                  // 重绘前收起 AI 预览卡（M4b-2）
   closeDraftCards();               // 重绘前收起草稿卡（M4b-4）
+  scriptsOnRepaint(data.scene.id); // 剧本抽屉：同场不扰，切场未钉住即关 / 钉住跟场
   clearSel();
   view.textContent = '';
   view.classList.toggle('wrap-off', !prefs.wrap);
@@ -304,9 +309,17 @@ function addBeatBar(withDraft) {
     const d = el('button', 'tool-btn add-beat dz-violet', '✦ 从台本出草稿…');
     d.title = '贴一段台本，AI 搭出节拍骨架 + 镜头行草稿（仅空场可用）';
     d.addEventListener('click', () => {
-      if (currentData) openSceneDraft(currentData.scene.id, refreshCurrentView);
+      if (currentData) openSceneDraft(currentData.scene.id, refreshCurrentView, currentData.scene.script || '');
     });
     bar.appendChild(d);
+    const sb2 = el('button', 'tool-btn', '台本');
+    sb2.title = '本场台本（浮动抽屉：查看 / 修订 / 复制）';
+    sb2.addEventListener('click', () => openScriptDrawer());
+    bar.appendChild(sb2);
+    const imp2 = el('button', 'tool-btn', '导入台本…');
+    imp2.title = '整本剧本切分导入（逐场勾选覆盖）';
+    imp2.addEventListener('click', () => openScriptImport());
+    bar.appendChild(imp2);
   }
   return bar;
 }
@@ -494,6 +507,10 @@ function viewTools() {
       paintScene(document.getElementById('view'));
     });
   };
+  const sb = el('button', 'tool-btn', '台本');
+  sb.title = '本场台本（浮动抽屉：查看 / 修订 / 复制）';
+  sb.addEventListener('click', () => openScriptDrawer());
+  bar.appendChild(sb);
   const ab = el('button', 'tool-btn audit-btn', '审计');
   ab.title = '审计问题清单（灯＝待处理；每次按设置跑）';
   ab.addEventListener('click', toggleAuditPanel);
@@ -501,7 +518,7 @@ function viewTools() {
   bar.appendChild(ab);
 
   const drawer = el('button', 'tool-btn vt-drawer', '场务 ⋯');
-  drawer.title = '场务：整理镜号 / 锁定本场 / 自动换行 / 列设置 / 痕迹';
+  drawer.title = '场务：整理镜号 / 锁定本场 / 自动换行 / 列设置 / 导入台本 / 痕迹';
   drawer.addEventListener('click', () => {
     const locked = !!currentData.scene.locked;
     openMenu(drawer, [
@@ -511,12 +528,14 @@ function viewTools() {
       { key: 'wrap', label: '自动换行', current: !!prefs.wrap },
       { key: 'cols', label: '列设置' },
       { sep: true },
+      { key: 'scriptImp', label: '导入台本…' },
       { key: 'hist', label: '痕迹' },
     ], (k) => {
       if (k === 'renum') doRenumber();
       else if (k === 'lock') doLockToggle();
       else if (k === 'wrap') setWrap(!prefs.wrap);
       else if (k === 'cols') openColsMenu(drawer);
+      else if (k === 'scriptImp') openScriptImport();
       else if (k === 'hist') toggleHistory(currentData.scene);
     });
   });

@@ -13,7 +13,7 @@ from core import db, fields
 TABLES = {
     "shots":  {"spec": fields.SHOT_FIELDS,  "skip_types": {"prompt"}},
     "beats":  {"spec": fields.BEAT_FIELDS,  "skip_types": set()},
-    "scenes": {"spec": fields.SCENE_FIELDS, "skip_types": set()},
+    "scenes": {"spec": fields.SCENE_FIELDS, "skip_types": set(), "extra": ["script"]},
 }
 
 
@@ -22,7 +22,9 @@ def write_keys(table):
     t = TABLES.get(table)
     if not t:
         return []
-    return [f["key"] for f in t["spec"] if f["type"] not in t["skip_types"]]
+    keys = [f["key"] for f in t["spec"] if f["type"] not in t["skip_types"]]
+    keys.extend(t.get("extra", []))   # 表级例外（scenes.script＝台本：可写，但不进字段面/表头）
+    return keys
 
 
 def record_history(con, scene_id, entity, entity_id, field, old_value, new_value, source="manual"):

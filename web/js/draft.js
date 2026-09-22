@@ -23,12 +23,13 @@ function closeScene() {
 
 // ── 场次草稿卡 ──────────────────────────────────────────────
 
-export function openSceneDraft(sceneId, onApplied) {
+export function openSceneDraft(sceneId, onApplied, prescript) {
   if (!card) buildCard();
   floatEnter('draft', closeScene);   // 互斥：场次草稿 ↔ 组级初稿（开新关旧，L6）
   card.hidden = false;
   card._sceneId = sceneId;
   card._onApplied = onApplied;
+  card._prescript = prescript || '';
   card._jobId = null;
   showForm();
 }
@@ -50,6 +51,7 @@ function showForm() {
   ta.placeholder = '例：\n内景 旧公寓客厅 深夜\n男人坐在沙发上反复解锁手机……';
   ta.spellcheck = false;
   if (card._lastScript) ta.value = card._lastScript;
+  else if (card._prescript) ta.value = card._prescript;
   b.appendChild(ta);
   const bar = el('div', 'as-bar');
   const go = el('button', 'tool-btn small dz-violet', '生成草稿');

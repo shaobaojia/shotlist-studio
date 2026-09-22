@@ -84,6 +84,7 @@ function ensureDrawer() {
       const t = e.target;
       if (t && t.closest && t.closest('.menu')) return;                       // 菜单自管优先
       const inDrawer = !!(t && dr.el.contains(t));
+      if (!inDrawer && t && t.closest && t.closest('.drawer')) return;        // 焦点在别的抽屉：让它家处理
       if (!inDrawer && t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
         return;                                                                 // 别处编辑中：不介入（编辑面内由 ta 自管）
       }
@@ -510,7 +511,7 @@ function onOutside(e) {
   const t = e.target;
   if (!dr || !dr.isOpen()) return;
   if (menuEl() && menuEl().contains(t)) return;
-  if (t.closest && t.closest('.float-card:not(.scene-freeze), #block-manager, #draft-card, #hist-panel, #sel-bar, .ai-diff, [id^="ai-"], .prompt-box, .cell-prompt')) {
+  if (t.closest && t.closest('.float-card:not(.scene-freeze), .drawer, #block-manager, #draft-card, #hist-panel, #sel-bar, .ai-diff, [id^="ai-"], .prompt-box, .cell-prompt')) {
     return;                                     // 浮卡/菜单/块库管理/AI 卡/详情预览/提示词列：不算点外（场头不豁免）
   }
   if (dr.isPinned()) return;                    // 钉住：不关
