@@ -175,6 +175,7 @@ function renderDrawer(mode) {
   if (S.toggleBtn) S.toggleBtn.textContent = (mode === 'edit') ? '💾 保存' : '编辑';
   detachEditor();
   d.bodyEl.textContent = '';
+  d.bodyEl.scrollTop = 0;
   if (mode === 'edit') {
     const box = buildEditorDom(d.bodyEl, g);
     S.ta = box.ta;
