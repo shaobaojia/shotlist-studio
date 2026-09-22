@@ -5,6 +5,7 @@ Python 3 stdlib 零依赖 + SQLite + 原生 HTML/JS（无构建链）。
 
 - DESIGN.md —— 设计文档（v0.1.1，已冻结 · 动工依据）
 - AGENTS.md —— 交接备忘录（状态权威）
+- AUDIT-M3.md · AUDIT-M4.md —— 审计报告（M3 子系统 / M4 全链；含修复台账与「刻意边界」清单）
 - 需求池.md —— 新想法 /「先凑合」都记这里
 - server/ web/ scripts/ recipes/ references/ —— 代码与资产
 - data/ —— 运行数据（DB / 快照 / 导出件），不入 git
