@@ -324,10 +324,12 @@ export async function batchWrite(ops, label, opts) {
   const results = ret.results || [];
   const errs = results.filter((r) => r.error);
   const back = [];
+  const tmap = {};
+  for (const o of ops) tmap[o.id + '|' + o.field] = o.table || table;   // 逐项写入表回读（P0·F2-B1）
   for (const r of results.filter((x) => x.changed)) {
     const s = resolve(r);
     if (!s) continue;
-    back.push({ table: table, id: r.id, field: r.field,
+    back.push({ table: tmap[r.id + '|' + r.field] || table, id: r.id, field: r.field,
                 value: (r.restore != null) ? r.restore : (s[r.field] == null ? '' : String(s[r.field])) });
     s[r.field] = vmap[r.id + '|' + r.field];
     refresh(s, r);
