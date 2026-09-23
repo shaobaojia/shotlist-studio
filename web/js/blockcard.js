@@ -6,10 +6,10 @@
 // M5d-4：随面板入场后再浮现（防「块库先于面板」）；贴紧时面板去左/上投影（bc-under）。
 import { el } from './ui.js';
 import {
-  ensureBlocks, blocksData, onBlocksChange, blockMatch, catName, sortedBlocks,
+  ensureBlocks, blocksData, onBlocksChange, blockMatch, sortedBlocks,
 } from './blocks.js';
-import { renderOrg } from './bc-org.js';
-import { attachRowMenu, attachSecMenu, attachBlankMenu } from './bc-ops.js';
+import { renderList } from './bc-list.js';
+import { attachBlankMenu } from './bc-ops.js';
 
 const SLIVER = 12;                     // 收起时露出的边宽（左缘 / 上缘）
 const OVERLAP = 30;                    // 常态压在面板底下的进深
@@ -34,7 +34,6 @@ let underApplied = null;               // 镜像：'none' | 'left' | 'up'（对�
 const mem = { w: DEF_W, h: DEF_H, open: false };
 let filter = 'all';
 let query = '';
-let orgMode = false;                      // 整理态（M5e：管理器退役后收进卡片）
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function lsLoad() { try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}') || {}; } catch (e) { return {}; } }
@@ -85,16 +84,6 @@ function buildList(host) {
   head.appendChild(el('span', 'bc-title', '块库'));
   const count = el('span', 'bc-count', '');
   head.appendChild(count);
-  const orgBtn = el('button', 'panel-btn bc-mng', '整理');
-  const syncOrgBtn = () => {                        // 卡头在 draw 之外控制，须每次重绘同步（否则态变钮不变）
-    orgBtn.textContent = orgMode ? '✓ 完成' : '整理';
-    orgBtn.title = orgMode ? '退出整理（回日常：点块即插入）' : '整理块库（改 / 删 / 序 / 换类 / 新建；块行右键更多）';
-    orgBtn.classList.toggle('bc-org-on', orgMode);
-  };
-  orgBtn.addEventListener('mousedown', (e) => e.preventDefault());
-  orgBtn.addEventListener('click', (e) => { e.stopPropagation(); orgMode = !orgMode; draw(); });
-  syncOrgBtn();
-  head.appendChild(orgBtn);
   host.appendChild(head);
 
   const filters = el('div', 'bc-filters');
@@ -116,12 +105,10 @@ function buildList(host) {
   }
   function foldSave() { try { localStorage.setItem(LS_FOLD, JSON.stringify(Array.from(folded))); } catch (e) { /* ignore */ } }
 
-  // 卡片 API（菜单 / 整理态共用）：refresh=重绘；insert=插入到编辑面；setMode/isOrg=姿态；foldAll=全收/全展
+  // 卡片 API（列表 / 菜单共用）：refresh=重绘；insert=插入到编辑面；foldAll=全收/全展
   const ctx = {
     refresh: () => draw(),
     insert: (t, b) => { if (insertCb) insertCb(t, b); },
-    setMode: (m) => { orgMode = (m === 'org'); draw(); },
-    isOrg: () => orgMode,
     folded: folded,
     foldSave: foldSave,
     list: list,
@@ -136,30 +123,13 @@ function buildList(host) {
       draw();
     },
   };
-  attachBlankMenu(ctx, list);                          // 列表空白右键：新建块 / 新分类 / 收起展开 / 整理开关
+  attachBlankMenu(ctx, list);                          // 列表空白右键：新建块 / 新分类 / 全部收起展开
 
   function mkChip(key, label) {
     const c = el('span', 'bc-fchip' + (filter === key ? ' on' : ''), label);
     c.addEventListener('mousedown', (e) => e.preventDefault());
     c.addEventListener('click', () => { filter = key; draw(); });
     return c;
-  }
-
-  function buildRow(b) {
-    const row = el('div', 'bc-row');
-    row.style.setProperty('--bc-cat', catColor(b.category_id));
-    if (b.pinned) row.appendChild(el('span', 'bc-star', '★'));
-    const txt = String(b.text == null ? '' : b.text).replace(/\s+/g, ' ').trim();
-    row.appendChild(el('div', 'bc-text', txt || '（空）'));
-    const full = String(b.text == null ? '' : b.text);
-    row.title = catName(b.category_id) + '\n' + full.slice(0, 240) + (full.length > 240 ? '…' : '')
-      + '\n\n点击插入到光标处（即插即固化）';
-    row.addEventListener('mousedown', (e) => e.preventDefault());     // 保编辑面焦点
-    row.addEventListener('click', () => {
-      if (insertCb) insertCb(String(b.text == null ? '' : b.text), b);
-    });
-    attachRowMenu(ctx, row, b);                        // 块行右键：插入 / 复制 / 置顶 / 移动 / 编辑 / 删除
-    return row;
   }
 
   // 分段：按分类序（未分类殿后），键 'c<id>' / 'none'
@@ -174,7 +144,7 @@ function buildList(host) {
     return secs;
   }
 
-  // 「全部收起/展开」小控件（日常态与整理态共用）
+  // 「全部收起/展开」小控件
   function addFoldAll(secs) {
     const anyOpen = secs.some((s) => !folded.has(s.key));
     const fa = el('span', 'bc-foldall', anyOpen ? '收起全部' : '展开全部');
@@ -188,7 +158,6 @@ function buildList(host) {
   }
 
   function draw() {
-    syncOrgBtn();
     filters.textContent = '';
     filters.appendChild(mkChip('all', '全部'));
     filters.appendChild(mkChip('pin', '★'));
@@ -199,36 +168,14 @@ function buildList(host) {
     let arr = sortedBlocks();
     if (filter === 'pin') arr = arr.filter((b) => b.pinned);
     if (query) arr = arr.filter((b) => blockMatch(b, query));
-    if (orgMode) {                       // 整理态：分组渲染（空类也显，供新建 / 拖放）
-      addFoldAll(sectionsOf(d, arr));
-      renderOrg(ctx, list, arr, { showEmpty: !query && filter === 'all', forceOpen: !!query });
+    if (query) {                                       // 搜索态＝平铺（平铺下不适用拖拽）
+      if (!arr.length) list.appendChild(el('div', 'bc-empty', '没有匹配的块'));
+      renderList(ctx, list, arr, { flat: true });
       return;
     }
-    if (!arr.length) {
-      list.appendChild(el('div', 'bc-empty', d.blocks.length ? '没有匹配的块' : '块库为空 —— 点「整理」添加常用块'));
-      return;
-    }
-    if (query) { for (const b of arr) list.appendChild(buildRow(b)); return; }   // 搜索态＝平铺
-    const secs = sectionsOf(d, arr);
-    addFoldAll(secs);
-    for (const sec of secs) {
-      const closed = folded.has(sec.key);
-      const sh = el('div', 'bc-sechead');
-      sh.appendChild(el('span', 'bc-secarrow', closed ? '▸' : '▾'));
-      const dot = el('span', 'bc-secdot');
-      dot.style.setProperty('--bc-cat', catColor(sec.cid));
-      sh.appendChild(dot);
-      sh.appendChild(el('span', 'bc-secname', sec.name));
-      sh.appendChild(el('span', 'bc-seccount', String(sec.items.length)));
-      attachSecMenu(ctx, sh, sec.cid);                 // 段头右键：＋块 / 改名 / 上移 / 下移 / 删类
-      sh.addEventListener('mousedown', (e) => e.preventDefault());
-      sh.addEventListener('click', () => {
-        if (closed) folded.delete(sec.key); else folded.add(sec.key);
-        foldSave(); draw();
-      });
-      list.appendChild(sh);
-      if (!closed) for (const b of sec.items) list.appendChild(buildRow(b));
-    }
+    addFoldAll(sectionsOf(d, arr));
+    if (!d.blocks.length) list.appendChild(el('div', 'bc-empty', '块库为空 —— 底栏「＋新建块」或右键新建'));
+    renderList(ctx, list, arr, { showEmpty: true, drag: filter === 'all' });
   }
 
   return draw;

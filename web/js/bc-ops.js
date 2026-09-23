@@ -123,11 +123,10 @@ export function draftBlockInline(ctx, sec, cat) {
   });
 }
 
-// 入口：进整理态并在目标分类里开草稿行（段头右键 / 底栏「＋新建块」共用）
+// 入口：在目标分类里开草稿行（供段头右键 / 底栏「＋新建块」）——不切任何模式
 export function newBlockInCat(ctx, cat) {
   const key = cat ? 'c' + cat.id : 'none';
-  if (ctx.folded.has(key)) { ctx.folded.delete(key); ctx.foldSave(); }
-  ctx.setMode('org');
+  if (ctx.folded.has(key)) { ctx.folded.delete(key); ctx.foldSave(); ctx.refresh(); }
   requestAnimationFrame(() => {
     const sec = ctx.list.querySelector('.bco-sec[data-catkey="' + (cat ? cat.id : 'none') + '"]');
     if (sec) { sec.scrollIntoView({ block: 'nearest' }); draftBlockInline(ctx, sec, cat); }
@@ -136,21 +135,19 @@ export function newBlockInCat(ctx, cat) {
 
 export function newBlockUncat(ctx) { newBlockInCat(ctx, null); }
 
-// 入口：进整理态并打开某块的编辑器（「编辑块…」）
+// 入口：就地打开某块的编辑器（供「编辑块…」）——不切任何模式
 export function startEditBlock(ctx, id) {
   const d = blocksData();
   const b = d && d.blocks ? d.blocks.find((x) => x.id === id) : null;
   if (b) {
     const key = b.category_id == null ? 'none' : 'c' + b.category_id;
-    if (ctx.folded.has(key)) { ctx.folded.delete(key); ctx.foldSave(); }
+    if (ctx.folded.has(key)) { ctx.folded.delete(key); ctx.foldSave(); ctx.refresh(); }
   }
-  if (ctx.isOrg()) ctx.refresh(); else ctx.setMode('org');
   requestAnimationFrame(() => {
     const row = ctx.list.querySelector('.bco-row[data-id="' + id + '"]');
     if (!row) return;
     row.scrollIntoView({ block: 'center' });
-    const t = row.querySelector('.bco-text');
-    if (t) t.click();
+    if (row._startEdit) row._startEdit();
   });
 }
 
@@ -218,14 +215,11 @@ export function attachBlankMenu(ctx, listEl) {
       { sep: true },
       { key: 'collapse', label: '全部收起' },
       { key: 'expand', label: '全部展开' },
-      { sep: true },
-      { key: 'org', label: ctx.isOrg() ? '✓ 完成整理' : '打开整理' },
     ], (k) => {
       if (k === 'nb') newBlockUncat(ctx);
       else if (k === 'nc') newCatInline(ctx, listEl);
       else if (k === 'collapse') ctx.foldAll(false);
       else if (k === 'expand') ctx.foldAll(true);
-      else if (k === 'org') ctx.setMode(ctx.isOrg() ? 'normal' : 'org');
     });
   });
 }

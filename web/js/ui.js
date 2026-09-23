@@ -76,3 +76,30 @@ export function durText(v) {
 export function isFloatTarget(t) {
   return !!(t && t.closest && t.closest('.float-card, .menu'));
 }
+
+
+// ── M5f：滚轮护栏 —— 面板 / 块库 / 菜单范围内，光标下没有任何「可消费本方向滚轮」的
+//    滚动层时吞掉滚轮事件，防止滚动链穿透到分镜表（实测三种泄漏：非滚动区链滚 /
+//    滚动到边界继续滚 / 块库边缘链滚）。内层能滚的场合一律放行，浏览器自己滚它。
+function wheelCanConsume(el0, dy) {
+  const oy = getComputedStyle(el0).overflowY;
+  if (oy !== 'auto' && oy !== 'scroll') return false;
+  const max = el0.scrollHeight - el0.clientHeight;
+  if (max <= 0) return false;
+  return dy < 0 ? el0.scrollTop > 0 : el0.scrollTop < max - 1;
+}
+export function installWheelGuards() {
+  if (installWheelGuards.__on) return;
+  installWheelGuards.__on = true;
+  document.addEventListener('wheel', (ev) => {
+    const t = ev.target;
+    if (!(t instanceof Element) || !ev.deltaY) return;
+    if (!t.closest('.drawer, .bcard, .menu')) return;
+    let n = t;
+    while (n && n !== document.documentElement) {
+      if (wheelCanConsume(n, ev.deltaY)) return;     // 有可消费的内层 → 放行
+      n = n.parentElement;
+    }
+    ev.preventDefault();                             // 无处可滚 → 吞掉，防穿到分镜表
+  }, { passive: false, capture: true });
+}

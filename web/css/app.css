@@ -807,7 +807,6 @@ table.shots tr.shot.cover-off:hover td { opacity: 1; }
 .bc-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--rule); }
 .bc-title { font-size: 12px; font-weight: 700; color: var(--head); }
 .bc-count { font-size: 10.5px; color: var(--dim); margin-right: auto; }
-.bc-mng { font-size: 10.5px; padding: 2px 7px; }
 .bc-filters { display: flex; flex-wrap: wrap; gap: 4px; padding: 7px 10px 4px; }
 .bc-fchip { font-size: 10.5px; color: var(--ink2); border: 1px solid var(--rule); background: var(--card);
   border-radius: 999px; padding: 1px 8px; cursor: pointer; }
@@ -872,7 +871,7 @@ table.shots tr.shot.cover-off:hover td { opacity: 1; }
   padding: 4px 10px 3px 7px; background: var(--card); border-bottom: 1px solid var(--rule);
   font-size: 10.5px; color: var(--ink2); cursor: pointer; user-select: none; }
 .bc-sechead:hover { color: var(--accent); }
-.bc-secarrow { width: 10px; font-size: 10px; color: #b3aa97; }
+.bc-secarrow { width: 13px; font-size: 13px; color: #8a7f68; text-align: center; line-height: 1; }
 .bc-secdot { width: 7px; height: 7px; border-radius: 50%; background: var(--bc-cat, var(--rule)); flex: none; }
 .bc-secname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: .04em; }
 .bc-seccount { color: #b3aa97; font-size: 10px; }
@@ -890,16 +889,20 @@ table.shots tr.shot.cover-off:hover td { opacity: 1; }
 .pd-stat-sel { color: var(--accent); font-weight: 600; }
 
 /* ── M5e：块库整理态 + 右键菜单（管理器退役）── */
-.bc-mng.bc-org-on { background: #2e7d32; border-color: #2e7d32; }
-.bc-mng.bc-org-on:hover { background: transparent; color: #2e7d32; }
-.bco-rows { min-height: 6px; }
+.bco-rows { min-height: 22px; }        /* 空组＝可见的拖放落区 */
 .bco-rows.drop-end { background: rgba(188, 63, 44, .06); outline: 1px dashed rgba(188, 63, 44, .45); outline-offset: -2px; border-radius: 5px; }
-.bco-row { display: flex; align-items: flex-start; gap: 5px; padding: 3px 9px 3px 5px; border-top: 1px dashed rgba(105, 88, 58, .14); }
-.bco-row:first-child { border-top: none; }
+.bco-row { position: relative; display: flex; align-items: flex-start; gap: 5px;
+  padding: 5px 9px 5px 14px; margin-bottom: 4px; border: 1px solid var(--rule);
+  border-radius: 6px; background: var(--card); box-shadow: var(--shadow-mini); cursor: pointer; }
+.bco-row:hover { border-color: rgba(188, 63, 44, .45); box-shadow: 0 3px 8px rgba(60, 40, 20, .15); }
+.bco-row::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+  border-radius: 6px 0 0 6px; background: var(--bc-cat, var(--rule)); }
 .bco-grip { color: var(--dim); cursor: grab; user-select: none; letter-spacing: -1px; font-size: 11px; flex: none; }
+.bco-grip:active { cursor: grabbing; }
 .bco-star { cursor: pointer; color: #b3aa97; font-size: 12px; flex: none; }
 .bco-star.on { color: #c99a2e; }
-.bco-text { flex: 1; min-width: 0; cursor: text; overflow-wrap: anywhere; }
+.bco-text { flex: 1; min-width: 0; font-size: 11px; color: var(--ink2); line-height: 1.5; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .bco-text:hover { color: var(--accent); }
 .bco-x { color: var(--dim); cursor: pointer; font-size: 11px; flex: none; }
 .bco-x:hover { color: var(--accent); }
@@ -912,6 +915,7 @@ table.shots tr.shot.cover-off:hover td { opacity: 1; }
 .bco-row.drop-above { box-shadow: inset 0 2px 0 rgba(188, 63, 44, .75); }
 .bco-row.drop-below { box-shadow: inset 0 -2px 0 rgba(188, 63, 44, .75); }
 .bco-row.bco-dragging { opacity: .45; }
+.bc-sechead.drop-end { background: rgba(188, 63, 44, .09); }
 .bco-foot { display: flex; align-items: center; gap: 6px; padding: 6px 9px 4px; margin-top: 4px; border-top: 1px dashed rgba(105, 88, 58, .2); }
 .bco-fbtn { font-size: 11px; border: 1px solid rgba(105, 88, 58, .35); border-radius: 4px; padding: 1px 8px; color: var(--ink2); cursor: pointer; }
 .bco-fbtn:hover { border-color: var(--accent); color: var(--accent); }
