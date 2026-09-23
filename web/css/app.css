@@ -113,6 +113,8 @@ table.shots th {
 /* 平铺（.holdhead）：表头冻结在吸顶区正下方；代价＝此表放弃内部横滚（窄屏整页横滚） */
 .table-wrap.holdhead { overflow: visible; }
 .table-wrap.holdhead table.shots th { top: calc(var(--topbar-h, 45px) + var(--freeze-h, 140px)); z-index: 5; }
+/* 滚动定位目标避开吸顶区（topbar+freeze）：跳镜/新建闪烁不藏进吸顶下面（M5h，scroll-margin 不影响静态布局） */
+tr.shot, section.beat { scroll-margin-top: calc(var(--topbar-h, 45px) + var(--freeze-h, 140px) + 10px); }
 table.shots th.sortable { cursor: pointer; }
 table.shots th.sortable:hover { color: var(--accent); }
 table.shots th .arrow { margin-left: 4px; font-size: 10px; color: var(--accent); }
