@@ -67,14 +67,21 @@ def scene(m, q):
 
 
 def history(m, q):
-    sid = (q.get("scene_id") or [None])[0]
+    sid_raw = (q.get("scene_id") or [None])[0]
+    sid = None
+    if sid_raw not in (None, ""):
+        try:
+            sid = int(sid_raw)
+        except (TypeError, ValueError):
+            return {"error": "参数不完整（scene_id）"}, 400   # 非数字 → 400（不再 500；P0·S1-B3）
     try:
-        limit = min(500, max(1, int((q.get("limit") or ["100"])[0])))
-    except ValueError:
-        limit = 100
+        limit = int((q.get("limit") or [str(ops.HISTORY_LIMIT_DEFAULT)])[0])
+    except (TypeError, ValueError):
+        limit = ops.HISTORY_LIMIT_DEFAULT
+    limit = min(ops.HISTORY_LIMIT_MAX, max(1, limit))
     con = db.connect()
     try:
-        return {"history": ops.history_of(con, int(sid) if sid else None, limit)}, 200
+        return {"history": ops.history_of(con, sid, limit)}, 200
     finally:
         con.close()
 
@@ -87,17 +94,9 @@ def update(m, body, q):
     value = (body or {}).get("value")
     if table not in ("shots", "beats", "scenes") or not isinstance(row_id, int) or not field:
         return {"error": "参数不完整（table/id/field）"}, 400
-    if table == "scenes" and field == "scene_no":
-        value = ("" if value is None else str(value)).strip()
-        if not value:
-            return {"error": "场号不能为空"}, 400
+    # 场号 trim/非空/唯一校验已下沉 ops._apply_field（update / batch 同源；P0·S1-B1）
     con = db.connect(rw=True)
     try:
-        if table == "scenes" and field == "scene_no":
-            dup = con.execute("SELECT id FROM scenes WHERE scene_no=? AND id<>?",
-                              (value, row_id)).fetchone()
-            if dup:
-                return {"error": "场号已存在：%s" % value}, 400
         row, changed = ops.update_field(con, table, row_id, field,
                                         "" if value is None else str(value))
         return {"ok": True, "changed": changed, "row": row}, 200

@@ -401,5 +401,34 @@ class TestDeleteGuards(unittest.TestCase):
                 self.assertIn("table", res["error"])
 
 
+class TestHistoryParams(unittest.TestCase):
+    """history 参数守卫（P0·S1-B3）：非数字 scene_id → 400（不再 500），且不触达连接。"""
+
+    def test_scene_id_not_int_400(self):
+        with mock.patch.object(core_db, "connect",
+                               side_effect=AssertionError("坏请求触达了连接")):
+            res, code = api_handlers.history(None, {"scene_id": ["abc"]})
+        self.assertEqual(code, 400)
+        self.assertIn("scene_id", res["error"])
+
+    def test_scene_id_zero_passed_through(self):
+        con = mock.MagicMock()
+        with mock.patch.object(core_db, "connect", return_value=con):
+            res, code = api_handlers.history(None, {"scene_id": ["0"]})
+        self.assertEqual(code, 200)
+        q, args = con.execute.call_args[0]
+        self.assertIn("WHERE scene_id", q)
+        self.assertEqual(args[0], 0)
+
+    def test_no_scene_id_full_library(self):
+        con = mock.MagicMock()
+        with mock.patch.object(core_db, "connect", return_value=con):
+            res, code = api_handlers.history(None, {})
+        self.assertEqual(code, 200)
+        q, args = con.execute.call_args[0]
+        self.assertNotIn("WHERE", q)
+        self.assertEqual(args, [100])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

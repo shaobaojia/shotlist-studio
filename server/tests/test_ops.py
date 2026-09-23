@@ -78,6 +78,45 @@ class TestUpdateField(unittest.TestCase):
         self.assertEqual(con.execute("SELECT director_note FROM shots WHERE id=1").fetchone()["director_note"], "丙")
 
 
+class TestSceneNoGuards(unittest.TestCase):
+    """场号域层校验（P0·S1-B1）：update / batch 同源——trim + 非空 + 唯一。"""
+
+    def test_update_rejects_empty_scene_no(self):
+        con = make_db()
+        with self.assertRaises(ValueError) as cm:
+            ops.update_field(con, "scenes", 1, "scene_no", "   ")
+        self.assertIn("场号不能为空", str(cm.exception))
+
+    def test_update_rejects_dup_scene_no(self):
+        con = make_db()
+        con.execute("INSERT INTO scenes (film_id, scene_no, title) VALUES (1, 's020', '二')")
+        con.commit()
+        with self.assertRaises(ValueError) as cm:
+            ops.update_field(con, "scenes", 1, "scene_no", "s020")
+        self.assertIn("场号已存在", str(cm.exception))
+
+    def test_update_scene_no_trims_and_writes(self):
+        con = make_db()
+        row, changed = ops.update_field(con, "scenes", 1, "scene_no", "  s010A  ")
+        self.assertTrue(changed)
+        self.assertEqual(row["scene_no"], "s010A")
+
+    def test_batch_scene_no_same_guards(self):
+        con = make_db()
+        con.execute("INSERT INTO scenes (film_id, scene_no, title) VALUES (1, 's020', '二')")
+        con.commit()
+        res = ops.batch_update(con, [
+            {"table": "scenes", "id": 1, "field": "scene_no", "value": ""},
+            {"table": "scenes", "id": 1, "field": "scene_no", "value": "s020"},
+        ])
+        self.assertEqual(res["changed"], 0)
+        self.assertIn("场号不能为空", res["results"][0]["error"])
+        self.assertIn("场号已存在", res["results"][1]["error"])
+        res2 = ops.batch_update(con, [{"table": "scenes", "id": 1, "field": "scene_no", "value": "s010B"}])
+        self.assertEqual(res2["changed"], 1)
+        self.assertEqual(con.execute("SELECT scene_no FROM scenes WHERE id=1").fetchone()["scene_no"], "s010B")
+
+
 class TestRenumber(unittest.TestCase):
     def test_renumber_by_position(self):
         con = make_db()

@@ -5,6 +5,7 @@ import os
 import re
 import sqlite3
 import string
+import threading
 from datetime import date, datetime
 from pathlib import Path
 
@@ -44,32 +45,49 @@ def _scene_of(con, table, row_id):
 
 SNAPSHOT_RETAIN_DAYS = 30
 
+# 痕迹接口配额（单源：接口层只做类型解析；P0·S1-P2）
+HISTORY_LIMIT_DEFAULT = 100
+HISTORY_LIMIT_MAX = 500
+
+# 每日快照：并发锁 + 进程内「今日已做」幂等键（P0·S1-B2）
+_snapshot_lock = threading.Lock()
+_snapshot_done = None   # (src, root, ymd)：做完才置位；免每次写连接的 stat+glob
+
 
 def ensure_daily_snapshot(db_path=None, snap_root=None):
     """每日快照：当天首次写操作前整库备份一份（幂等，已存在则跳过）。
     用 SQLite 备份接口落 .tmp 再原子改名——不裸拷 live 文件（避免拷到事务半写态），
-    中断只留 .tmp、不留半截正式备份；顺带清理超过 SNAPSHOT_RETAIN_DAYS 天的旧档。"""
+    中断只留 .tmp、不留半截正式备份；顺带清理超过 SNAPSHOT_RETAIN_DAYS 天的旧档。
+    并发安全：锁内复查 + tmp 名带 pid（P0·S1-B2）；进程内「今日已做」免重复 stat+glob。"""
+    global _snapshot_done
     src = Path(db_path) if db_path else db.DB_PATH
     root = Path(snap_root) if snap_root else src.parent / "snapshots" / "daily"
     if not src.exists():
         return None
+    key = (str(src), str(root), date.today().strftime("%Y%m%d"))
+    if _snapshot_done == key:
+        return None
     root.mkdir(parents=True, exist_ok=True)
-    dest = root / ("studio-%s.db" % date.today().strftime("%Y%m%d"))
+    dest = root / ("studio-%s.db" % key[2])
     made = None
-    if not dest.exists():
-        tmp = root / (dest.name + ".tmp")
-        src_con = sqlite3.connect("file:%s?mode=ro" % src, uri=True)
-        try:
-            dst_con = sqlite3.connect(str(tmp))
+    with _snapshot_lock:
+        if _snapshot_done == key:   # 等锁期间已被别的线程做完
+            return None
+        if not dest.exists():
+            tmp = root / (dest.name + ".%d.tmp" % os.getpid())
+            src_con = sqlite3.connect("file:%s?mode=ro" % src, uri=True)
             try:
-                src_con.backup(dst_con)
+                dst_con = sqlite3.connect(str(tmp))
+                try:
+                    src_con.backup(dst_con)
+                finally:
+                    dst_con.close()
             finally:
-                dst_con.close()
-        finally:
-            src_con.close()
-        os.replace(tmp, dest)
-        made = str(dest)
-    _prune_snapshots(root)
+                src_con.close()
+            os.replace(tmp, dest)
+            made = str(dest)
+        _prune_snapshots(root)
+        _snapshot_done = key
     return made
 
 
@@ -134,13 +152,29 @@ def _guarded_set(con, table, field, row_id, old, value):
     return cur.rowcount > 0
 
 
+def _check_field_value(con, table, row_id, field, value):
+    """per-field 域层校验（update / batch 同源；P0·S1-B1）：返回规整后的值。
+    场号：trim + 非空 + 唯一（唯一性检查与写入同连接、同事务收口）。"""
+    if table == "scenes" and field == "scene_no":
+        v = ("" if value is None else str(value)).strip()
+        if not v:
+            raise ValueError("场号不能为空")
+        dup = con.execute("SELECT id FROM scenes WHERE scene_no=? AND id<>?",
+                          (v, row_id)).fetchone()
+        if dup:
+            raise ValueError("场号已存在：%s" % v)
+        return v
+    return value
+
+
 def _apply_field(con, table, row_id, field, value, source="manual"):
-    """单字段更新（不 commit）：白名单校验 → 写行 → 记痕迹。返回 (row, changed)。"""
+    """单字段更新（不 commit）：白名单校验 → 域层值校验 → 写行 → 记痕迹。返回 (row, changed)。"""
     if field not in write_keys(table):
         raise ValueError("字段不可写：%s.%s" % (table, field))
     row = con.execute("SELECT * FROM %s WHERE id=?" % table, (row_id,)).fetchone()
     if not row:
         raise ValueError("行不存在：%s #%s" % (table, row_id))
+    value = _check_field_value(con, table, row_id, field, value)
     old = row[field]
     if (old if old is not None else "") == (value if value is not None else ""):
         return dict(row), False
@@ -398,10 +432,10 @@ def delete_shot(con, shot_id):
     return {"id": shot_id, "shot_no": row["shot_no"]}
 
 
-def history_of(con, scene_id=None, limit=100):
+def history_of(con, scene_id=None, limit=HISTORY_LIMIT_DEFAULT):
     q = "SELECT * FROM history"
     args = []
-    if scene_id:
+    if scene_id is not None:
         q += " WHERE scene_id=?"
         args.append(scene_id)
     q += " ORDER BY id DESC LIMIT ?"
