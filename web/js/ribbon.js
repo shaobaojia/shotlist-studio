@@ -122,6 +122,7 @@ export function buildRibbon(data, shots) {
     segs.push({ i0, i1, v: numOf(b.mood_temp), firstId: arr[0].id, name: b.name || ('节拍' + b.beat_no) });
   });
   const hasMood = segs.some((t) => t.v != null);
+  if (hasMood && !ST.mood) { ST.mood = true; save(); }   // 有数据＝自动显示（切场即出）
   const mx = Math.max(10, ...segs.map((t) => (t.v == null ? 0 : t.v)));
   let svg = null, pHalo = null, pMain = null;
   if (hasMood) {
@@ -175,8 +176,8 @@ export function buildRibbon(data, shots) {
       const dot = p.t._dot;
       if (dot) { dot.setAttribute('cx', p.x); dot.setAttribute('cy', p.y); }
     }
-    svg.setAttribute('height', String(ST.h));
-    svg.setAttribute('width', String(Math.max(1, Math.round(inner.offsetWidth || 1))));
+    svg.setAttribute('height', String(ST.h));   // 宽度走 CSS 100%（build 时 offsetWidth=0，数值覆盖会致 1px 宽→曲线被裁）
+    if (!svg.style.width) svg.style.width = '100%';
   }
 
   // ── 布局 ──
