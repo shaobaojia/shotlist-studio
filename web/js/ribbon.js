@@ -332,7 +332,7 @@ export function buildRibbon(data, shots) {
 
   // ── 底栏（三开关居中对齐、折叠态隐藏）──
   const bar = el('div', 'dk-bar');
-  const caret = el('span', 'dk-caret', ST.open ? '▾' : '▴');
+  const caret = el('span', 'dk-caret', ST.open ? '▴' : '▾');
   bar.appendChild(caret);
   bar.appendChild(el('span', 'dk-label', '挂件带'));
   const unitEl = el('span', 'dk-unit', '轴·镜号');
@@ -360,7 +360,7 @@ export function buildRibbon(data, shots) {
   bar.addEventListener('click', () => {
     ST.open = !ST.open;
     root.dataset.open = ST.open ? '1' : '0';
-    caret.textContent = ST.open ? '▾' : '▴';
+    caret.textContent = ST.open ? '▴' : '▾';
     save();
     syncMoodHint();
   });
