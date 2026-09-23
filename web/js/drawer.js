@@ -265,6 +265,7 @@ export function createDrawer(opts) {
     addButton, addPinButton, addDockButton, addCloseButton,
     dockRight: () => applyDock('right'),
     dockBottom: () => applyDock('bottom'),
+    getDock: () => st.dock,
     saveState,
   };
 }

@@ -5,9 +5,9 @@ import { api } from './api.js';
 import { el, toast, growTextarea, durText } from './ui.js';
 import { openMenu, menuEl } from './menu.js';
 import { recordUndo, undo as globalUndo } from './edit.js';
-import { buildShelf, storeAsBlock, byPosition } from './blocks.js';
+import { storeAsBlock, byPosition } from './blocks.js';
+import { initBlockCard, cardLayout, cardSetActive, cardSetInsert } from './blockcard.js';
 import { writeClipboard } from './clipboard.js';
-import { openManager } from './blockman.js';
 import { aiTextMenu } from './aiwrite.js';
 import { openPromptDraft } from './draft.js';
 import { createDrawer } from './drawer.js';
@@ -62,6 +62,7 @@ function ensureDrawer() {
     onOutside,
     onClose: onDrawerClosed,
   });
+  initBlockCard(dr);
   dr.addDockButton('bottom');
   dr.addDockButton('right');
   dr.addPinButton();
@@ -146,6 +147,8 @@ export function releaseComposer() {
 
 function onDrawerClosed() {
   detachEditor();
+  clearCover();
+  cardSetActive(false);
   S.shotId = null;
   S.s = null;
   S.mode = 'edit';
@@ -177,16 +180,16 @@ function renderDrawer(mode) {
   detachEditor();
   d.bodyEl.textContent = '';
   d.bodyEl.scrollTop = 0;
+  d.bodyEl.appendChild(buildStatRow(s, g));
   if (mode === 'edit') {
     const box = buildEditorDom(d.bodyEl, g);
     S.ta = box.ta;
     S.original = box.ta.value;
-    const shelfCtl = buildShelf(box.shelf, {
-      onInsert: (text) => insertInto(box.ta, substitute(text, s, ctx.getData())),
-      openManager: (fid) => openManager(fid),
-      restoreFocus: () => focusTaSoft(),
+    cardSetInsert((text) => {
+      insertInto(box.ta, substitute(text, s, ctx.getData()));
+      focusTaSoft();
     });
-    S.unsub = shelfCtl ? shelfCtl.off : null;
+    cardSetActive(true);
     editorReset(box.ta);
     wireEditorEvents(box, s);
     growTextarea(box.ta, EDITOR_MIN_H);
@@ -195,8 +198,51 @@ function renderDrawer(mode) {
       try { box.ta.focus(); box.ta.setSelectionRange(n, n); } catch (e) { /* ignore */ }
     }, 0);
   } else {
+    cardSetActive(false);
     renderView(d.bodyEl, s, g);
   }
+  refreshCover();
+}
+
+// ── 覆盖高亮（B 聚焦降噪）：打开抽屉时，提示词覆盖的镜头行高亮、其余退噪 ──
+function coverIdsOf(s) {
+  const g = groupOf(s, ctx.groupsMap());
+  return (g && g.member_ids && g.member_ids.length) ? g.member_ids.slice() : [s.id];
+}
+
+function refreshCover() {
+  const on = !!(dr && dr.isOpen() && S.s);
+  const ids = on ? coverIdsOf(S.s) : null;
+  document.querySelectorAll('tr.shot').forEach((tr) => {
+    tr.classList.remove('cover', 'cover-off');
+    if (!on) return;
+    if (ids.indexOf(Number(tr.dataset.id)) !== -1) tr.classList.add('cover');
+    else tr.classList.add('cover-off');
+  });
+}
+
+function clearCover() {
+  document.querySelectorAll('tr.shot.cover, tr.shot.cover-off')
+    .forEach((tr) => tr.classList.remove('cover', 'cover-off'));
+}
+
+// 状态行（三段固定·头）：镜号 · 组/覆盖镜 · 字数
+function buildStatRow(s, g) {
+  const row = el('div', 'pd-stat');
+  const left = el('span');
+  const no = s.shot_no != null ? String(s.shot_no) : String(s.id);
+  left.appendChild(el('span', 'k', '镜 ' + no));
+  if (g && g.member_shots.length > 1) {
+    const n = groupOrdinal(g, ctx.getData());
+    left.appendChild(document.createTextNode(
+      ' · ' + (n ? '组' + n : '成组') + ' · 覆盖 ' + g.member_shots.length + ' 镜（' + g.member_shots.join(' / ') + '）'));
+  } else {
+    left.appendChild(document.createTextNode(' · 单镜'));
+  }
+  row.appendChild(left);
+  const text = (g && g.text) ? String(g.text) : '';
+  row.appendChild(el('span', 'pd-stat-r', text.trim() ? ('约 ' + text.length + ' 字') : '未写'));
+  return row;
 }
 
 function focusTaSoft() {
@@ -301,7 +347,7 @@ function buildEditorDom(bodyEl, g) {
   const ta = document.createElement('textarea');
   ta.className = 'hotbox-editor';
   ta.spellcheck = false;
-  ta.placeholder = '拼装提示词：点下方块库插入积木，或直接手写…';
+  ta.placeholder = '拼装提示词：点左侧块库插入积木，或直接手写…';
   ta.value = (g && g.text) ? g.text : '';
 
   const foot = el('div', 'hotbox-foot');
@@ -320,12 +366,10 @@ function buildEditorDom(bodyEl, g) {
   foot.appendChild(copyBtn);
   foot.appendChild(blockBtn);
 
-  const shelf = el('div', 'hotbox-shelf');
   box.appendChild(ta);
   box.appendChild(foot);
-  box.appendChild(shelf);
   bodyEl.appendChild(box);
-  return { ta: ta, draftBtn: draftBtn, saveBtn: saveBtn, copyBtn: copyBtn, blockBtn: blockBtn, shelf: shelf };
+  return { ta: ta, draftBtn: draftBtn, saveBtn: saveBtn, copyBtn: copyBtn, blockBtn: blockBtn };
 }
 
 // 编辑面事件接线（键处理 / 脚部按钮 / 右键菜单）
@@ -525,7 +569,7 @@ function onOutside(e) {
   const t = e.target;
   if (!dr || !dr.isOpen()) return;
   if (menuEl() && menuEl().contains(t)) return;
-  if (t.closest && t.closest('.float-card:not(.scene-freeze), .drawer, #block-manager, #draft-card, #hist-panel, #sel-bar, .ai-diff, [id^="ai-"], .prompt-box, .cell-prompt')) {
+  if (t.closest && t.closest('.float-card:not(.scene-freeze), .drawer, .bcard, #block-manager, #draft-card, #hist-panel, #sel-bar, .ai-diff, [id^="ai-"], .prompt-box, .cell-prompt')) {
     return;                                     // 浮卡/菜单/块库管理/AI 卡/详情预览/提示词列：不算点外（场头不豁免）
   }
   if (dr.isPinned()) return;                    // 钉住：不关
@@ -674,6 +718,7 @@ export function applyPromptGroups(list) {
   syncPromptCells();
   refreshAllPreviews();
   refreshDrawerSoft();
+  refreshCover();
   if (ctx.reapply) ctx.reapply();               // 筛选重评（「未写提示词」等）
 }
 

@@ -764,3 +764,62 @@ td.editing, .beat-action.editing, .kv-value.editing { position: relative; }
 .pd-mem-chip:hover { border-color: var(--accent); color: var(--accent); }
 .pd-mem-chip.cur { background: var(--accent); border-color: var(--accent); color: #fff; cursor: default; }
 
+/* ═══ M5d · 覆盖高亮（B 聚焦降噪）+ 三段固定 + 块库卡 ═══ */
+/* 覆盖高亮：成员行茜红浅铺 + 左轨；非成员退噪 43%，悬停恢复 */
+table.shots tr.shot.cover td { background: rgba(188, 63, 44, 0.07) !important; }
+table.shots tr.shot.cover:hover td { background: rgba(188, 63, 44, 0.11) !important; }
+table.shots tr.shot.cover td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+table.shots tr.shot.cover td.cell-shot_no { color: var(--accent); }
+table.shots tr.shot.cover-off td { opacity: 0.42; }
+table.shots tr.shot.cover-off:hover td { opacity: 1; }
+/* 状态行（三段固定·头） */
+.pd-stat { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; color: var(--dim);
+  border-bottom: 1px dashed rgba(60, 50, 30, 0.2); padding-bottom: 7px; }
+.pd-stat .k { color: var(--ink2); }
+.pd-stat-r { flex: none; }
+/* 呼吸微调（② 三段固定） */
+.drawer-body { padding: 11px 13px 13px; gap: 9px; }
+/* 块库卡（下层卡纸） */
+.bcard { position: fixed; z-index: 42; background: var(--paper); border: 1px solid var(--rule);
+  border-radius: 10px; display: flex; flex-direction: column; overflow: visible;
+  box-shadow: -4px 6px 16px rgba(50, 38, 20, 0.15);
+  transition: transform 0.18s ease-out; }
+.bcard[hidden] { display: none; }
+.bcard.bc-noanim { transition: none; }
+.bc-inner { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; border-radius: 9px; }
+/* 索引标签（拉手）：小、细、贴在露出的卡缘上 */
+.bc-tab { position: absolute; left: -7px; top: 28px; width: 24px; height: 11px;
+  border-radius: 5px 1px 1px 5px; cursor: pointer; z-index: 3;
+  background: linear-gradient(180deg, #f2e6c8, #e5d6b1);
+  border: 1px solid rgba(92, 72, 38, 0.45); box-shadow: 0 1px 2px rgba(60, 40, 20, 0.22); }
+.bc-tab::after { content: ''; position: absolute; left: 4px; right: 5px; top: 3px; height: 1px;
+  background: rgba(92, 72, 38, 0.42); box-shadow: 0 3px 0 rgba(92, 72, 38, 0.32); }
+.bc-tab:hover { filter: brightness(1.04); transform: translateX(-1px); }
+.bcard.bc-up .bc-tab { left: 30px; top: -6px; width: 20px; height: 11px; border-radius: 5px 5px 1px 1px; }
+.bcard.bc-up .bc-tab:hover { transform: translateY(-1px); }
+/* 拉缘（调宽 / 调高） */
+.bc-rz { position: absolute; left: -3px; top: 22px; bottom: 22px; width: 7px; cursor: ew-resize; z-index: 2; }
+.bc-rz:hover { background: linear-gradient(90deg, rgba(188, 63, 44, 0.15), transparent); border-radius: 3px; }
+.bcard.bc-up .bc-rz { left: 22px; right: 22px; top: -3px; bottom: auto; height: 7px; width: auto; cursor: ns-resize; }
+.bcard.bc-up .bc-rz:hover { background: linear-gradient(180deg, rgba(188, 63, 44, 0.15), transparent); }
+/* 列表 */
+.bc-head { display: flex; align-items: center; gap: 8px; padding: 7px 42px 7px 10px; border-bottom: 1px solid var(--rule); }
+.bc-title { font-size: 12px; font-weight: 700; color: var(--head); }
+.bc-count { font-size: 10.5px; color: var(--dim); margin-right: auto; }
+.bc-mng { font-size: 10.5px; padding: 2px 7px; }
+.bc-filters { display: flex; flex-wrap: wrap; gap: 4px; padding: 7px 42px 4px 10px; }
+.bc-fchip { font-size: 10.5px; color: var(--ink2); border: 1px solid var(--rule); background: var(--card);
+  border-radius: 999px; padding: 1px 8px; cursor: pointer; }
+.bc-fchip:hover { border-color: rgba(188, 63, 44, 0.4); color: var(--accent); }
+.bc-fchip.on { color: #fff; background: var(--accent); border-color: var(--accent); }
+.bc-search { margin: 2px 42px 6px 10px; font-size: 11px; color: var(--text); font-family: inherit;
+  border: 1px solid var(--rule); background: var(--card); border-radius: 5px; padding: 4px 8px; }
+.bc-search:focus { outline: none; border-color: var(--accent); }
+.bc-list { flex: 1; overflow: auto; padding: 0 6px 34px; }
+.bc-row { position: relative; border: 1px solid transparent; border-radius: 5px;
+  padding: 5px 7px 5px 18px; margin-bottom: 2px; cursor: pointer; }
+.bc-row:hover { background: rgba(188, 63, 44, 0.07); border-color: rgba(188, 63, 44, 0.3); }
+.bc-star { position: absolute; left: 5px; top: 5px; font-size: 9px; color: var(--accent); }
+.bc-text { font-size: 11px; color: var(--ink2); line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.bc-empty { font-size: 11px; color: var(--dim); padding: 6px 8px; }

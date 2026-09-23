@@ -129,7 +129,7 @@ export async function blockOp(payload) {
 }
 
 // 展示序：置顶最前 → 分类序 → 块序
-function sortedBlocks() {
+export function sortedBlocks() {
   const cats = cache ? cache.categories : [];
   const order = {};
   cats.forEach((c, i) => { order[c.id] = i; });
