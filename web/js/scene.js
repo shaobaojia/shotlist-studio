@@ -551,7 +551,7 @@ function viewTools() {
   bar.appendChild(ab);
 
   const drawer = el('button', 'tool-btn vt-drawer', '场务 ⋯');
-  drawer.title = '场务：整理镜号 / 锁定本场 / 自动换行 / 列设置 / 导入台本 / 痕迹';
+  drawer.title = '场务：整理镜号 / 锁定本场 / 自动换行 / 列设置 / 导入台本 / 导出 / 痕迹';
   drawer.addEventListener('click', () => {
     const locked = !!currentData.scene.locked;
     openMenu(drawer, [
@@ -562,6 +562,9 @@ function viewTools() {
       { key: 'cols', label: '列设置' },
       { sep: true },
       { key: 'scriptImp', label: '导入台本…' },
+      { sep: true },
+      { key: 'expPage', label: '导出本场 · 静态页' },
+      { key: 'expPrint', label: '导出本场 · A4 打印版' },
       { key: 'hist', label: '痕迹' },
     ], (k) => {
       if (k === 'renum') doRenumber();
@@ -569,12 +572,26 @@ function viewTools() {
       else if (k === 'wrap') setWrap(!prefs.wrap);
       else if (k === 'cols') openColsMenu(drawer);
       else if (k === 'scriptImp') openScriptImport();
+      else if (k === 'expPage') openExport('page');
+      else if (k === 'expPrint') openExport('print');
       else if (k === 'hist') toggleHistory(currentData.scene);
     });
   });
   bar.appendChild(drawer);
 
   return bar;
+}
+
+function openExport(fmt) {
+  const sc = currentData && currentData.scene;
+  if (!sc) { toast('先打开一个场再导出'); return; }
+  const a = document.createElement('a');
+  a.href = '/api/export?scene=' + encodeURIComponent(sc.scene_no) + '&format=' + fmt;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  toast(fmt === 'print' ? '正在导出 A4 打印版…' : '正在导出静态页…');
 }
 
 function cycleSort(key) {

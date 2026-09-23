@@ -14,6 +14,8 @@ const CMDS = [
   { key: 'flat', label: '切换到平铺视图', alias: 'pingpu flat 平铺', hint: '视图', run: () => clickToolbar('平铺') },
   { key: 'script', label: '打开本场台本', alias: 'taiben script 台本 剧本', hint: '工具', run: () => clickToolbar('台本') },
   { key: 'audit', label: '跑审计（本场）', alias: 'shenji audit 审计 检查', hint: '工具', run: () => clickToolbar('审计') },
+  { key: 'export-page', label: '导出本场 · 静态页', alias: 'daochu export 导出 分享 存档', hint: '导出', run: () => exportScene('page') },
+  { key: 'export-print', label: '导出本场 · A4 打印版', alias: 'daochu export a4 打印 dayin 导出', hint: '导出', run: () => exportScene('print') },
 ];
 
 function clickToolbar(text) {
@@ -21,6 +23,17 @@ function clickToolbar(text) {
   const b = btns.find((x) => x.textContent.trim() === text);
   if (b && !b.disabled) { b.click(); return; }
   toast('当前视图没有「' + text + '」入口');
+}
+
+function exportScene(fmt) {
+  const m = location.hash.match(/^#\/(s\w+)/);
+  if (!m) { toast('先进入一个场，再导出'); return; }
+  const a = document.createElement('a');
+  a.href = '/api/export?scene=' + encodeURIComponent(m[1]) + '&format=' + fmt;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  toast(fmt === 'print' ? '正在导出 A4 打印版…' : '正在导出静态页…');
 }
 
 function rank(text, q) {
