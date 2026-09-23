@@ -1,6 +1,6 @@
-// 挂件带 v2（M5k）——底部冻结通栏：收起＝一条吸底细带；展开＝向上浮层（不挤镜头）。
-// 一条条带三种读法：①竖向高/色＝景别（渐紧渐松）②横向宽＝时长（横轴单位随之 镜号⇄时长）
-// ③情绪曲线叠加共存。状态切换带 morph 动画（条条 left/width/height/背景 + 曲线淡入出 + 轴标换字）。
+// 挂件带 v2.1（M5k-2）——底部冻结通栏 + 向上浮层。
+// 一条条带三种读法：①竖向高/色＝景别 ②横向宽＝时长（横轴＝时间刻度尺）③情绪曲线叠加（平滑曲线+数据点）。
+// 交互：上沿拖拽＝面板高矮（窗口式）；滚轮＝横向缩放（时间轴式，光标锚定）；中键拖拽＝平移；shift+滚轮＝横滚。
 import { el, toast } from './ui.js';
 import { jumpToShotById } from './filter.js';
 
@@ -8,13 +8,16 @@ const KEY = 'studio.dock';
 // 档位：按前缀匹配（长词在前，防「中近/中景」互截）
 const TIER_SEQ = ['全景', '中全', '中景', '中近', '近景', '特写', '极特'];
 const TIER_MATCH = ['极特', '特写', '近景', '中近', '中景', '中全', '全景'];
-const TIER_H = [10, 14, 18, 22, 26, 30, 34];   // 档位 1..7 高度（底对齐）
-const H_FLAT = 16;                              // 景别关：等高中条
-const PXS = 8, MINW = 12, MAXW = 160;           // 时长→px
-const GAP_IDX = 4, GAP_TIME = 1, SLOT = 22;     // 索引槽 / 时间缝
-const STRIP_H = 44;
+const TIER_H = [10, 14, 18, 22, 26, 30, 34];   // 基准高度（44 高铁带内）
+const H_FLAT = 16;
+const BASE_V = 44;                              // 条带基准高（ST.h 以此为 1）
+const PXS = 8, MINW = 6, MAXW = 160, GAP_IDX = 4, GAP_TIME = 1, SLOT = 22;
+const ZMIN = 0.35, ZMAX = 4;
 
-let ST = { open: false, size: true, rhythm: false, mood: false };
+let ST = { open: false, size: true, rhythm: false, mood: false, h: 44, zoom: 1 };
+let _bt = 0, _sv = 0;
+
+function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
 
 function load() {
   try {
@@ -26,6 +29,8 @@ function load() {
     if ('size' in o) ST.size = !!o.size;
     if ('rhythm' in o) ST.rhythm = !!o.rhythm;
     if ('mood' in o) ST.mood = !!o.mood;
+    if (typeof o.h === 'number') ST.h = clamp(Math.round(o.h), 40, 380);
+    if (typeof o.zoom === 'number') ST.zoom = clamp(o.zoom, ZMIN, ZMAX);
   } catch (e) { /* ignore */ }
 }
 function save() {
@@ -41,11 +46,28 @@ function numOf(v) {
   const m = String(v == null ? '' : v).match(/-?\d+(\.\d+)?/);
   return m ? parseFloat(m[0]) : null;
 }
-function fmtSec(d) {
-  return String(d).replace(/\.0+$/, '') + '″';
+function fmtTick(t) {
+  t = Math.round(t);
+  if (t < 60) return t + '″';
+  return Math.floor(t / 60) + '′' + String(t % 60).padStart(2, '0') + '″';
 }
 function jump(id) {
   if (!jumpToShotById(id)) toast('该镜不在当前视图（可能被筛选隐藏）');
+}
+
+// Catmull-Rom → 三次贝塞尔（平滑曲线）
+function smoothPath(pts) {
+  if (!pts.length) return '';
+  const r = (v) => Math.round(v * 10) / 10;
+  if (pts.length === 1) return 'M' + r(pts[0].x) + ' ' + r(pts[0].y) + ' L' + r(pts[0].x + 8) + ' ' + r(pts[0].y);
+  let d = 'M' + r(pts[0].x) + ' ' + r(pts[0].y);
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+    const c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6, c2y = p2.y - (p3.y - p1.y) / 6;
+    d += ' C' + r(c1x) + ' ' + r(c1y) + ' ' + r(c2x) + ' ' + r(c2y) + ' ' + r(p2.x) + ' ' + r(p2.y);
+  }
+  return d;
 }
 
 // ── 入口：底部挂件带（无镜头返回 null）──
@@ -56,8 +78,11 @@ export function buildRibbon(data, shots) {
   const root = el('div', 'dock');
   root.dataset.open = ST.open ? '1' : '0';
 
-  // ── 浮层：条条带 + 横轴 ──
+  // ── 浮层 ──
   const panel = el('div', 'dk-panel');
+  const rz = el('div', 'dk-rz');                    // 上沿：窗口式拖拽缩放
+  rz.appendChild(el('span', 'dk-grip'));
+  panel.appendChild(rz);
   const scroll = el('div', 'dk-scroll');
   const inner = el('div', 'dk-inner');
   const strip = el('div', 'dk-strip');
@@ -69,7 +94,7 @@ export function buildRibbon(data, shots) {
   const moodHint = el('div', 'dk-mood-empty', '情绪温度未填写——节拍行填「情绪温度」（如 7）后这里出曲线');
   panel.appendChild(moodHint);
 
-  // 条条（绝对定位；left/width/height/背景全走 CSS 过渡）
+  // 条条
   const bars = [];
   for (const s of shots) {
     const b = el('button', 'dk-b');
@@ -79,7 +104,7 @@ export function buildRibbon(data, shots) {
     strip.appendChild(b);
     bars.push(b);
   }
-  // 轴标
+  // 索引模式轴标
   const labels = [];
   for (let i = 0; i < shots.length; i++) {
     const l = el('span', 'dk-lab');
@@ -87,7 +112,7 @@ export function buildRibbon(data, shots) {
     labels.push(l);
   }
 
-  // ── 情绪曲线（按节拍跨段；叠加在条条上）──
+  // ── 情绪数据点（按节拍；平滑曲线叠加）──
   const segs = [];
   (data.beats || []).forEach((b) => {
     const arr = b.shots || [];
@@ -97,55 +122,68 @@ export function buildRibbon(data, shots) {
     segs.push({ i0, i1, v: numOf(b.mood_temp), firstId: arr[0].id, name: b.name || ('节拍' + b.beat_no) });
   });
   const hasMood = segs.some((t) => t.v != null);
-  let svg = null;
+  const mx = Math.max(10, ...segs.map((t) => (t.v == null ? 0 : t.v)));
+  let svg = null, pHalo = null, pMain = null;
   if (hasMood) {
     svg = document.createElementNS(NS, 'svg');
     svg.setAttribute('class', 'dk-mood');
     svg.setAttribute('width', '100%');
-    svg.setAttribute('height', String(STRIP_H));
-    const mx = Math.max(10, ...segs.map((t) => (t.v == null ? 0 : t.v)));
-    const Y = (v) => 40 - (v / mx) * 32;
+    svg.setAttribute('height', String(ST.h));
+    pHalo = document.createElementNS(NS, 'path');
+    pHalo.setAttribute('class', 'dk-mph');
+    pMain = document.createElementNS(NS, 'path');
+    pMain.setAttribute('class', 'dk-mp');
+    svg.appendChild(pHalo);
+    svg.appendChild(pMain);
     for (const t of segs) {
-      const p = document.createElementNS(NS, 'path');
-      p.setAttribute('class', t.v == null ? 'dk-mp dk-mp-empty' : 'dk-mp');
-      p.style.pointerEvents = 'auto';
-      p.style.cursor = 'pointer';
+      if (t.v == null) continue;
+      const dot = document.createElementNS(NS, 'circle');
+      dot.setAttribute('r', '3');
+      dot.setAttribute('class', 'dk-mdot');
+      dot.style.pointerEvents = 'auto';
+      dot.style.cursor = 'pointer';
       const ti = document.createElementNS(NS, 'title');
-      ti.textContent = t.name + (t.v == null ? ' · 未填' : ' · 温度 ' + t.v);
-      p.appendChild(ti);
+      ti.textContent = t.name + ' · 温度 ' + t.v;
+      dot.appendChild(ti);
       const fid = t.firstId;
-      p.addEventListener('click', () => jump(fid));
-      svg.appendChild(p);
-      t._el = p;
-      t._y = t.v == null ? 24 : Y(t.v);
-    }
-    // 节拍间连接线
-    for (let k = 0; k < segs.length - 1; k++) {
-      const ln = document.createElementNS(NS, 'line');
-      ln.setAttribute('class', 'dk-mlk');
-      svg.appendChild(ln);
-      segs[k]._ln = ln;
+      dot.addEventListener('click', () => jump(fid));
+      svg.appendChild(dot);
+      t._dot = dot;
     }
     strip.appendChild(svg);
   }
   function drawCurve() {
     if (!svg) return;
-    for (let k = 0; k < segs.length; k++) {
-      const t = segs[k];
+    const vh = ST.h / BASE_V;
+    const Y = (v) => (40 - (v / mx) * 32) * vh;
+    const pts = [];
+    for (const t of segs) {
+      if (t.v == null) continue;
       const x0 = parseFloat(bars[t.i0].style.left) || 0;
       const xEnd = (parseFloat(bars[t.i1].style.left) || 0) + (parseFloat(bars[t.i1].style.width) || 0);
-      t._el.setAttribute('d', 'M' + x0 + ' ' + t._y + ' L' + Math.max(xEnd - 1, x0) + ' ' + t._y);
-      if (t._ln) {
-        const nxt = segs[k + 1];
-        const xb = parseFloat(bars[nxt.i0].style.left) || 0;
-        t._ln.setAttribute('x1', xEnd); t._ln.setAttribute('y1', t._y);
-        t._ln.setAttribute('x2', xb); t._ln.setAttribute('y2', nxt._y);
-      }
+      pts.push({ x: (x0 + xEnd) / 2, y: Y(t.v), t });
     }
+    if (!pts.length) return;
+    const fb = pts[0].t, lb = pts[pts.length - 1].t;
+    const lx = parseFloat(bars[fb.i0].style.left) || 0;
+    const rx = (parseFloat(bars[lb.i1].style.left) || 0) + (parseFloat(bars[lb.i1].style.width) || 0);
+    const full = [{ x: lx, y: pts[0].y }].concat(pts).concat([{ x: rx, y: pts[pts.length - 1].y }]);
+    const d = smoothPath(full);
+    pHalo.setAttribute('d', d);
+    pMain.setAttribute('d', d);
+    for (const p of pts) {
+      const dot = p.t._dot;
+      if (dot) { dot.setAttribute('cx', p.x); dot.setAttribute('cy', p.y); }
+    }
+    svg.setAttribute('height', String(ST.h));
+    svg.setAttribute('width', String(Math.max(1, Math.round(inner.offsetWidth || 1))));
   }
 
-  // ── 布局：把状态写进条条（CSS 过渡负责 morph）──
+  // ── 布局 ──
   function layout(animate) {
+    const z = ST.zoom, vh = ST.h / BASE_V;
+    inner.style.height = (ST.h + 18) + 'px';
+    strip.style.height = ST.h + 'px';
     const timeMode = ST.rhythm;
     const xs = [], ws = [];
     let acc = 0;
@@ -153,13 +191,16 @@ export function buildRibbon(data, shots) {
       let w, gap;
       if (timeMode) {
         const d = numOf(shots[i].duration) || 0;
-        w = Math.max(MINW, Math.min(MAXW, Math.round(d * PXS)));
+        w = clamp(Math.round(d * PXS * z), Math.max(4, Math.round(MINW * z)), Math.round(MAXW * z));
         gap = GAP_TIME;
-      } else { w = SLOT; gap = GAP_IDX; }
+      } else {
+        w = Math.round(SLOT * z);
+        gap = Math.max(2, Math.round(GAP_IDX * z));
+      }
       xs.push(acc); ws.push(w); acc += w + gap;
     }
-    const total = Math.max(acc - (timeMode ? GAP_TIME : GAP_IDX), 40);
-    inner.style.width = total + 'px';
+    const lastGap = timeMode ? GAP_TIME : Math.max(2, Math.round(GAP_IDX * z));
+    inner.style.width = Math.max(acc - lastGap, 40) + 'px';
     for (let i = 0; i < bars.length; i++) {
       const b = bars[i], s = shots[i];
       b.style.left = xs[i] + 'px';
@@ -168,26 +209,20 @@ export function buildRibbon(data, shots) {
         const t = tierOf(s.shot_size);
         const lv = t ? TIER_SEQ.indexOf(t) + 1 : 0;
         b.dataset.lv = String(lv);
-        b.style.height = (t ? TIER_H[lv - 1] : 14) + 'px';
+        b.style.height = Math.round((t ? TIER_H[lv - 1] : 14) * vh) + 'px';
       } else {
         b.dataset.lv = '';
-        b.style.height = H_FLAT + 'px';
+        b.style.height = Math.round(H_FLAT * vh) + 'px';
       }
-      const l = labels[i];
-      l.style.left = xs[i] + 'px';
-      l.style.width = ws[i] + 'px';
     }
     unitEl.textContent = timeMode ? '轴·时长' : '轴·镜号';
     legendEl.textContent = ST.size ? '红＝近/特写 · 点击跳镜' : '点击跳镜';
-    relabel(animate);
+    renderAxis(animate);
     if (svg) {
-      if (animate && ST.mood) {                       // 换轴时曲线淡出→重定位→淡入
+      if (animate && ST.mood) {                     // 换轴：曲线淡出→重定位→淡入
         svg.style.opacity = '0';
         clearTimeout(svg._t);
-        svg._t = setTimeout(() => {
-          drawCurve();
-          if (ST.mood) svg.style.opacity = '';
-        }, 210);
+        svg._t = setTimeout(() => { drawCurve(); if (ST.mood) svg.style.opacity = ''; }, 210);
       } else {
         drawCurve();
       }
@@ -196,30 +231,105 @@ export function buildRibbon(data, shots) {
     syncMoodHint();
   }
 
-  function relabel(fade) {
-    const apply = () => {
-      const timeMode = ST.rhythm;
-      for (let i = 0; i < labels.length; i++) {
-        const w = parseFloat(bars[i].style.width) || 0;
-        if (timeMode) {
-          const d = numOf(shots[i].duration);
-          labels[i].textContent = (d != null && w >= 22) ? fmtSec(d) : '';
-        } else {
-          labels[i].textContent = w >= 16 ? (shots[i].shot_no || String(i + 1)) : '';
+  // 横轴：节奏开＝时间刻度尺；关＝每格镜号
+  function renderAxis(fade) {
+    const draw = () => {
+      axis.textContent = '';
+      if (ST.rhythm) {
+        const pps = PXS * ST.zoom;
+        let totalSec = 0;
+        for (const s of shots) totalSec += (numOf(s.duration) || 0);
+        const steps = [1, 2, 5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 300, 600];
+        const step = steps.find((s) => s * pps >= 64) || 600;
+        for (let t = 0; t <= totalSec + 0.001; t += step) {
+          const tk = el('span', 'dk-tick');
+          tk.style.left = Math.round(t * pps) + 'px';
+          tk.textContent = fmtTick(t);
+          axis.appendChild(tk);
+        }
+      } else {
+        for (let i = 0; i < labels.length; i++) {
+          const b = bars[i];
+          const w = parseFloat(b.style.width) || 0;
+          labels[i].style.left = (parseFloat(b.style.left) || 0) + 'px';
+          labels[i].style.width = w + 'px';
+          labels[i].textContent = w >= 14 ? (shots[i].shot_no || String(i + 1)) : '';
+          axis.appendChild(labels[i]);
         }
       }
     };
     if (fade) {
       axis.classList.add('dk-faded');
-      setTimeout(() => { apply(); axis.classList.remove('dk-faded'); }, 160);
-    } else apply();
+      setTimeout(() => { draw(); axis.classList.remove('dk-faded'); }, 160);
+    } else draw();
   }
 
   function syncMoodHint() {
     moodHint.style.display = (ST.mood && ST.open && !hasMood) ? '' : 'none';
   }
 
-  // ── 底栏 ──
+  function noanimBurst() {
+    root.classList.add('dk-noanim');
+    clearTimeout(_bt);
+    _bt = setTimeout(() => root.classList.remove('dk-noanim'), 240);
+  }
+
+  // ── 缩放（滚轮，光标锚定）／平移（中键）／窗口拖拽（上沿）──
+  panel.addEventListener('wheel', (e) => {          // 面板区域＝条条视口：滚轮缩放
+    e.preventDefault();
+    if (e.shiftKey) { scroll.scrollLeft += (e.deltaY || e.deltaX || 0); return; }
+    const rect = scroll.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const oldTotal = inner.offsetWidth || 1;
+    const ratio = (scroll.scrollLeft + cx) / oldTotal;
+    const nz = clamp(ST.zoom * Math.exp(-e.deltaY * 0.0012), ZMIN, ZMAX);
+    if (Math.abs(nz - ST.zoom) < 0.002) return;
+    ST.zoom = nz;
+    noanimBurst();
+    layout(false);
+    const newTotal = inner.offsetWidth || 1;
+    scroll.scrollLeft = Math.max(0, ratio * newTotal - cx);
+    clearTimeout(_sv);
+    _sv = setTimeout(save, 320);
+  }, { passive: false });
+
+  panel.addEventListener('mousedown', (e) => {
+    if (e.button !== 1) return;                       // 中键＝平移
+    e.preventDefault();
+    const sx = e.clientX, sl = scroll.scrollLeft;
+    root.classList.add('dk-panning');
+    const mv = (ev) => { scroll.scrollLeft = sl - (ev.clientX - sx); };
+    const up = () => {
+      document.removeEventListener('mousemove', mv);
+      document.removeEventListener('mouseup', up);
+      root.classList.remove('dk-panning');
+      save();
+    };
+    document.addEventListener('mousemove', mv);
+    document.addEventListener('mouseup', up);
+  });
+
+  rz.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;                       // 上沿＝窗口式缩放
+    e.preventDefault();
+    e.stopPropagation();
+    const sy = e.clientY, sv = ST.h;
+    root.classList.add('dk-noanim');
+    const mv = (ev) => {
+      ST.h = clamp(Math.round(sv - (ev.clientY - sy)), 40, 380);
+      layout(false);
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', mv);
+      document.removeEventListener('mouseup', up);
+      noanimBurst();
+      save();
+    };
+    document.addEventListener('mousemove', mv);
+    document.addEventListener('mouseup', up);
+  });
+
+  // ── 底栏（三开关居中对齐、折叠态隐藏）──
   const bar = el('div', 'dk-bar');
   const caret = el('span', 'dk-caret', ST.open ? '▾' : '▴');
   bar.appendChild(caret);
@@ -235,15 +345,14 @@ export function buildRibbon(data, shots) {
       e.stopPropagation();
       ST[k] = !ST[k];
       b.classList.toggle('on', ST[k]);
-      if (!ST.open) { ST.open = true; root.dataset.open = '1'; caret.textContent = '▾'; }
       save();
       layout(true);
     });
     tgs.appendChild(b);
   };
   mkTg('size', '景别序列', '竖向高度/色＝景别档（渐紧渐松一眼见）');
-  mkTg('rhythm', '节奏视窗', '横向宽＝时长（横轴单位随之在镜号⇄时长之间切换）');
-  mkTg('mood', '情绪曲线', '情绪温度曲线叠加在条条上（按节拍）');
+  mkTg('rhythm', '节奏视窗', '横向宽＝时长（横轴变时间刻度尺）');
+  mkTg('mood', '情绪曲线', '情绪温度平滑曲线叠加在条条上（按节拍）');
   bar.appendChild(tgs);
   const legendEl = el('span', 'dk-legend', '');
   bar.appendChild(legendEl);

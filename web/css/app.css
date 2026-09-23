@@ -933,19 +933,21 @@ table.shots tr.shot.cover-off:hover td { opacity: 1; }
   background: rgba(226, 216, 193, 0.94); backdrop-filter: blur(10px);
   border-top: 1px solid rgba(60, 50, 30, 0.22);
   box-shadow: 0 -10px 24px rgba(92, 74, 46, 0.14); }
-.dk-bar { display: flex; align-items: center; gap: 9px; height: 33px; padding: 0 22px; box-sizing: border-box;
+.dk-bar { position: relative; display: flex; align-items: center; gap: 9px; height: 33px; padding: 0 22px; box-sizing: border-box;
   font-size: 12px; color: var(--ink2); user-select: none; cursor: pointer; }
 .dk-caret { font-size: 10px; color: var(--dim); }
 .dk-label { font-weight: 600; color: var(--head); letter-spacing: .04em; }
 .dk-unit { color: var(--dim); font-size: 11px; }
-.dk-tgs { display: inline-flex; gap: 6px; margin-left: auto; }
-.dk-tg { font: inherit; font-size: 11px; line-height: 1.6; padding: 0 10px; border: 1px solid rgba(105, 88, 58, .42);
+.dk-tgs { position: absolute; left: 50%; transform: translateX(-50%); display: none; gap: 6px; }
+.dock[data-open="1"] .dk-tgs { display: inline-flex; }
+.dk-tg { font: inherit; font-size: 11px; line-height: 1.6; padding: 0 10px; min-width: 74px; text-align: center; border: 1px solid rgba(105, 88, 58, .42);
   border-radius: 999px; background: transparent; color: var(--dim); cursor: pointer;
   transition: background .18s ease, color .18s ease, border-color .18s ease; }
 .dk-tg:hover { color: var(--head); border-color: rgba(105, 88, 58, .75); }
 .dk-tg.on { background: var(--head); border-color: var(--head); color: #f6f0e1; }
-.dk-legend { color: var(--dim2); font-size: 11px; }
-.dk-panel { position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 6px; padding: 10px 22px 9px;
+.dk-legend { display: none; margin-left: auto; color: var(--dim2); font-size: 11px; }
+.dock[data-open="1"] .dk-legend { display: inline; }
+.dk-panel { position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 6px; padding: 12px 22px 9px;
   background: rgba(246, 240, 225, 0.97); border: 1px solid rgba(60, 50, 30, 0.18); border-radius: 10px;
   box-shadow: 0 -14px 34px rgba(92, 74, 46, 0.20);
   transform: translateY(10px); opacity: 0; pointer-events: none; visibility: hidden;
@@ -958,7 +960,7 @@ table.shots tr.shot.cover-off:hover td { opacity: 1; }
 .dk-lab { position: absolute; top: 2px; font-size: 9.5px; line-height: 1.3; color: var(--dim); text-align: center;
   overflow: hidden; white-space: nowrap;
   transition: opacity .16s ease, left .28s cubic-bezier(.22,.8,.3,1), width .28s cubic-bezier(.22,.8,.3,1); }
-.dk-axis.dk-faded .dk-lab { opacity: 0; }
+.dk-axis.dk-faded .dk-lab, .dk-axis.dk-faded .dk-tick { opacity: 0; }
 .dk-b { position: absolute; bottom: 0; padding: 0; border: none; cursor: pointer; border-radius: 2px; background: #d9cdb0;
   transition: left .28s cubic-bezier(.22,.8,.3,1), width .28s cubic-bezier(.22,.8,.3,1), height .28s cubic-bezier(.22,.8,.3,1), background-color .24s ease; }
 .dk-b:hover { outline: 2px solid rgba(188, 63, 44, .4); outline-offset: 1px; }
@@ -972,7 +974,12 @@ table.shots tr.shot.cover-off:hover td { opacity: 1; }
 .dk-b[data-lv="7"] { background: #bc3f2c; }
 .dk-mood { position: absolute; left: 0; top: 0; pointer-events: none; transition: opacity .28s ease; }
 .dk-mp { stroke: var(--accent); stroke-width: 2; fill: none; stroke-linecap: round; }
-.dk-mp-empty { stroke: rgba(60, 50, 30, .35); stroke-dasharray: 3 3; stroke-width: 1.5; }
-.dk-mlk { stroke: rgba(188, 63, 44, .4); stroke-width: 1.5; }
+.dk-mph { stroke: rgba(246, 240, 225, .92); stroke-width: 4.5; fill: none; stroke-linecap: round; }
+.dk-mdot { fill: var(--accent); stroke: #fffef9; stroke-width: 1.5; }
 .dk-mood-empty { position: absolute; top: 7px; right: 24px; font-size: 11px; color: var(--dim); }
 .dk-noanim .dk-b, .dk-noanim .dk-lab, .dk-noanim .dk-panel, .dk-noanim .dk-mood { transition: none !important; }
+.dk-rz { position: absolute; left: 0; right: 0; top: 0; height: 8px; cursor: ns-resize; }
+.dk-grip { position: absolute; left: 50%; top: 3px; transform: translateX(-50%); width: 42px; height: 4px; border-radius: 2px; background: rgba(105, 88, 58, .28); transition: background .15s ease; }
+.dk-rz:hover .dk-grip { background: var(--accent); }
+.dock.dk-panning .dk-scroll { cursor: grabbing; }
+.dk-tick { position: absolute; top: 0; height: 16px; border-left: 1px solid rgba(60, 50, 30, .35); padding-left: 4px; font-size: 9.5px; line-height: 16px; color: var(--dim); white-space: nowrap; transition: opacity .16s ease; }
