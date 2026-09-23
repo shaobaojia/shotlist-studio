@@ -67,7 +67,7 @@ function ensureDrawer() {
   dr.addDockButton('right');
   dr.addPinButton();
   S.toggleBtn = dr.addButton('编辑', {
-    title: '查看 ⇄ 编辑（编辑中点＝保存）',
+    title: '进入编辑面（编辑态无保存钮：Ctrl+Enter／点外面即存）',
     onClick: onToggleMode,
   });
   dr.addButton('复制', {
@@ -78,6 +78,14 @@ function ensureDrawer() {
 
   if (!escWired) {
     escWired = true;
+    // 选区字数：查看态（抽屉内渲染文本的 DOM 选区）
+    document.addEventListener('selectionchange', () => {
+      if (!dr || !dr.isOpen() || S.mode !== 'view') return;
+      const sel = document.getSelection();
+      if (!sel || sel.isCollapsed) { setSelCount(0); return; }
+      const n = sel.anchorNode;
+      setSelCount((n && dr.el.contains(n)) ? [...String(sel)].length : 0);
+    });
     // 焦点在抽屉内时：Esc 编辑→查看（不保存）/ 查看→关闭（未钉住）
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
@@ -176,7 +184,8 @@ function renderDrawer(mode) {
   const g = groupOf(s, ctx.groupsMap());
   S.mode = mode;
   d.setTitle(promptTitle(s, g));
-  if (S.toggleBtn) S.toggleBtn.textContent = (mode === 'edit') ? '💾 保存' : '编辑';
+  // 编辑态不设「保存」钮（退役：保存路径＝Ctrl+Enter／点外／✕／钉住切镜）；该钮只在查看态现身
+  if (S.toggleBtn) { S.toggleBtn.textContent = '编辑'; S.toggleBtn.hidden = (mode === 'edit'); }
   detachEditor();
   d.bodyEl.textContent = '';
   d.bodyEl.scrollTop = 0;
@@ -226,7 +235,15 @@ function clearCover() {
     .forEach((tr) => tr.classList.remove('cover', 'cover-off'));
 }
 
-// 状态行（三段固定·头）：镜号 · 组/覆盖镜 · 字数
+// 已选字数（单点）：S.selStatEl 由 buildStatRow 每次重建
+function setSelCount(n) {
+  const sp = S.selStatEl;
+  if (!sp) return;
+  if (n > 0) { sp.textContent = '已选 ' + n + ' 字'; sp.hidden = false; }
+  else { sp.textContent = ''; sp.hidden = true; }
+}
+
+// 状态行（三段固定·头）：镜号 · 组/覆盖镜 · 已选/字数
 function buildStatRow(s, g) {
   const row = el('div', 'pd-stat');
   const left = el('span');
@@ -240,8 +257,13 @@ function buildStatRow(s, g) {
     left.appendChild(document.createTextNode(' · 单镜'));
   }
   row.appendChild(left);
+  const right = el('span', 'pd-stat-right');
+  S.selStatEl = el('span', 'pd-stat-sel');
+  S.selStatEl.hidden = true;
+  right.appendChild(S.selStatEl);
   const text = (g && g.text) ? String(g.text) : '';
-  row.appendChild(el('span', 'pd-stat-r', text.trim() ? ('约 ' + text.length + ' 字') : '未写'));
+  right.appendChild(el('span', 'pd-stat-r', text.trim() ? ('约 ' + text.length + ' 字') : '未写'));
+  row.appendChild(right);
   return row;
 }
 
@@ -385,6 +407,12 @@ function wireEditorEvents(box, s) {
   const selText = () => ta.value.slice(ta.selectionStart, ta.selectionEnd);
 
   ta.addEventListener('input', () => editorOnInput(ta));
+  // 选区字数：编辑面（textarea 选区）
+  const selCount = () => { const v = selText(); setSelCount(v.trim() ? [...v].length : 0); };
+  ta.addEventListener('select', selCount);
+  ta.addEventListener('keyup', selCount);
+  ta.addEventListener('mouseup', selCount);
+  ta.addEventListener('blur', () => setSelCount(0));
   ta.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault();
@@ -416,7 +444,7 @@ function wireEditorEvents(box, s) {
       onInsert: (text) => {
         if (S.ta !== ta) { toast('已切换镜头，初稿未插入'); return; }
         replaceAll(ta, text);
-        toast('初稿已进编辑面——精修后「保存」才落库（Ctrl+Z 可撤）');
+        toast('初稿已进编辑面——精修后 Ctrl+Enter／点外面保存落库（Ctrl+Z 可撤）');
       },
     });
   });

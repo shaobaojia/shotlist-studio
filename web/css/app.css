@@ -884,3 +884,7 @@ table.shots tr.shot.cover-off:hover td { opacity: 1; }
 [data-drawer="prompt"] .hotbox-foot .tool-btn.dz-violet { border-color: rgba(107, 90, 142, 0.85);
   background: #6b5a8e; color: #fff; }
 [data-drawer="prompt"] .hotbox-foot .tool-btn.dz-violet:hover { background: transparent; color: #6b5a8e; }
+
+/* ── M5d-10：状态行右侧组 + 已选字数 ── */
+.pd-stat-right { display: flex; align-items: baseline; gap: 10px; flex: none; }
+.pd-stat-sel { color: var(--accent); font-weight: 600; }
