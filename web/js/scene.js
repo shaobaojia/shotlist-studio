@@ -66,6 +66,7 @@ export async function renderScene(view, sceneNo) {
   let curD = curH;
   try { curD = decodeURIComponent(curH); } catch (e) { /* keep */ }
   if (curD !== '#/' + sceneNo) return;
+  _refreshSeq++;   // 本场渲染生效：作废切场前在飞的刷新回包（P0·F1-B1）
   sortState = null;
   resetFilter();
   closeHistory();
@@ -112,12 +113,22 @@ export function refreshSceneSoon() {
   }, 30);
 }
 
+// 在飞刷新序号：陈旧回包守卫（P0·F1-B1）
+let _refreshSeq = 0;
 export async function refreshCurrentView() {
   const view = document.getElementById('view');
   if (!currentData || !view) return;
   const no = currentData.scene.scene_no;
+  const seq = ++_refreshSeq;
   try {
-    currentData = await api.scene(no);
+    const next = await api.scene(no);
+    if (seq !== _refreshSeq) return;                 // 更新一轮刷新在飞：本回包作废
+    const curH = location.hash === '' ? '#/' : location.hash;
+    let curD = curH;
+    try { curD = decodeURIComponent(curH); } catch (e) { /* keep */ }
+    if (curD !== '#/' + no) return;                  // 路由已切走：不回写
+    if (!currentData || currentData.scene.scene_no !== no) return;   // 已切场：不回写
+    currentData = next;
     paintScene(view);
   } catch (e) { /* 保留现状 */ }
 }

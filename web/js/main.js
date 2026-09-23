@@ -204,6 +204,7 @@ async function reloadFilm() {
     state.scenes = fd.scenes || [];
     buildNav();
     refreshNavBadges();
+    applyNavOn();   // 重建后重打高亮（拖动排序/删场触发；hash 未变无 hashchange）（P0·F1-B7）
     const cur = decHash(currentHash());
     const m = cur.match(/^#\/(.+)$/);
     if (m && !state.scenes.some((x) => x.scene_no === m[1])) {
@@ -214,13 +215,19 @@ async function reloadFilm() {
   } catch (err) { /* 保留现状 */ }
 }
 
-function route() {
+// 按当前 hash 重打导航高亮（nav 重建后调用；不触发视图重绘）（P0·F1-B7）
+function applyNavOn() {
   const cur = decHash(currentHash());
   document.querySelectorAll('#scene-nav .chip').forEach((chip) => {
     chip.classList.toggle('on', decHash(chip.getAttribute('href') || '') === cur);
   });
   const onChip = document.querySelector('#scene-nav .chip.on');
   if (onChip && onChip.scrollIntoView) onChip.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+}
+
+function route() {
+  applyNavOn();
+  const cur = decHash(currentHash());
   const view = document.getElementById('view');
   const m = cur.match(/^#\/(.+)$/);
   if (m) renderScene(view, m[1]);
@@ -278,6 +285,7 @@ window.addEventListener('shotlist:audit-changed', scheduleNavBadges);
 
 document.addEventListener('keydown', async (e) => {
   if (!(e.ctrlKey || e.metaKey) || String(e.key).toLowerCase() !== 'z') return;
+  if (e.shiftKey || e.altKey) return;   // 重做等组合不归全局撤销管（P0·F1-B2）
   const ae = document.activeElement;
   if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
   e.preventDefault();
