@@ -911,7 +911,7 @@ table.shots tr.shot.cover-off:hover td { opacity: 1; }
 .bco-op:hover { color: var(--accent); }
 .bco-ops { margin-left: auto; display: flex; align-items: center; gap: 0; }
 .bco-sec .bc-sechead { flex-wrap: wrap; row-gap: 1px; }      /* 窄卡时操作符自动折到第二行右对齐，名字永远读得到 */
-.bco-sec .bc-secname { flex: 0 1 auto; min-width: 76px; }    /* 不撑开：计数紧跟组名（骨架（1））；窄卡可缩到 76 底线 */
+.bco-sec .bc-secname { flex: 0 1 auto; min-width: 0; }    /* 不撑开：计数紧跟组名（骨架（1））；窄卡名字任意缩（省略号） */
 .bco-sec .bc-seccount { margin-left: -3px; }                   /* 括号计数再贴一点 */
 .bco-row.drop-above { box-shadow: inset 0 2px 0 rgba(188, 63, 44, .75); }
 .bco-row.drop-below { box-shadow: inset 0 -2px 0 rgba(188, 63, 44, .75); }
