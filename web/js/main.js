@@ -7,6 +7,7 @@ import { renderScene, refreshCurrentView } from './scene.js';
 import { undo, recordUndo } from './edit.js';
 import { openMenu } from './menu.js';
 import { bindSettingsBtn } from './settings.js';
+import { bindCmdK } from './cmdk.js';
 import { closeAuditPanel } from './auditpanel.js';
 
 let navBound = false;
@@ -243,6 +244,7 @@ async function boot() {
     refreshNavBadges();
     syncTopbarVar();
     bindSettingsBtn(document.getElementById('settings-btn'));
+  bindCmdK();
     if (window.ResizeObserver) { try { new ResizeObserver(syncTopbarVar).observe(document.getElementById('topbar')); } catch (e) { /* ignore */ } }
     window.addEventListener('hashchange', route);
     window.addEventListener('shotlist:film-changed', () => { reloadFilm(); });

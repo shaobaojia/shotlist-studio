@@ -986,3 +986,26 @@ table.shots tr.shot.cover-off:hover td { opacity: 1; }
 .dk-rz:hover .dk-grip { background: var(--accent); }
 .dock.dk-panning .dk-scroll { cursor: grabbing; }
 .dk-tick { position: absolute; top: 0; height: 16px; border-left: 1px solid rgba(60, 50, 30, .35); padding-left: 4px; font-size: 9.5px; line-height: 16px; color: var(--dim); white-space: nowrap; transition: opacity .16s ease; }
+
+/* ⌘K 命令面板（M6 批6-1） */
+.cmdk-mask { position: fixed; inset: 0; z-index: 120; background: rgba(40, 32, 20, 0.28);
+  display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; }
+.cmdk-mask[hidden] { display: none; }
+.cmdk { width: 520px; max-width: calc(100vw - 40px); background: var(--card);
+  border: 1px solid rgba(60, 50, 30, 0.22); border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(60, 45, 20, 0.30); overflow: hidden; }
+.cmdk-input { width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; color: var(--ink);
+  background: transparent; border: none; outline: none; padding: 13px 16px;
+  border-bottom: 1px solid rgba(60, 50, 30, 0.14); }
+.cmdk-list { max-height: 320px; overflow-y: auto; padding: 6px 0; }
+.cmdk-group { font-size: 10px; letter-spacing: .12em; color: var(--dim2); padding: 7px 16px 3px; }
+.cmdk-item { display: flex; align-items: center; gap: 8px; padding: 6px 16px; cursor: pointer;
+  font-size: 13px; color: var(--ink2); }
+.cmdk-item.on { background: rgba(188, 63, 44, 0.09); color: var(--head); }
+.cmdk-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk-hint { color: var(--dim2); font-size: 11px; }
+.cmdk-empty { padding: 14px 16px; color: var(--dim); font-size: 12px; }
+.cmdk-foot { border-top: 1px solid rgba(60, 50, 30, 0.12); padding: 7px 16px; font-size: 11px; color: var(--dim2); }
+#topbar .cmdk-open { font: inherit; font-size: 12px; color: var(--dim); background: transparent;
+  border: 1px solid rgba(60, 50, 30, 0.18); border-radius: 6px; padding: 3px 9px; cursor: pointer; margin-right: 8px; }
+#topbar .cmdk-open:hover { color: var(--head); border-color: rgba(60, 50, 30, 0.4); }
