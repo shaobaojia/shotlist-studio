@@ -275,34 +275,47 @@ def _resolve_ref(ctx, carrier, ref):
 
 
 def _parse_findings(ctx, text):
+    """解析回包。返回 (findings, dropped)：dropped＝被丢弃条目数（P0·S2-B1，调用方必须当回事）。"""
     data = _extract_json(text)
     raw = data.get("findings")
     if not isinstance(raw, list):
         raise ValueError("回包缺少 findings 列表")
     out = []
+    dropped = 0
     for f in raw:
         if not isinstance(f, dict):
+            dropped += 1
             continue
         carrier = str(f.get("carrier") or "").strip()
         msg = str(f.get("message") or "").strip()
         if carrier not in CARRIERS or not msg:
+            dropped += 1
             continue
         target = _resolve_ref(ctx, carrier, str(f.get("ref") or ""))
         if not target:
+            dropped += 1
             continue
         out.append(_f(carrier, target, msg[:200]))
-    return out
+    return out, dropped
+
+
+class FindingsDropped(ValueError):
+    """回包 findings 有不可解析条目：走规则级 error 通道、本轮不对账（P0·S2-B1）。"""
 
 
 def _run_llm_rule(ctx, rule, cfg, ai_chat):
+    """返回 (state, findings)；state ∈ {"ran", "skipped"}（skipped＝无候选，不参与对账）。"""
     key = _rule_key(rule)
     body = LLM_DIGESTS[key](ctx, rule["params"])
     if body is None:
-        return []
+        return "skipped", []
     system = _load_recipe(key)
     text = ai_chat(cfg, [{"role": "system", "content": system},
                          {"role": "user", "content": body}])
-    return _parse_findings(ctx, text)
+    findings, dropped = _parse_findings(ctx, text)
+    if dropped:
+        raise FindingsDropped("%d 条 finding 引用不可解析" % dropped)
+    return "ran", findings
 
 
 # ════════ 对账与运行 ════════
@@ -338,7 +351,7 @@ def reconcile(con, scene_id, rule, findings):
 
 def run_scene(con, scene_id, only=None, ai_chat=None, progress=None):
     """跑审计：only=None → 全部启用规则；only={id,…} → 指定规则（重检，无视开关）。
-    progress(rule, state, found, error, ms) 供任务进度上报（state: running/done/error）。
+    progress(rule, state, found, error, ms) 供任务进度上报（state: running/done/error/skipped）。
     返回 (summary, state)。"""
     ctx = load_ctx(con, scene_id)
     rules = [dict(r) for r in con.execute("SELECT * FROM audit_rules ORDER BY id")]
@@ -356,16 +369,16 @@ def run_scene(con, scene_id, only=None, ai_chat=None, progress=None):
         k = _rule_key(r)
         if k in PROGRAM_RULES:
             try:
-                plan.append([r, PROGRAM_RULES[k](ctx, r["params"]), None, 0])
+                plan.append([r, PROGRAM_RULES[k](ctx, r["params"]), None, 0, "ran"])
             except Exception as e:
-                plan.append([r, None, "程序规则异常：%s" % e, 0])
+                plan.append([r, None, "程序规则异常：%s" % e, 0, "error"])
         elif k in LLM_DIGESTS:
             llm_jobs.append(r)
-            plan.append([r, None, None, 0])
+            plan.append([r, None, None, 0, None])
         else:
-            plan.append([r, None, "无实现", 0])
+            plan.append([r, None, "无实现", 0, "error"])
     if progress:
-        for r, findings, err, ms in plan:
+        for r, findings, err, ms, _st in plan:
             if findings is None and err is None and _rule_key(r) in LLM_DIGESTS:
                 continue  # LLM 规则待跑
             progress(r, "error" if err else "done", len(findings or []), err, ms)
@@ -381,23 +394,32 @@ def run_scene(con, scene_id, only=None, ai_chat=None, progress=None):
                 slot = next(x for x in plan if x[0] is r)
                 try:
                     t1 = time.time()
-                    slot[1] = fut.result()
+                    res = fut.result()
+                    slot[1] = res[1]      # findings
+                    slot[4] = res[0]      # "ran" / "skipped"
                     slot[3] = int((time.time() - t1) * 1000)
+                except FindingsDropped as e:
+                    slot[2] = str(e)
                 except Exception as e:
                     slot[2] = "LLM 调用失败：%s" % e
                 if progress:
-                    progress(r, "error" if slot[2] else "done",
-                             len(slot[1] or []), slot[2], slot[3])
+                    st = "error" if slot[2] else ("skipped" if slot[4] == "skipped" else "done")
+                    progress(r, st, len(slot[1] or []), slot[2], slot[3])
     summary, total = [], 0
-    for r, findings, err, ms in plan:
+    for r, findings, err, ms, st in plan:
         if err:
             summary.append({"id": r["id"], "title": r["title"], "ran": False,
-                            "found": 0, "error": err, "ms": ms})
+                            "found": 0, "error": err, "ms": ms, "skipped": False})
+            continue
+        if st == "skipped":
+            # 无候选：本轮无信息，不得对账（否则遗留 open 会被误判「未再命中」假熄灯；P0·S2-B1）
+            summary.append({"id": r["id"], "title": r["title"], "ran": False,
+                            "found": 0, "error": None, "ms": ms, "skipped": True})
             continue
         if findings is not None:
             reconcile(con, scene_id, r, findings)
         summary.append({"id": r["id"], "title": r["title"], "ran": True,
-                        "found": len(findings or []), "error": None, "ms": ms})
+                        "found": len(findings or []), "error": None, "ms": ms, "skipped": False})
         total += len(findings or [])
     con.commit()
     return ({"scene_id": scene_id, "rules": summary, "found": total,

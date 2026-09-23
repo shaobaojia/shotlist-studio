@@ -274,7 +274,10 @@ class TestLlmRules(unittest.TestCase):
             if "审计配方 · 轴线" in messages[0]["content"]:
                 return {"text": '{"findings":[{"carrier":"seam","ref":"99->01","message":"x"}]}'}
             return {"text": '{"findings": []}'}
-        audit.run_scene(self.con, self.sid, ai_chat=bad_ref)
+        summary, _ = audit.run_scene(self.con, self.sid, ai_chat=bad_ref)
+        axis = [x for x in summary["rules"] if x["title"] == "轴线"][0]
+        self.assertFalse(axis["ran"])                      # 丢弃条目 → 规则级 error（P0·S2-B1）
+        self.assertIn("引用不可解析", axis["error"])
         self.assertEqual(len(_issues(self.con, self.sid, "轴线")), 0)
 
     def test_llm_error_records_summary(self):
@@ -296,6 +299,49 @@ class TestLlmRules(unittest.TestCase):
             return {"text": "不知道。"}
         audit.run_scene(self.con, self.sid, ai_chat=garbage)
         self.assertEqual(_issues(self.con, self.sid, "轴线")[0]["status"], "open")
+
+    def test_skip_and_drop_no_silent_fix(self):
+        """假熄灯回归（P0·S2-B1）：无候选跳过 / 引用丢弃 均不得把存量 open 对账成 fixed。"""
+        rid = {r["title"]: r["id"] for r in self.con.execute("SELECT id, title FROM audit_rules")}["动作具象化"]
+        self.con.execute("UPDATE shots SET blocking='男人僵住' WHERE shot_no='01'")
+        self.con.commit()
+        audit.update_rule(self.con, rid, params={"wordlist": ["僵住"]})
+        calls = []
+
+        def hit(cfg, messages):
+            calls.append(messages[0]["content"])
+            if "审计配方 · 动作具象化" in messages[0]["content"]:
+                return {"text": '{"findings":[{"carrier":"shot","ref":"01","message":"「僵住」不够具象"}]}'}
+            return {"text": '{"findings": []}'}
+
+        audit.run_scene(self.con, self.sid, ai_chat=hit)
+        rows = _issues(self.con, self.sid, "动作具象化")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["status"], "open")
+
+        # ① 词表清空 → 无候选：跳过（不调模型）且不对账，存量 open 不动
+        audit.update_rule(self.con, rid, params={"wordlist": []})
+        calls.clear()
+        summary, _ = audit.run_scene(self.con, self.sid, ai_chat=hit)
+        self.assertFalse(any("动作具象化" in c for c in calls))
+        item = [x for x in summary["rules"] if x["title"] == "动作具象化"][0]
+        self.assertTrue(item["skipped"])
+        self.assertFalse(item["ran"])
+        self.assertEqual(_issues(self.con, self.sid, "动作具象化")[0]["status"], "open")
+
+        # ② 引用不可解析 → 规则级 error：不对账，存量 open 不动
+        audit.update_rule(self.con, rid, params={"wordlist": ["僵住"]})
+
+        def bad(cfg, messages):
+            if "审计配方 · 动作具象化" in messages[0]["content"]:
+                return {"text": '{"findings":[{"carrier":"shot","ref":"99","message":"x"}]}'}
+            return {"text": '{"findings": []}'}
+
+        summary, _ = audit.run_scene(self.con, self.sid, ai_chat=bad)
+        item = [x for x in summary["rules"] if x["title"] == "动作具象化"][0]
+        self.assertFalse(item["ran"])
+        self.assertIn("引用不可解析", item["error"])
+        self.assertEqual(_issues(self.con, self.sid, "动作具象化")[0]["status"], "open")
 
 
 class TestJobManager(unittest.TestCase):
@@ -337,7 +383,7 @@ class TestJobManager(unittest.TestCase):
             j = m.status(1)
             self.assertFalse(j["running"], "job 未在限时内完成")
             states = {x["title"]: x["state"] for x in j["rules"]}
-            self.assertTrue(all(s == "done" for s in states.values()), states)
+            self.assertTrue(all(s in ("done", "skipped") for s in states.values()), states)
             self.assertEqual(j["found_total"], 4)
             con = factory()
             try:

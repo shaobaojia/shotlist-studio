@@ -57,7 +57,12 @@ function build() {
   document.body.appendChild(panel);
 }
 
-function doneCount(job) { return job.rules.filter((r) => r.state === 'done' || r.state === 'error').length; }
+function doneCount(job) { return job.rules.filter((r) => r.state === 'done' || r.state === 'error' || r.state === 'skipped').length; }
+
+function skipNote(job) {
+  const sk = job ? job.rules.filter((r) => r.state === 'skipped') : [];
+  return sk.length ? '跳过（无候选）：' + sk.map((r) => r.title).join('、') : '';
+}
 
 function renderBtn() {
   if (!btn) return;
@@ -83,13 +88,15 @@ function render() {
 
   if (job && job.running) {
     const running = job.rules.filter((r) => r.state === 'running').map((r) => r.title).join('、');
-    statsEl.textContent = '审计中 ' + doneCount(job) + '/' + job.rules.length + (running ? '（' + running + '）' : '');
+    const sk = skipNote(job);
+    statsEl.textContent = '审计中 ' + doneCount(job) + '/' + job.rules.length + (running ? '（' + running + '）' : '') + (sk ? ' · ' + sk : '');
     statsEl.classList.add('busy');
     runBtn.disabled = true;
     runBtn.textContent = '审计中…';
   } else {
     const c = (st && st.counts) || { open: 0, fixed: 0, waived: 0 };
-    statsEl.textContent = '未处理 ' + c.open + ' · 已修 ' + c.fixed + ' · 豁免 ' + c.waived;
+    const sk = job ? skipNote(job) : '';
+    statsEl.textContent = '未处理 ' + c.open + ' · 已修 ' + c.fixed + ' · 豁免 ' + c.waived + (sk ? ' · ' + sk : '');
     statsEl.classList.remove('busy');
     runBtn.disabled = false;
     runBtn.textContent = '跑审计';
