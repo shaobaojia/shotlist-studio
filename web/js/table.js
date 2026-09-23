@@ -377,6 +377,19 @@ export function beatSection(b, data, opts) {
       renderCell: () => { title.textContent = beatTitle(b); },
     });
     head.appendChild(title);
+    const mood = el('span', 'beat-mood');
+    if (!b.mood_temp) mood.classList.add('empty');
+    renderMoodChip(mood, b);
+    attachEditable(mood, {
+      table: 'beats', id: b.id, field: 'mood_temp', label: '情绪温度',
+      getValue: () => b.mood_temp,
+      onLocal: (v) => { b.mood_temp = v; },
+      renderCell: () => {
+        mood.classList.toggle('empty', !b.mood_temp);
+        renderMoodChip(mood, b);
+      },
+    });
+    head.appendChild(mood);
     sec.appendChild(head);
   } else {
     sec.appendChild(el('div', 'space-label', '▸ ' + (b.name || '未归节拍') + ' (' + b.shots.length + ' 镜)'));
@@ -472,6 +485,13 @@ function beatInsertIndex(data, b) {
 
 function beatTitle(b) {
   return 'beat ' + b.beat_no + '：' + (b.name || '') + ' (' + b.shots.length + ' 镜)';
+}
+
+// 节拍头「温度」芯片（M5k-3）：情绪温度直填口（喂挂件带情绪曲线）
+function renderMoodChip(sp, b) {
+  const v = String(b.mood_temp == null ? '' : b.mood_temp).trim();
+  sp.textContent = v ? ('温度 ' + v) : '温度 ＋';
+  sp.title = '情绪温度：点着填 0–10（喂给挂件带的情绪曲线）';
 }
 
 function renderBeatAction(act, b) {

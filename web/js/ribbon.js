@@ -91,7 +91,7 @@ export function buildRibbon(data, shots) {
   inner.appendChild(axis);
   scroll.appendChild(inner);
   panel.appendChild(scroll);
-  const moodHint = el('div', 'dk-mood-empty', '情绪温度未填写——节拍行填「情绪温度」（如 7）后这里出曲线');
+  const moodHint = el('div', 'dk-mood-empty', '情绪温度未填写——点节拍头上的「温度」芯片填（0–10），或用选区条「设值…」套到节拍');
   panel.appendChild(moodHint);
 
   // 条条

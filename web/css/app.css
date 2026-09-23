@@ -98,6 +98,9 @@ a { color: inherit; text-decoration: none; }
 .beat { margin-bottom: 18px; position: relative; background: var(--paper); border: 1px solid rgba(105, 88, 58, 0.24); border-radius: 10px; padding: 12px 13px 7px; box-shadow: var(--shadow-card); }
 .beat-head { display: flex; align-items: baseline; gap: 9px; margin: 2px 0 6px; }
 .beat-label { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; color: var(--dim); background: rgba(255, 255, 255, 0.4); border: 1px solid rgba(60, 50, 30, 0.16); }
+.beat-mood { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; color: #8a6f3c; background: rgba(216, 196, 152, 0.42); border: 1px solid rgba(105, 88, 58, 0.35); cursor: text; white-space: nowrap; margin-left: auto; }
+.beat-mood.empty { color: var(--dim); background: transparent; border-style: dashed; }
+.beat-mood.empty:hover { border-color: var(--accent); color: var(--ink2); }
 .beat-title { color: var(--head); font-size: 15px; font-weight: 700; }
 .beat-action { font-size: 12.5px; color: #4c463a; margin: 2px 0 10px; padding-left: 11px; border-left: 2px solid rgba(188, 63, 44, 0.32); line-height: 1.72; }
 .space-label { color: var(--dim); font-size: 13px; font-weight: 600; margin: 6px 0 8px; }
