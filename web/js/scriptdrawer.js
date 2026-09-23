@@ -311,43 +311,61 @@ async function doParse(text, list) {
       if (cb && cb.checked && cb._seg) picked.push({ id: Number(row.dataset.sceneId), seg: cb._seg, cb, row });
     });
     if (!picked.length) { toast('先勾选要导入的场'); return; }
-    const priors = [];
-    let done = 0;
-    for (const j of picked) {
-      const sc = scenes.find((x) => x.id === j.id);
-      priors.push({ id: j.id, prior: sc && sc.script != null ? String(sc.script) : '' });
-      try {
-        await api.update('scenes', j.id, 'script', j.seg);
+    // 写前重取现值：撤销基线取「此刻库内真值」，抹平解析→导入之间的外部编辑（P0·F4-B2）
+    let priors;
+    try {
+      const fj = await api.film();
+      const fmap = new Map(((fj && fj.scenes) || []).map((x) => [x.id, x]));
+      priors = picked.map((j) => {
+        const f = fmap.get(j.id);
+        return { id: j.id, prior: f && f.script != null ? String(f.script) : '' };
+      });
+    } catch (err) {
+      toast('读取最新台本失败：' + err.message, 'err');
+      return;
+    }
+    let ret;
+    try {
+      ret = await api.batch(picked.map((j) => ({ table: 'scenes', id: j.id, field: 'script', value: j.seg })));   // 一次往返（P0·F4）
+    } catch (err) {
+      toast('导入失败：' + err.message, 'err');
+      return;
+    }
+    const results = (ret && ret.results) || [];
+    const changedIds = new Set(results.filter((r) => r.changed).map((r) => r.id));
+    const done = picked.filter((j) => changedIds.has(j.id));
+    if (done.length) {
+      const byId = new Map(scenes.map((x) => [x.id, x]));   // 预建查找（P0·F4）
+      const undoPriors = priors.filter((p) => changedIds.has(p.id));
+      for (const j of done) {
+        const sc = byId.get(j.id);
         if (sc) sc.script = j.seg;
         const cur = ctx.getScene();
         if (cur && cur.id === j.id) cur.script = j.seg;
-        done++;
-      } catch (err) {
-        toast('导入中断：' + err.message, 'err');
-        break;
       }
-    }
-    if (done) {
       recordUndo({
         type: 'custom', label: '导入台本',
         undo: async () => {
-          for (const p of priors.slice(0, done)) {
-            await api.update('scenes', p.id, 'script', p.prior);
-            const cur = ctx.getScene();
+          await api.batch(undoPriors.map((p) => ({ table: 'scenes', id: p.id, field: 'script', value: p.prior })));
+          const cur = ctx.getScene();
+          for (const p of undoPriors) {
             if (cur && cur.id === p.id) cur.script = p.prior;
           }
           refreshScriptDrawer();
         },
       });
-      toast('已导入 ' + done + ' 场台本（Ctrl+Z 可整批撤）');
+      toast('已导入 ' + done.length + ' 场台本（Ctrl+Z 可整批撤）');
       refreshScriptDrawer();
-      for (const j of picked.slice(0, done)) {
+      for (const j of done) {
         j.cb.checked = false;
         if (!j.row.querySelector('.sd-imp-warn')) {
           j.row.appendChild(el('span', 'sd-imp-warn', '已有台本 · 勾选覆盖'));
         }
       }
       refreshStat();
+    } else {
+      const ferr = results.find((r) => r.error);
+      toast('导入未生效：' + (ferr ? ferr.error : '无变更'), 'err');
     }
   });
 }

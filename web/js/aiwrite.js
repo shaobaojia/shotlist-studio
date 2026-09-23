@@ -173,6 +173,8 @@ function startSingleCard(action, target, o) {
     floatLeave('ai', close);
   });
   floatEnter('ai', close);   // 互斥：AI 卡同层开新关旧（L6）
+  document.addEventListener('scroll', onScroll, true);   // 跟随锚点（与 onClose 的 remove 严格对齐）（P0·F4-B3）
+  window.addEventListener('resize', onScroll);
 
   const setLoading = () => {
     spinHead(head, '✦ ' + ACTION_CN[action] + ' · 生成中…');
@@ -250,7 +252,7 @@ function startSingleCard(action, target, o) {
       const res = await api.aiPreview({ scene_id: sid, action: action, targets: [target] });
       jobId = res.job.id;
       if (res.job.joined) toast('本场已有生成任务在跑——已并入，出稿一起看');
-      const r = await pollJob(() => api.aiJob(jobId).then((x) => x.job), { interval: 650, alive: life.alive });
+      const r = await pollJob(() => api.aiJob(jobId).then((x) => x.job), { interval: 650, alive: life.alive, tolerant: true });
       if (r.st === 'abort') return;
       if (life.isClosed()) return;
       if (r.st === 'done') { setDone(r.job); return; }
@@ -418,7 +420,7 @@ function startBatchCard(opts) {
       const res = await api.aiPreview(payload);
       jobId = res.job.id;
       if (res.job.joined) toast('本场已有生成任务在跑——已并入，出稿一起看');
-      const r = await pollJob(() => api.aiJob(jobId).then((x) => x.job), { interval: 650, alive: life.alive });
+      const r = await pollJob(() => api.aiJob(jobId).then((x) => x.job), { interval: 650, alive: life.alive, tolerant: true });
       if (r.st === 'abort') return;
       if (life.isClosed()) return;
       if (r.st === 'done') { setDone(r.job); return; }
