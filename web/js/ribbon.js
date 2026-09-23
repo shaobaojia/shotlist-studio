@@ -17,6 +17,30 @@ const ZMIN = 0.35, ZMAX = 4;
 let ST = { open: false, size: true, rhythm: false, mood: false, h: 44, zoom: 1 };
 let _bt = 0, _sv = 0;
 
+// ── 悬浮提示（300ms 延时；取代原生 title——原生延时不可控且 ~1s）──
+let _tipEl = null, _tipT = 0;
+function tipHide() {
+  if (_tipT) { clearTimeout(_tipT); _tipT = 0; }
+  if (_tipEl) _tipEl.hidden = true;
+}
+function tipShow(tgt) {
+  if (!tgt.isConnected) return;
+  const txt = tgt.dataset.tip || '';
+  if (!txt) return;
+  if (!_tipEl) { _tipEl = el('div', 'dk-tip'); _tipEl.hidden = true; document.body.appendChild(_tipEl); }
+  _tipEl.textContent = txt;
+  _tipEl.hidden = false;
+  const r = tgt.getBoundingClientRect();
+  const w = _tipEl.offsetWidth, vw = document.documentElement.clientWidth;
+  _tipEl.style.left = Math.round(Math.min(Math.max(8, r.left + r.width / 2 - w / 2), vw - w - 8)) + 'px';
+  _tipEl.style.bottom = Math.round(window.innerHeight - r.top + 9) + 'px';
+}
+function bindTip(node) {
+  node.addEventListener('mouseenter', () => { if (_tipT) clearTimeout(_tipT); _tipT = setTimeout(() => tipShow(node), 300); });
+  node.addEventListener('mouseleave', tipHide);
+  node.addEventListener('click', tipHide);
+}
+
 function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
 
 function load() {
@@ -99,7 +123,9 @@ export function buildRibbon(data, shots) {
   for (const s of shots) {
     const b = el('button', 'dk-b');
     b.type = 'button';
-    b.title = '镜 ' + (s.shot_no || '') + ' · ' + (s.shot_size || '未填景别') + (s.duration ? ' · ' + s.duration + 's' : '') + ' · 点击跳镜';
+    b.dataset.tip = '镜 ' + (s.shot_no || '') + ' · ' + (s.shot_size || '未填景别') + (s.duration ? ' · ' + s.duration + 's' : '') + ' · 点击跳镜';
+    b.setAttribute('aria-label', b.dataset.tip);
+    bindTip(b);
     b.addEventListener('click', () => jump(s.id));
     strip.appendChild(b);
     bars.push(b);
@@ -143,9 +169,8 @@ export function buildRibbon(data, shots) {
       dot.setAttribute('class', 'dk-mdot');
       dot.style.pointerEvents = 'auto';
       dot.style.cursor = 'pointer';
-      const ti = document.createElementNS(NS, 'title');
-      ti.textContent = t.name + ' · 温度 ' + t.v;
-      dot.appendChild(ti);
+      dot.dataset.tip = t.name + ' · 温度 ' + t.v;
+      bindTip(dot);
       const fid = t.firstId;
       dot.addEventListener('click', () => jump(fid));
       svg.appendChild(dot);
@@ -182,6 +207,7 @@ export function buildRibbon(data, shots) {
 
   // ── 布局 ──
   function layout(animate) {
+    tipHide();
     const z = ST.zoom, vh = ST.h / BASE_V;
     inner.style.height = (ST.h + 18) + 'px';
     strip.style.height = ST.h + 'px';
@@ -367,6 +393,7 @@ export function buildRibbon(data, shots) {
 
   root.appendChild(panel);
   root.appendChild(bar);
+  root.addEventListener('mouseleave', tipHide);
   root.classList.add('dk-noanim');
   layout(false);
   requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove('dk-noanim')));
