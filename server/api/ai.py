@@ -2,7 +2,7 @@
 
 安全口径：key 明文永不回传前端（public_config 只有 has_key 布尔）；api_key 留空 = 不改动。
 """
-from core import ai, db, rewrite
+from core import ai, db, fields, rewrite
 
 
 def settings_get(m, q):
@@ -50,7 +50,7 @@ def preview(m, body, q):
     """创作预览（M4b）：起后台任务出稿；参数错立即 400。预览零写入。"""
     body = body or {}
     sid = body.get("scene_id")
-    if not isinstance(sid, int):
+    if not fields.is_id(sid):
         return {"error": "参数不完整（scene_id）"}, 400
     con = db.connect()
     try:
@@ -84,7 +84,7 @@ def apply_op(m, body, q):
     """应用预览条目（source=ai 落库；一步事务；前端推撤销栈）。"""
     body = body or {}
     jid = body.get("job_id")
-    if not isinstance(jid, int):
+    if not fields.is_id(jid):
         return {"error": "参数不完整（job_id）"}, 400
     job = rewrite.JOBS.get(jid)
     if not job:

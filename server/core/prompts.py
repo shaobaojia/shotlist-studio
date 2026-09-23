@@ -17,9 +17,7 @@ MAX_BLOCK_TEXT = 20000   # 块正文长度上限
 MAX_CAT_NAME = 40        # 分类名长度上限
 
 
-def is_id(x):
-    """行 id 判据：非 bool 的 int（JSON true 不得当 1 用）。"""
-    return isinstance(x, int) and not isinstance(x, bool)
+is_id = fields.is_id   # 判据已上移 core/fields（P0·S3-B1）；别名保留，旧引用照常。
 
 
 def _check_len(value, label, max_len):

@@ -1,5 +1,5 @@
 """草稿档接口（M4b-4）：场次草稿 / 组级初稿 / 轮询 / 落入。薄层，逻辑在 core/draft。"""
-from core import draft
+from core import draft, fields
 
 JOBS = draft.DraftJobs()
 
@@ -7,7 +7,7 @@ JOBS = draft.DraftJobs()
 def start(m, body, q):
     body = body or {}
     sid, script = body.get("scene_id"), body.get("script")
-    if not isinstance(sid, int):
+    if not fields.is_id(sid):
         return {"error": "参数不完整（scene_id）"}, 400
     if not isinstance(script, str):
         return {"error": "参数不完整（script）"}, 400
@@ -20,7 +20,7 @@ def start(m, body, q):
 def prompt(m, body, q):
     body = body or {}
     sid, shid = body.get("scene_id"), body.get("shot_id")
-    if not isinstance(sid, int) or not isinstance(shid, int):
+    if not fields.is_id(sid) or not fields.is_id(shid):
         return {"error": "参数不完整（scene_id / shot_id）"}, 400
     try:
         return {"ok": True, "job": JOBS.start_prompt(sid, shid)}, 200
@@ -43,7 +43,7 @@ def job_get(m, q):
 def apply_op(m, body, q):
     body = body or {}
     jid = body.get("job_id")
-    if not isinstance(jid, int):
+    if not fields.is_id(jid):
         return {"error": "参数不完整（job_id）"}, 400
     try:
         res = JOBS.apply(jid)

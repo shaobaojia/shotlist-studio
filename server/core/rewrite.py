@@ -69,7 +69,7 @@ def _norm_targets(con, scene_id, targets):
             out.append(item)
             continue
         table, rid, fld = t.get("table"), t.get("id"), t.get("field")
-        ok = (table in AI_FIELDS and isinstance(rid, int)
+        ok = (table in AI_FIELDS and fields.is_id(rid)
               and isinstance(fld, str) and fld in AI_FIELDS[table])
         if not ok:
             raise ValueError("第 %d 条目标不受支持（%s.%s）" % (i + 1, table, fld))
@@ -163,6 +163,8 @@ class PreviewJobs(jobs.JobBoard):
               chat=None, connect_factory=None):
         """校验目标（同步——参数错立即抛）→ 建任务 → 后台出稿。返回任务快照。
         同场已在跑 → 并入该任务（快照带 joined=True）；并发超限 → ValueError。"""
+        if not fields.is_id(scene_id):
+            raise ValueError("参数不完整（scene_id）")
         if instruction is not None and not isinstance(instruction, str):
             raise ValueError("instruction 必须是文本")
         if action is not None and not isinstance(action, str):
@@ -257,7 +259,7 @@ def apply_items(con, job, item_ids=None):
     picks = job.get("items") or []
     if item_ids is not None:
         if (not isinstance(item_ids, list) or not item_ids
-                or not all(isinstance(x, int) for x in item_ids)):
+                or not all(fields.is_id(x) for x in item_ids)):
             raise ValueError("参数格式错误（item_ids）")
         want = set(item_ids)
     else:

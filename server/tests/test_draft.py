@@ -167,6 +167,8 @@ class TestSceneFlow(Base):
             m.start_scene(1, "字" * 6001, chat=stub({}), connect_factory=self.factory)
         with self.assertRaises(ValueError):
             m.start_scene(99999, SCRIPT, chat=stub({}), connect_factory=self.factory)
+        with self.assertRaises(ValueError):
+            m.start_scene(True, SCRIPT, chat=stub({}), connect_factory=self.factory)   # bool 不得当 1 用（P0·S3-B1）
 
     def test_empty_generation_errors(self):
         sid = self.mk_scene()
@@ -314,6 +316,10 @@ class TestPromptDraft(Base):
             m.start_prompt(99999, 1, chat=stub({"text": "x"}), connect_factory=self.factory)
         with self.assertRaises(ValueError):
             m.start_prompt(sid, 99999, chat=stub({"text": "x"}), connect_factory=self.factory)
+        with self.assertRaises(ValueError):
+            m.start_prompt(True, 1, chat=stub({"text": "x"}), connect_factory=self.factory)   # P0·S3-B1
+        with self.assertRaises(ValueError):
+            m.start_prompt(sid, True, chat=stub({"text": "x"}), connect_factory=self.factory)
 
     def test_prompt_recipe_dispatch(self):
         """三份草稿配方现读可载（注册表口径）。"""

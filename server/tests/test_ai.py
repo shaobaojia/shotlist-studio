@@ -194,6 +194,8 @@ class TestPreview(Base):
         with self.assertRaises(ValueError):
             m.start(1, [self.tshot("01")] * 31, action="rewrite", connect_factory=f)
         with self.assertRaises(ValueError):
+            m.start(True, [self.tshot("01")], action="rewrite", connect_factory=f)   # bool 不得当 1 用（P0·S3-B1）
+        with self.assertRaises(ValueError):
             m.start(1, [self.tshot("01")], connect_factory=f)          # 无 action/instruction
         with self.assertRaises(ValueError):
             m.start(1, [self.tshot("01")], action="nope", connect_factory=f)

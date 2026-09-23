@@ -9,7 +9,7 @@
 import threading
 import time
 
-from . import ai, db, digest, jobs, ops
+from . import ai, db, digest, fields, jobs, ops
 from .rewrite import _extract_json, load_recipe
 
 DRAFT_BEATS_RECIPE = "draft_beats.md"
@@ -109,6 +109,8 @@ class DraftJobs(jobs.JobBoard):
     # ── 场级：从台本出草稿 ──
 
     def start_scene(self, scene_id, script, chat=None, connect_factory=None):
+        if not fields.is_id(scene_id):
+            raise ValueError("参数不完整（scene_id）")
         script = (script or "").strip()
         if len(script) < SCRIPT_MIN:
             raise ValueError("台本太短（至少 %d 字）" % SCRIPT_MIN)
@@ -184,6 +186,8 @@ class DraftJobs(jobs.JobBoard):
     # ── 组级：提示词初稿 ──
 
     def start_prompt(self, scene_id, shot_id, chat=None, connect_factory=None):
+        if not fields.is_id(scene_id) or not fields.is_id(shot_id):
+            raise ValueError("参数不完整（scene_id / shot_id）")
         con = connect_factory() if connect_factory else db.connect()
         try:
             sc = con.execute("SELECT * FROM scenes WHERE id=?", (scene_id,)).fetchone()

@@ -13,6 +13,12 @@ options = 类型化控件的预设清单（下拉）：
 CAM_TIERS = ["全景 ★", "中全 ★★", "中景 ★★★", "中近 ★★★", "近景 ★★★★", "特写 ★★★★★", "极特 ★★★★★"]
 CAM_FOCALS = ["24mm", "35mm", "50mm", "85mm", "100mm"]
 
+
+def is_id(x):
+    """行 id 判据（单点；P0·S3-B1）：非 bool 的 int——JSON true 不得当 1 用。"""
+    return isinstance(x, int) and not isinstance(x, bool)
+
+
 # 块库写白名单（M3 提示词域；块库不记痕迹、不进 /api/meta 的表格字段）
 BLOCK_FIELDS = ["text", "category_id", "pinned", "position"]
 BLOCK_WRITE_KEYS = set(BLOCK_FIELDS)
