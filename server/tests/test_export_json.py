@@ -31,6 +31,17 @@ class TestExportJson(unittest.TestCase):
         # 全部值为 JSON 原生类型（可序列化）
         json.dumps(data, ensure_ascii=False)
 
+    def test_mask_keys_redacts_settings(self):
+        con = make_base_db()
+        con.execute("INSERT INTO settings (key, value) VALUES ('ai_api_key', 'sk-fake-value-for-test')")
+        con.commit()
+        data = export_json.dump_db(con, mask_keys=True)
+        text = json.dumps(data, ensure_ascii=False)
+        self.assertNotIn("sk-", text)
+        vals = {r["key"]: r["value"] for r in data["tables"]["settings"]}
+        self.assertEqual(vals.get("ai_api_key"), "<redacted>")
+        self.assertIn("settings.ai_api_key", data["meta"]["masked_fields"])
+
     def test_roundtrip_to_text(self):
         con = make_base_db()
         data = export_json.dump_db(con)

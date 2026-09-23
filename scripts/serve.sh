@@ -2,32 +2,78 @@
 # shotlist-studio 服务管理（:8094）—— 脱会话常驻 + 崩溃自动重拉
 # 用法: bash scripts/serve.sh {start|stop|status}
 # ⚠️ 不要用 Hermes 后台进程方式跑：会话关闭时会被 SIGTERM 清掉（2026-09-19 实证）。
+set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${PORT:-8094}"
 PIDFILE="$ROOT/data/serve.pid"
 LOG="$ROOT/data/serve.log"
-mkdir -p "$ROOT/data"
-alive() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null; }
+
+# pidfile：第 1 行 pid、第 2 行启动时刻（ps lstart；防 PID 复用误杀；兼容旧单行格式）
+alive() {
+  local p st now
+  p="$(head -n1 "$PIDFILE" 2>/dev/null || true)"
+  [ -n "$p" ] || return 1
+  kill -0 "$p" 2>/dev/null || return 1
+  st="$(sed -n '2p' "$PIDFILE" 2>/dev/null || true)"
+  if [ -n "$st" ]; then
+    now="$(ps -o lstart= -p "$p" 2>/dev/null | sed 's/^ *//' || true)"
+    [ -z "$now" ] || [ "$now" = "$st" ] || return 1
+  fi
+  return 0
+}
 healthy() { curl -sf -m 2 "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; }
+
 case "${1:-status}" in
   start)
     if healthy; then echo "已在运行（健康）"; exit 0; fi
+    mkdir -p "$ROOT/data"
     cd "$ROOT" || exit 1
-    setsid bash -c 'echo $$ > '"$PIDFILE"'; while true; do
+    setsid bash -c 'echo $$ > '"$PIDFILE"'; ps -o lstart= -p $$ | sed "s/^ *//" >> '"$PIDFILE"'; while true; do
       echo "[$(date "+%F %T")] start" >> '"$LOG"'
-      python3 -u server/app.py >> '"$LOG"' 2>&1
+      python3 -u server/app.py --port '"$PORT"' >> '"$LOG"' 2>&1
       echo "[$(date "+%F %T")] exited($?), retry in 2s" >> '"$LOG"'
       sleep 2
     done' < /dev/null > /dev/null 2>&1 &
-    for i in $(seq 1 12); do sleep 0.5; healthy && break; done
-    healthy && echo "已启动 → http://192.168.3.65:$PORT/" || { echo "启动异常，日志尾部："; tail -8 "$LOG"; exit 1; }
+    for i in $(seq 1 12); do sleep 0.5; if healthy; then break; fi; done
+    if healthy; then
+      echo "已启动 → http://127.0.0.1:$PORT/"
+    else
+      echo "启动异常，日志尾部："; tail -8 "$LOG"; exit 1
+    fi
     ;;
   stop)
-    alive && kill -- -"$(cat "$PIDFILE")" 2>/dev/null; sleep 0.5; rm -f "$PIDFILE"
-    healthy && echo "警告: 端口 $PORT 仍通（其他进程？）" || echo "已停止"
+    if ! alive; then
+      if healthy; then
+        echo "警告：pidfile 无效，但端口 $PORT 仍在响应（孤儿进程？未做处理）" >&2
+        exit 1
+      fi
+      rm -f "$PIDFILE"
+      echo "未在运行"
+      exit 0
+    fi
+    p="$(head -n1 "$PIDFILE")"
+    kill -- -"$p" 2>/dev/null || true
+    for i in $(seq 1 20); do sleep 0.25; if ! alive; then break; fi; done
+    if alive; then
+      echo "停止失败：进程组仍在（pidfile 已保留，可重试）" >&2
+      exit 1
+    fi
+    rm -f "$PIDFILE"
+    if healthy; then
+      echo "警告: 端口 $PORT 仍通（其他进程？）" >&2
+      exit 1
+    fi
+    echo "已停止"
     ;;
   status)
-    healthy && echo "运行中（健康）pid=$(cat "$PIDFILE" 2>/dev/null)" || echo "未运行"
+    if healthy; then
+      echo "运行中（健康）pid=$(head -n1 "$PIDFILE" 2>/dev/null || true)"
+    else
+      echo "未运行"
+    fi
     ;;
-  *) echo "用法: bash scripts/serve.sh {start|stop|status}"; exit 2;;
+  *)
+    echo "用法: bash scripts/serve.sh {start|stop|status}" >&2
+    exit 2
+    ;;
 esac

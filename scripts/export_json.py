@@ -14,16 +14,24 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
 
+from core import ai as core_ai  # noqa: E402
 from core import db as core_db  # noqa: E402
 
 
-def dump_db(con):
-    """把整库转成可 JSON 化的 dict：meta + schema（建表语句）+ tables（逐表逐行）。"""
+def dump_db(con, mask_keys=False):
+    """把整库转成可 JSON 化的 dict：meta + schema（建表语句）+ tables（逐表逐行）。
+    mask_keys=True：命中 ai.KEY_FIELD 的设置行写 <redacted>，meta.masked_fields 记账（P0·S4-B1）。"""
     names = [r["name"] for r in con.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
     tables = {}
+    masked = []
     for n in names:
         rows = [dict(r) for r in con.execute('SELECT * FROM "%s" ORDER BY rowid' % n)]
+        if mask_keys:
+            for r in rows:
+                if r.get("key") == core_ai.KEY_FIELD:
+                    r["value"] = "<redacted>"
+                    masked.append("%s.%s" % (n, r["key"]))
         tables[n] = rows
     schema = [r["sql"] for r in con.execute(
         "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name")]
@@ -32,6 +40,7 @@ def dump_db(con):
             "app": "shotlist-studio",
             "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "source_db": str(core_db.DB_PATH),
+            "masked_fields": masked,
         },
         "schema": schema,
         "tables": tables,
@@ -48,7 +57,7 @@ def main():
         return 1
     con = core_db.connect()
     try:
-        data = dump_db(con)
+        data = dump_db(con, mask_keys=True)
     finally:
         con.close()
 
@@ -63,6 +72,8 @@ def main():
     counts = {k: len(v) for k, v in data["tables"].items()}
     print("✓ 已导出 %s（%.1f KB）" % (fname, fname.stat().st_size / 1024))
     print("  行数：%s" % json.dumps(counts, ensure_ascii=False))
+    if data["meta"].get("masked_fields"):
+        print("  已脱敏：%s" % ", ".join(data["meta"]["masked_fields"]))
     return 0
 
 

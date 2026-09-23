@@ -7,7 +7,7 @@
   - 场景价值字段来自 价值弧线_s010-s080.md；s010 节拍明细来自 s010_第一场_分析.md
   - 提示词：↑sNNN-NN 引用 → 链式解析并组；直接文本 → 立组（DESIGN §3.4）
 """
-import argparse, json, re, sqlite3, sys
+import argparse, json, re, shutil, sqlite3, sys
 from datetime import datetime
 from pathlib import Path
 from collections import Counter
@@ -82,15 +82,19 @@ def main():
 
     export = Path(args.export) if args.export else latest_export()
     db_path = Path(args.db) if args.db else ROOT / "data" / "studio.db"
-    if db_path.exists():
-        if not args.reset:
-            sys.exit("db 已存在，用 --reset 重建：%s" % db_path)
-        db_path.unlink()
 
+    # 输入读取与解析全部前置：任一失败即退出，旧库分毫不动（P0·S4-B2）
     sb = json.loads((export / "storyboard.json").read_text(encoding="utf-8"))
     an = json.loads((export / "analysis.json").read_text(encoding="utf-8"))
     arc = parse_arc_table(args.arc)
     s010a = parse_s010_analysis(args.s010_analysis)
+
+    if db_path.exists():
+        if not args.reset:
+            sys.exit("db 已存在，用 --reset 重建：%s" % db_path)
+        bak = db_path.with_name(db_path.name + ".bak-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+        shutil.copy2(db_path, bak)   # 删前留底（P0·S4-B2）
+        db_path.unlink()
     warnings = []
 
     con = sqlite3.connect(db_path)
