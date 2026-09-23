@@ -927,3 +927,45 @@ table.shots tr.shot.cover-off:hover td { opacity: 1; }
 .bco-hint { margin-left: auto; color: var(--dim); font-size: 10px; }
 .bco-newcat { display: flex; padding: 4px 9px 2px; }
 .bco-newcat input, .bco-input { flex: 1; min-width: 0; box-sizing: border-box; font: inherit; font-size: 12px; padding: 2px 6px; border: 1px solid rgba(188, 63, 44, .6); border-radius: 4px; background: #fff; }
+
+/* ── 挂件带（M5 批5 · 形态 B）：表头上方细带，默认收起 ── */
+.ribbon { margin: 0 0 12px; }
+.rb-bar { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 10px; box-sizing: border-box; background: rgba(238, 230, 211, .6); border: 1px solid rgba(105, 88, 58, .18); border-radius: 6px; cursor: pointer; font-size: 12px; color: var(--dim); user-select: none; }
+.rb-bar:hover { border-color: rgba(105, 88, 58, .34); }
+.rb-caret { font-size: 10px; color: var(--ink2); }
+.rb-label { font-weight: 600; color: var(--head); letter-spacing: .04em; }
+.rb-legend { margin-left: auto; font-size: 11px; color: var(--dim2); }
+.rb-body { display: none; margin-top: 6px; padding: 10px 12px; background: rgba(246, 240, 225, .7); border: 1px solid rgba(105, 88, 58, .15); border-radius: 8px; }
+.ribbon.open .rb-body { display: block; }
+.ribbon.open .rb-bar { border-color: rgba(105, 88, 58, .3); background: rgba(238, 230, 211, .85); }
+.rb-w + .rb-w { margin-top: 10px; }
+.rb-wh { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.rb-wt { font-size: 12px; font-weight: 600; color: var(--head); }
+.rb-wnote { font-size: 11px; color: var(--dim); }
+/* ① 序列条：高度/色阶＝档位，底对齐 */
+.rb-seq { display: flex; align-items: flex-end; height: 22px; padding-bottom: 2px; }
+.rb-cell { width: 20px; margin-right: 3px; padding: 0; border: none; border-radius: 2px; cursor: pointer; flex: none; }
+.rb-cell:hover { outline: 2px solid rgba(188, 63, 44, .4); outline-offset: 1px; }
+.rb-cell.rb-bl { margin-left: -3px; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.rb-cell.rb-br { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.rb-cell[data-lv="0"] { height: 10px; background: transparent; border: 1px dashed rgba(105, 88, 58, .45); box-sizing: border-box; }
+.rb-cell[data-lv="1"] { height: 7px;  background: #ece2ca; }
+.rb-cell[data-lv="2"] { height: 9px;  background: #e3d6ba; }
+.rb-cell[data-lv="3"] { height: 11px; background: #d9c8a6; }
+.rb-cell[data-lv="4"] { height: 13px; background: #cfb88f; }
+.rb-cell[data-lv="5"] { height: 15px; background: #dc9f88; }
+.rb-cell[data-lv="6"] { height: 17px; background: #c87457; }
+.rb-cell[data-lv="7"] { height: 19px; background: #bc3f2c; }
+/* ② 节奏视窗：时间轴块 + 曲线 */
+.rb-scroll { overflow-x: auto; padding-bottom: 2px; }
+.rb-time { position: relative; height: 62px; }
+.rb-block { position: absolute; top: 0; height: 18px; box-sizing: border-box; border: 1px solid rgba(60, 50, 30, .18); border-radius: 3px; cursor: pointer; padding: 0; }
+.rb-block:hover { border-color: var(--accent); }
+.rb-t0 { background: #efe6d2; }
+.rb-t1 { background: #e0cfad; }
+.rb-orphan { background: repeating-linear-gradient(45deg, #efe6d2, #efe6d2 4px, #e7dcc3 4px, #e7dcc3 8px); }
+.rb-svg { position: absolute; left: 0; top: 24px; overflow: visible; }
+.rb-ps { stroke: var(--accent); stroke-width: 2; fill: none; stroke-linecap: round; }
+.rb-ps-empty { stroke: rgba(60, 50, 30, .35); stroke-dasharray: 3 3; stroke-width: 1.5; }
+.rb-lk { stroke: rgba(188, 63, 44, .4); stroke-width: 1.5; }
+.rb-mood-empty { position: absolute; top: 26px; left: 2px; font-size: 11px; color: var(--dim); }

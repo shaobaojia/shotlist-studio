@@ -19,6 +19,7 @@ import { bindAuditBtn, toggleAuditPanel, closeAuditPanel } from './auditpanel.js
 import { initAiWrite, closeAiCards } from './aiwrite.js';
 import { openSceneDraft, closeDraftCards } from './draft.js';
 import { initScriptDrawer, openScriptDrawer, openScriptImport, scriptsOnRepaint } from './scriptdrawer.js';
+import { buildRibbon } from './ribbon.js';
 
 const PREFS_KEY = 'shotlist_prefs_v1';
 let prefs = loadPrefs();   // { wrap, hidden:{key:true=隐藏}, widths:{key:px} }
@@ -231,6 +232,10 @@ function paintScene(view) {
     return;
   }
   freeze.appendChild(viewTools());
+  if (shots.length) {                                     // 挂件带（M5 批5）：表头上方细带，默认收起
+    const ribbon = buildRibbon(data, shots);
+    if (ribbon) view.appendChild(ribbon);
+  }
   promptGroupsMap = {};
   for (const g of data.prompt_groups) promptGroupsMap[g.id] = g;
   const topts = { prefs: prefs, sortState: sortState, onSort: cycleSort, refresh: refreshCurrentView, savePrefs: savePrefs, groups: promptGroupsMap };

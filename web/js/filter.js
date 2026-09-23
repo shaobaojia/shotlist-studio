@@ -137,10 +137,15 @@ export function jumpToShot(raw, ctx) {
     resetFilter();
     ctx.repaint();
   }
-  const view = ctx.getView();
-  const tr = view.querySelector('tr.shot[data-id="' + target.id + '"]');
-  if (!tr) return;
+  jumpToShotById(target.id);
+}
+
+// 滚到行并闪烁（id 单点；挂件带/镜号跳转共用）
+export function jumpToShotById(id) {
+  const tr = document.querySelector('tr.shot[data-id="' + id + '"]');
+  if (!tr) return false;
   tr.scrollIntoView({ block: 'center' });
   tr.classList.add('flash');
   setTimeout(() => tr.classList.remove('flash'), 1600);
+  return true;
 }
