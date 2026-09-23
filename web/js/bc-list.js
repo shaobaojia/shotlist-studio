@@ -159,7 +159,10 @@ function blockRow(ctx, b, opts) {
   x.addEventListener('click', (e) => { e.stopPropagation(); deleteBlockWithUndo(b); });
   row.appendChild(x);
   row.title = '点击插入到光标处';
-  row.addEventListener('click', () => ctx.insert(full, b));
+  row.addEventListener('click', () => {
+    if (row.querySelector('.bco-edit')) return;          // 本行编辑中：点击只归编辑面（点外＝blur 提交），不触发插入
+    ctx.insert(full, b);
+  });
   row._startEdit = () => { row.scrollIntoView({ block: 'center' }); editRowInline(ctx, row, b, txt); };
   if (drag) bindRowDrop(row, b, b.category_id);
   attachRowMenu(ctx, row, b);
@@ -178,7 +181,7 @@ function listSection(ctx, cat, items, dragOn) {
   dot.style.setProperty('--bc-cat', catColor(cat ? cat.id : null));
   sh.appendChild(dot);
   sh.appendChild(el('span', 'bc-secname', cat ? cat.name : '未分类'));
-  sh.appendChild(el('span', 'bc-seccount', String(items.length)));
+  sh.appendChild(el('span', 'bc-seccount', '（' + items.length + '）'));   // 计数贴组名：骨架（1）
   attachSecMenu(ctx, sh, cat ? cat.id : null);       // 右键：＋块 / 改名 / 上移 / 下移 / 删类
   sh.addEventListener('mousedown', (e) => e.preventDefault());
   sh.addEventListener('click', () => {
