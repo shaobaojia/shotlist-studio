@@ -220,6 +220,7 @@ function paintScene(view) {
   clearSel();
   view.textContent = '';
   view.classList.toggle('wrap-off', !prefs.wrap);
+  document.documentElement.style.setProperty('--dock-h', '0px');
 
   const freeze = el('div', 'scene-freeze float-card');
   freeze.appendChild(sceneHead(data.scene, data));
@@ -232,10 +233,6 @@ function paintScene(view) {
     return;
   }
   freeze.appendChild(viewTools());
-  if (shots.length) {                                     // 挂件带（M5 批5）：表头上方细带，默认收起
-    const ribbon = buildRibbon(data, shots);
-    if (ribbon) view.appendChild(ribbon);
-  }
   promptGroupsMap = {};
   for (const g of data.prompt_groups) promptGroupsMap[g.id] = g;
   const topts = { prefs: prefs, sortState: sortState, onSort: cycleSort, refresh: refreshCurrentView, savePrefs: savePrefs, groups: promptGroupsMap };
@@ -263,6 +260,11 @@ function paintScene(view) {
     }
   }
   if (!flat) view.appendChild(addBeatBar());
+  {                                                       // 挂件带 v2（M5k）：底部冻结通栏 + 向上浮层
+    const dock = buildRibbon(data, shots);
+    if (dock) view.appendChild(dock);
+    document.documentElement.style.setProperty('--dock-h', dock ? dock.offsetHeight + 'px' : '0px');
+  }
   applyFilter(fctx);
   scheduleWarm(view);
   refreshHistoryIfOpen();
@@ -295,10 +297,11 @@ function syncLive() {
     const total = shs.reduce((n, s) => n + (parseFloat(s.duration) || 0), 0);
     st.textContent = shs.length + ' 镜 / ' + data.beats.length + ' 节拍 / 总时长 ' + fmtDur(total);
   }
-  const old = view.querySelector('.ribbon');
+  const old = view.querySelector('.dock');
   if (old) {
     const fresh = buildRibbon(data, allShots(data));
     if (fresh) old.replaceWith(fresh); else old.remove();
+    document.documentElement.style.setProperty('--dock-h', fresh ? fresh.offsetHeight + 'px' : '0px');
   }
 }
 

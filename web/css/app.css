@@ -60,7 +60,7 @@ a { color: inherit; text-decoration: none; }
 .nav .chip.on { border-color: rgba(105, 88, 58, 0.28); color: var(--head); background: var(--card); box-shadow: 0 2px 8px rgba(92, 74, 46, 0.18); }
 .topbar-right .tag { font-size: 11px; color: var(--dim); border: 1px dashed rgba(60, 50, 30, 0.3); padding: 1px 8px; border-radius: 6px; white-space: nowrap; }
 
-#view { padding: 18px 22px 70px; max-width: 1720px; }
+#view { padding: 18px 22px calc(70px + var(--dock-h, 0px)); max-width: 1720px; }
 
 /* 场景头 */
 .scene-head { margin: 6px 0 12px; padding: 10px 14px 11px;
@@ -268,7 +268,7 @@ section.beat.beat-drop-after { box-shadow: inset 0 -3px 0 -1px var(--accent); }
 }
 body.no-select { user-select: none; }
 #sel-bar {
-  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+  position: fixed; left: 50%; bottom: calc(22px + var(--dock-h, 0px)); transform: translateX(-50%);
   z-index: 55; display: flex; align-items: center; gap: 10px;
   background: var(--card); border: 1px solid rgba(90, 78, 55, 0.30); border-radius: 8px;
   padding: 7px 12px; box-shadow: var(--shadow-float); font-size: 13px;
@@ -928,44 +928,51 @@ table.shots tr.shot.cover-off:hover td { opacity: 1; }
 .bco-newcat { display: flex; padding: 4px 9px 2px; }
 .bco-newcat input, .bco-input { flex: 1; min-width: 0; box-sizing: border-box; font: inherit; font-size: 12px; padding: 2px 6px; border: 1px solid rgba(188, 63, 44, .6); border-radius: 4px; background: #fff; }
 
-/* ── 挂件带（M5 批5 · 形态 B）：表头上方细带，默认收起 ── */
-.ribbon { margin: 0 0 12px; }
-.rb-bar { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 10px; box-sizing: border-box; background: rgba(238, 230, 211, .6); border: 1px solid rgba(105, 88, 58, .18); border-radius: 6px; cursor: pointer; font-size: 12px; color: var(--dim); user-select: none; }
-.rb-bar:hover { border-color: rgba(105, 88, 58, .34); }
-.rb-caret { font-size: 10px; color: var(--ink2); }
-.rb-label { font-weight: 600; color: var(--head); letter-spacing: .04em; }
-.rb-legend { margin-left: auto; font-size: 11px; color: var(--dim2); }
-.rb-body { display: none; margin-top: 6px; padding: 10px 12px; background: rgba(246, 240, 225, .7); border: 1px solid rgba(105, 88, 58, .15); border-radius: 8px; }
-.ribbon.open .rb-body { display: block; }
-.ribbon.open .rb-bar { border-color: rgba(105, 88, 58, .3); background: rgba(238, 230, 211, .85); }
-.rb-w + .rb-w { margin-top: 10px; }
-.rb-wh { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
-.rb-wt { font-size: 12px; font-weight: 600; color: var(--head); }
-.rb-wnote { font-size: 11px; color: var(--dim); }
-/* ① 序列条：高度/色阶＝档位，底对齐 */
-.rb-seq { display: flex; align-items: flex-end; height: 22px; padding-bottom: 2px; }
-.rb-cell { width: 20px; margin-right: 3px; padding: 0; border: none; border-radius: 2px; cursor: pointer; flex: none; }
-.rb-cell:hover { outline: 2px solid rgba(188, 63, 44, .4); outline-offset: 1px; }
-.rb-cell.rb-bl { margin-left: -3px; border-top-left-radius: 0; border-bottom-left-radius: 0; }
-.rb-cell.rb-br { border-top-right-radius: 0; border-bottom-right-radius: 0; }
-.rb-cell[data-lv="0"] { height: 10px; background: transparent; border: 1px dashed rgba(105, 88, 58, .45); box-sizing: border-box; }
-.rb-cell[data-lv="1"] { height: 7px;  background: #ece2ca; }
-.rb-cell[data-lv="2"] { height: 9px;  background: #e3d6ba; }
-.rb-cell[data-lv="3"] { height: 11px; background: #d9c8a6; }
-.rb-cell[data-lv="4"] { height: 13px; background: #cfb88f; }
-.rb-cell[data-lv="5"] { height: 15px; background: #dc9f88; }
-.rb-cell[data-lv="6"] { height: 17px; background: #c87457; }
-.rb-cell[data-lv="7"] { height: 19px; background: #bc3f2c; }
-/* ② 节奏视窗：时间轴块 + 曲线 */
-.rb-scroll { overflow-x: auto; padding-bottom: 2px; }
-.rb-time { position: relative; height: 62px; }
-.rb-block { position: absolute; top: 0; height: 18px; box-sizing: border-box; border: 1px solid rgba(60, 50, 30, .18); border-radius: 3px; cursor: pointer; padding: 0; }
-.rb-block:hover { border-color: var(--accent); }
-.rb-t0 { background: #efe6d2; }
-.rb-t1 { background: #e0cfad; }
-.rb-orphan { background: repeating-linear-gradient(45deg, #efe6d2, #efe6d2 4px, #e7dcc3 4px, #e7dcc3 8px); }
-.rb-svg { position: absolute; left: 0; top: 24px; overflow: visible; }
-.rb-ps { stroke: var(--accent); stroke-width: 2; fill: none; stroke-linecap: round; }
-.rb-ps-empty { stroke: rgba(60, 50, 30, .35); stroke-dasharray: 3 3; stroke-width: 1.5; }
-.rb-lk { stroke: rgba(188, 63, 44, .4); stroke-width: 1.5; }
-.rb-mood-empty { position: absolute; top: 26px; left: 2px; font-size: 11px; color: var(--dim); }
+/* ── 挂件带 v2（M5k）：底部冻结通栏 + 向上浮层；一条条带三种读法 ── */
+.dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 8;
+  background: rgba(226, 216, 193, 0.94); backdrop-filter: blur(10px);
+  border-top: 1px solid rgba(60, 50, 30, 0.22);
+  box-shadow: 0 -10px 24px rgba(92, 74, 46, 0.14); }
+.dk-bar { display: flex; align-items: center; gap: 9px; height: 33px; padding: 0 22px; box-sizing: border-box;
+  font-size: 12px; color: var(--ink2); user-select: none; cursor: pointer; }
+.dk-caret { font-size: 10px; color: var(--dim); }
+.dk-label { font-weight: 600; color: var(--head); letter-spacing: .04em; }
+.dk-unit { color: var(--dim); font-size: 11px; }
+.dk-tgs { display: inline-flex; gap: 6px; margin-left: auto; }
+.dk-tg { font: inherit; font-size: 11px; line-height: 1.6; padding: 0 10px; border: 1px solid rgba(105, 88, 58, .42);
+  border-radius: 999px; background: transparent; color: var(--dim); cursor: pointer;
+  transition: background .18s ease, color .18s ease, border-color .18s ease; }
+.dk-tg:hover { color: var(--head); border-color: rgba(105, 88, 58, .75); }
+.dk-tg.on { background: var(--head); border-color: var(--head); color: #f6f0e1; }
+.dk-legend { color: var(--dim2); font-size: 11px; }
+.dk-panel { position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 6px; padding: 10px 22px 9px;
+  background: rgba(246, 240, 225, 0.97); border: 1px solid rgba(60, 50, 30, 0.18); border-radius: 10px;
+  box-shadow: 0 -14px 34px rgba(92, 74, 46, 0.20);
+  transform: translateY(10px); opacity: 0; pointer-events: none; visibility: hidden;
+  transition: transform .24s cubic-bezier(.22,.9,.3,1), opacity .24s ease, visibility .24s; }
+.dock[data-open="1"] .dk-panel { transform: none; opacity: 1; pointer-events: auto; visibility: visible; }
+.dk-scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
+.dk-inner { position: relative; height: 62px; min-width: 100%; }
+.dk-strip { position: absolute; left: 0; right: 0; bottom: 18px; height: 44px; }
+.dk-axis { position: absolute; left: 0; right: 0; bottom: 0; height: 16px; border-top: 1px solid rgba(60, 50, 30, 0.25); }
+.dk-lab { position: absolute; top: 2px; font-size: 9.5px; line-height: 1.3; color: var(--dim); text-align: center;
+  overflow: hidden; white-space: nowrap;
+  transition: opacity .16s ease, left .28s cubic-bezier(.22,.8,.3,1), width .28s cubic-bezier(.22,.8,.3,1); }
+.dk-axis.dk-faded .dk-lab { opacity: 0; }
+.dk-b { position: absolute; bottom: 0; padding: 0; border: none; cursor: pointer; border-radius: 2px; background: #d9cdb0;
+  transition: left .28s cubic-bezier(.22,.8,.3,1), width .28s cubic-bezier(.22,.8,.3,1), height .28s cubic-bezier(.22,.8,.3,1), background-color .24s ease; }
+.dk-b:hover { outline: 2px solid rgba(188, 63, 44, .4); outline-offset: 1px; }
+.dk-b[data-lv="0"] { background: transparent; border: 1px dashed rgba(105, 88, 58, .5); box-sizing: border-box; }
+.dk-b[data-lv="1"] { background: #ece2ca; }
+.dk-b[data-lv="2"] { background: #e3d6ba; }
+.dk-b[data-lv="3"] { background: #d9c8a6; }
+.dk-b[data-lv="4"] { background: #cfb88f; }
+.dk-b[data-lv="5"] { background: #dc9f88; }
+.dk-b[data-lv="6"] { background: #c87457; }
+.dk-b[data-lv="7"] { background: #bc3f2c; }
+.dk-mood { position: absolute; left: 0; top: 0; pointer-events: none; transition: opacity .28s ease; }
+.dk-mp { stroke: var(--accent); stroke-width: 2; fill: none; stroke-linecap: round; }
+.dk-mp-empty { stroke: rgba(60, 50, 30, .35); stroke-dasharray: 3 3; stroke-width: 1.5; }
+.dk-mlk { stroke: rgba(188, 63, 44, .4); stroke-width: 1.5; }
+.dk-mood-empty { position: absolute; top: 7px; right: 24px; font-size: 11px; color: var(--dim); }
+.dk-noanim .dk-b, .dk-noanim .dk-lab, .dk-noanim .dk-panel, .dk-noanim .dk-mood { transition: none !important; }
