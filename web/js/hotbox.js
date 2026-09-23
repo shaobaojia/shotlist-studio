@@ -357,7 +357,7 @@ function buildEditorDom(bodyEl, g) {
   ta.value = (g && g.text) ? g.text : '';
 
   const foot = el('div', 'hotbox-foot');
-  foot.appendChild(el('span', 'hotbox-hint', 'Ctrl+Enter 保存并下一镜 · Esc 返回查看'));
+  foot.appendChild(el('span', 'hotbox-hint', 'Ctrl+Enter 存 → 下一镜 · Esc 返回'));
 
   const draftBtn = el('button', 'tool-btn small dz-violet', '✦ 初稿');
   draftBtn.title = '按本镜数据 + 块库出一版初稿（进编辑面、未保存）';
@@ -784,7 +784,7 @@ async function runPromptOp(action, payload, focusId, label) {
       if (target) { S.shotId = target.id; S.s = target; }
       if (dr.isOpen() && S.s) renderDrawer(wasMode);
     } else if (focusId != null) {
-      openPromptDrawer(focusId, { mode: 'edit' });
+      jumpToShot(focusId);   // 分组导览：滚到并闪烁——分组≠编辑提示词，不弹面板
     }
     return true;
   } catch (err) {

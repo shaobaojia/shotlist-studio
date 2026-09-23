@@ -75,7 +75,8 @@ function catColor(cid) {
   return PALETTE[(idx < 0 ? PALETTE.length - 1 : idx) % PALETTE.length];
 }
 
-// ── 内容：块库列表（筛选 chips + 搜索 + 行点插 + 管理入口）──
+// ── 内容：块库列表（A3 分段标题 + 搜索 + 行点插；含全部收起/展开）──
+const LS_FOLD = 'studio.blockcard.fold';
 function buildList(host) {
   host.textContent = '';
   const head = el('div', 'bc-head');
@@ -102,6 +103,12 @@ function buildList(host) {
   const list = el('div', 'bc-list');
   host.appendChild(list);
 
+  let folded = foldLoad();   // 折叠集：'c<id>' / 'none'
+  function foldLoad() {
+    try { const v = JSON.parse(localStorage.getItem(LS_FOLD) || '[]'); return new Set(Array.isArray(v) ? v : []); } catch (e) { return new Set(); }
+  }
+  function foldSave() { try { localStorage.setItem(LS_FOLD, JSON.stringify(Array.from(folded))); } catch (e) { /* ignore */ } }
+
   function mkChip(key, label) {
     const c = el('span', 'bc-fchip' + (filter === key ? ' on' : ''), label);
     c.addEventListener('mousedown', (e) => e.preventDefault());
@@ -125,28 +132,61 @@ function buildList(host) {
     return row;
   }
 
+  // 分段：按分类序（未分类殿后），键 'c<id>' / 'none'
+  function sectionsOf(d, arr) {
+    const secs = [];
+    for (const c of d.categories) {
+      const items = arr.filter((b) => b.category_id === c.id);
+      if (items.length) secs.push({ key: 'c' + c.id, name: c.name, cid: c.id, items: items });
+    }
+    const none = arr.filter((b) => b.category_id == null);
+    if (none.length) secs.push({ key: 'none', name: '未分类', cid: null, items: none });
+    return secs;
+  }
+
   function draw() {
     filters.textContent = '';
     filters.appendChild(mkChip('all', '全部'));
     filters.appendChild(mkChip('pin', '★'));
     const d = blocksData();
-    if (d) {
-      for (const c of d.categories) filters.appendChild(mkChip(c.id, c.name));
-      if (d.blocks.some((b) => b.category_id == null)) filters.appendChild(mkChip('none', '未分类'));
-    }
     list.textContent = '';
     if (!d) { list.appendChild(el('div', 'bc-empty', '块库加载中…')); count.textContent = ''; return; }
     count.textContent = d.blocks.length + ' 个';
     let arr = sortedBlocks();
     if (filter === 'pin') arr = arr.filter((b) => b.pinned);
-    else if (filter === 'none') arr = arr.filter((b) => b.category_id == null);
-    else if (filter !== 'all') arr = arr.filter((b) => b.category_id === filter);
     if (query) arr = arr.filter((b) => blockMatch(b, query));
     if (!arr.length) {
       list.appendChild(el('div', 'bc-empty', d.blocks.length ? '没有匹配的块' : '块库为空 —— 点「管理」添加常用块'));
       return;
     }
-    for (const b of arr) list.appendChild(buildRow(b));
+    if (query) { for (const b of arr) list.appendChild(buildRow(b)); return; }   // 搜索态＝平铺
+    const secs = sectionsOf(d, arr);
+    const anyOpen = secs.some((s) => !folded.has(s.key));
+    const fa = el('span', 'bc-foldall', anyOpen ? '收起全部' : '展开全部');
+    fa.title = anyOpen ? '把所有分类折起来' : '把所有分类展开';
+    fa.addEventListener('mousedown', (e) => e.preventDefault());
+    fa.addEventListener('click', () => {
+      if (anyOpen) { for (const s of secs) folded.add(s.key); } else { for (const s of secs) folded.delete(s.key); }
+      foldSave(); draw();
+    });
+    filters.appendChild(fa);
+    for (const sec of secs) {
+      const closed = folded.has(sec.key);
+      const sh = el('div', 'bc-sechead');
+      sh.appendChild(el('span', 'bc-secarrow', closed ? '▸' : '▾'));
+      const dot = el('span', 'bc-secdot');
+      dot.style.setProperty('--bc-cat', catColor(sec.cid));
+      sh.appendChild(dot);
+      sh.appendChild(el('span', 'bc-secname', sec.name));
+      sh.appendChild(el('span', 'bc-seccount', String(sec.items.length)));
+      sh.addEventListener('mousedown', (e) => e.preventDefault());
+      sh.addEventListener('click', () => {
+        if (closed) folded.delete(sec.key); else folded.add(sec.key);
+        foldSave(); draw();
+      });
+      list.appendChild(sh);
+      if (!closed) for (const b of sec.items) list.appendChild(buildRow(b));
+    }
   }
 
   return draw;
@@ -169,6 +209,7 @@ function layout() {
   upMode = up;
   root.hidden = false;
   root.classList.toggle('bc-clps', !mem.open);   // 收起态：露边盖干净「纸口」
+  root.classList.toggle('bc-up', up);            // 上贴模式位（标签/拉手转上缘的 CSS 依赖它——重写时勿丢！）
   applyUnder(up ? 'up' : 'left');
   if (pendShow) {
     pendShow = false;

@@ -858,3 +858,29 @@ table.shots tr.shot.cover-off:hover td { opacity: 1; }
 .bcard.bc-clps.bc-up::after { top: 0; left: 0; right: 0; bottom: auto; width: auto; height: 12px;
   border-right: 0; border-bottom: 1px solid var(--rule); border-radius: 10px 10px 0 0; }
 .bcard .bc-tab { z-index: 6; }
+
+/* ── M5d-8：脚排单行（按钮组左、提示右端截断；不再换行成两行）── */
+[data-drawer="prompt"] .hotbox-foot { flex-wrap: nowrap; }
+[data-drawer="prompt"] .hotbox-hint { font-size: 10.5px; order: 2; margin-left: auto; margin-right: 0;
+  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-drawer="prompt"] .hotbox-foot .tool-btn { flex: none; white-space: nowrap; }
+/* ── M5d-8：块库 A3 分段标题列表 + 全部收起/展开 ── */
+.bc-foldall { margin-left: auto; font-size: 10.5px; color: var(--ink2); cursor: pointer;
+  padding: 1px 7px; border-radius: 999px; user-select: none; }
+.bc-foldall:hover { color: var(--accent); background: rgba(188, 63, 44, 0.07); }
+.bc-sechead { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 6px;
+  padding: 4px 10px 3px 7px; background: var(--card); border-bottom: 1px solid var(--rule);
+  font-size: 10.5px; color: var(--ink2); cursor: pointer; user-select: none; }
+.bc-sechead:hover { color: var(--accent); }
+.bc-secarrow { width: 10px; font-size: 10px; color: #b3aa97; }
+.bc-secdot { width: 7px; height: 7px; border-radius: 50%; background: var(--bc-cat, var(--rule)); flex: none; }
+.bc-secname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: .04em; }
+.bc-seccount { color: #b3aa97; font-size: 10px; }
+
+/* ── M5d-9：脚排按钮＝面板按钮语言（对齐提案 mock 的 dfoot）── */
+[data-drawer="prompt"] .hotbox-foot .tool-btn { border: 1px solid var(--accent); border-radius: 4px;
+  background: var(--accent); color: #fff; padding: 3px 9px; font-size: 11px; line-height: 1.4; }
+[data-drawer="prompt"] .hotbox-foot .tool-btn:hover { background: transparent; color: var(--accent); }
+[data-drawer="prompt"] .hotbox-foot .tool-btn.dz-violet { border-color: rgba(107, 90, 142, 0.85);
+  background: #6b5a8e; color: #fff; }
+[data-drawer="prompt"] .hotbox-foot .tool-btn.dz-violet:hover { background: transparent; color: #6b5a8e; }
