@@ -3,7 +3,7 @@
 // 设计对齐：设计稿 §4「Tab / 方向键走格；多选（Shift / 框选）→ 表底选区条批量改」。
 import { api } from './api.js';
 import { toast, isFloatTarget } from './ui.js';
-import { recordUndo } from './edit.js';
+import { recordUndo, notifyRowsChanged } from './edit.js';
 import { writeClipboard, toTSV } from './clipboard.js';
 import { refreshShotCell, visibleRows } from './table.js';
 import { menuOpen } from './menu.js';
@@ -343,6 +343,11 @@ export async function batchWrite(ops, label, opts) {
         }
       },
     });
+  }
+  if (back.length) {
+    const fs = {};
+    for (const o of back) fs[o.field] = 1;
+    for (const f in fs) notifyRowsChanged(table, f, null);
   }
   if (opts.done) {
     opts.done(back.length, errs, ret);

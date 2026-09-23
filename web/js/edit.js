@@ -64,6 +64,14 @@ export function commitField(cfg, oldV, newV) {
   }
   recordUndo({ type: 'field', table: cfg.table, id: cfg.id, field: cfg.field,
                restore: oldV, label: cfg.label });
+  notifyRowsChanged(cfg.table, cfg.field, cfg.id);
+}
+
+// 行级落定广播（M5j 活体件）：场景头「规模/总时长」与挂件带等据此就地刷新（不整页重绘）。
+export function notifyRowsChanged(table, field, id) {
+  try {
+    window.dispatchEvent(new CustomEvent('shotlist:rows-changed', { detail: { table: table, field: field, id: id } }));
+  } catch (e) { /* ignore */ }
 }
 
 // cfg: { table, id, field, label, getValue(), onLocal(v), renderCell(),
@@ -190,6 +198,7 @@ async function save(cfg, oldV, newV) {
   if (cfg.save) {
     try {
       await cfg.save(oldV, newV);
+      notifyRowsChanged(cfg.table, cfg.field, cfg.id);
     } catch (err) {
       cfg.onLocal(oldV);
       cfg.renderCell();
@@ -200,6 +209,7 @@ async function save(cfg, oldV, newV) {
   try {
     await api.update(cfg.table, cfg.id, cfg.field, newV);
     recordUndo({ type: 'field', table: cfg.table, id: cfg.id, field: cfg.field, restore: oldV, label: cfg.label });
+    notifyRowsChanged(cfg.table, cfg.field, cfg.id);
   } catch (err) {
     cfg.onLocal(oldV);
     cfg.renderCell();
@@ -353,6 +363,7 @@ function openCamForm(host, cfg) {
           for (const f of fields) await api.update('shots', cfg.id, f, oldVals[f] == null ? '' : oldVals[f]);
         },
       });
+      if (fields.indexOf('shot_size') !== -1) notifyRowsChanged('shots', 'shot_size', cfg.id);
     } catch (err) {
       for (const f of fields) cfg.setCam(f, oldVals[f]);
       if (cfg.refreshSiblings) cfg.refreshSiblings();

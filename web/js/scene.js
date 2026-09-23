@@ -277,6 +277,31 @@ function allShots(data) {
   return shots;
 }
 
+// 活体件同步（M5j）：场景头「规模/总时长」＋挂件带——字段落定后就地刷新（不整页重绘）
+window.addEventListener('shotlist:rows-changed', (ev) => {
+  const d = (ev && ev.detail) || {};
+  const hit = (d.table === 'shots' && (d.field === 'duration' || d.field === 'shot_size'))
+           || (d.table === 'beats' && (d.field === 'mood_temp' || d.field === 'name'));
+  if (hit) syncLive();
+});
+
+function syncLive() {
+  const data = currentData;
+  const view = document.getElementById('view');
+  if (!data || !view) return;
+  const st = view.querySelector('.scene-stats .ss-text');
+  if (st) {
+    const shs = allShots(data);
+    const total = shs.reduce((n, s) => n + (parseFloat(s.duration) || 0), 0);
+    st.textContent = shs.length + ' 镜 / ' + data.beats.length + ' 节拍 / 总时长 ' + fmtDur(total);
+  }
+  const old = view.querySelector('.ribbon');
+  if (old) {
+    const fresh = buildRibbon(data, allShots(data));
+    if (fresh) old.replaceWith(fresh); else old.remove();
+  }
+}
+
 function fmtDur(sec) {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
@@ -407,9 +432,9 @@ function sceneHead(sc, data) {
 
   const shots = allShots(data);
   const total = shots.reduce((n, s) => n + (parseFloat(s.duration) || 0), 0);
-  const s1 = el('span', 'kv');
+  const s1 = el('span', 'kv scene-stats');
   s1.appendChild(el('b', null, '规模'));
-  s1.appendChild(document.createTextNode(shots.length + ' 镜 / ' + data.beats.length + ' 节拍 / 总时长 ' + fmtDur(total)));
+  s1.appendChild(el('span', 'ss-text', shots.length + ' 镜 / ' + data.beats.length + ' 节拍 / 总时长 ' + fmtDur(total)));
   meta.appendChild(s1);
   if (sc.locked) {
     const lk = el('span', 'kv lock');
