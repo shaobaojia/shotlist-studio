@@ -23,6 +23,7 @@ function headTop() {
 export function createDrawer(opts) {
   const id = opts.id;
   const frame = el('div', 'drawer');
+  if (opts.id) frame.dataset.drawer = opts.id;
   frame.hidden = true;
   const head = el('div', 'drawer-head');
   const title = el('div', 'drawer-title');

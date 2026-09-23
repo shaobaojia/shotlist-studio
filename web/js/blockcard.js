@@ -3,6 +3,7 @@
 // 平时只露一条边（12px），边上贴一枚小索引标签作拉手（点按抽 / 收）。
 // 方向随贴附：浮窗、右贴附＝从左边抽（标签在左缘）；下贴附＝从上边抽（标签在上缘）。
 // 只在编辑态出现；宽度 / 高度沿卡缘拖拽可调并记忆；内容＝块库（分类筛选 + 搜索 + 点击插入）。
+// M5d-4：随面板入场后再浮现（防「块库先于面板」）；贴紧时面板去左/上投影（bc-under）。
 import { el } from './ui.js';
 import {
   ensureBlocks, blocksData, onBlocksChange, blockMatch, catName, sortedBlocks,
@@ -15,6 +16,8 @@ const INSET = 10;                      // 「小一圈」内缩：左模式＝�
 const MIN_W = 180, MAX_W = 360, DEF_W = 236;
 const MIN_H = 130, MAX_H = 380, DEF_H = 190;
 const LS_KEY = 'studio.blockcard';
+// 分类色带调色板（按分类顺序取色；未分类走中性色）——块行左缘的小色条＝它是「一块」
+const PALETTE = ['#b8563e', '#c08a2e', '#7a8b3f', '#4e7f6a', '#5d7fa3', '#8a6aa8', '#a05f74', '#8b6b4a'];
 
 let dr = null;
 let root = null;
@@ -24,6 +27,9 @@ let obs = null;
 let insertCb = null;
 let active = false;
 let upMode = false;
+let pendShow = false;                  // 面板入场动画未毕，卡先藏（入场完再浮现）
+let tAppear = null;
+let underApplied = null;               // 镜像：'none' | 'left' | 'up'（对照后再写，杜绝观察者回路）
 const mem = { w: DEF_W, h: DEF_H, open: false };
 let filter = 'all';
 let query = '';
@@ -31,6 +37,17 @@ let query = '';
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function lsLoad() { try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}') || {}; } catch (e) { return {}; } }
 function lsSave() { try { localStorage.setItem(LS_KEY, JSON.stringify(mem)); } catch (e) { /* ignore */ } }
+
+// 面板「贴紧」类：只有镜像状态真的变化才写 DOM——本环境 classList 幂等操作也会
+// 虚假触发 attribute mutation，直接写会与观察者形成无限回路（M5d-4 实测死机根因）
+function applyUnder(mode) {
+  if (mode === underApplied || !dr || !dr.el) return;
+  underApplied = mode;
+  try {
+    dr.el.classList.toggle('bc-under', mode !== 'none');
+    dr.el.classList.toggle('bc-under-up', mode === 'up');
+  } catch (e) { /* ignore */ }
+}
 
 // 面板几何：优先取内联样式坐标（开合/回弹动画期间 rect 会漂，样式值恒定）
 function frameRect() {
@@ -49,6 +66,13 @@ function frameRect() {
   }
   if (!Number.isFinite(left) || !Number.isFinite(top)) return fe.getBoundingClientRect();
   return { left: left, top: top, width: w, height: h };
+}
+
+function catColor(cid) {
+  if (cid == null) return '#9a9182';
+  const d = blocksData();
+  const idx = d ? d.categories.findIndex((c) => c.id === cid) : -1;
+  return PALETTE[(idx < 0 ? PALETTE.length - 1 : idx) % PALETTE.length];
 }
 
 // ── 内容：块库列表（筛选 chips + 搜索 + 行点插 + 管理入口）──
@@ -87,6 +111,7 @@ function buildList(host) {
 
   function buildRow(b) {
     const row = el('div', 'bc-row');
+    row.style.setProperty('--bc-cat', catColor(b.category_id));
     if (b.pinned) row.appendChild(el('span', 'bc-star', '★'));
     const txt = String(b.text == null ? '' : b.text).replace(/\s+/g, ' ').trim();
     row.appendChild(el('div', 'bc-text', txt || '（空）'));
@@ -130,14 +155,29 @@ function buildList(host) {
 // ── 布局同步（随抽屉几何/贴附/开合；靠 MutationObserver 跟拖拽与贴附）──
 function layout() {
   if (!root) return;
-  if (!active || !dr || !dr.isOpen()) { root.hidden = true; return; }
+  if (!active || !dr || !dr.isOpen()) {
+    root.hidden = true;
+    applyUnder('none');
+    return;
+  }
+  // 面板入场动画进行中：先藏（否则「块库先于面板出现」）；入场类摘除时观察者会再触发本函数
+  if (dr.el.classList.contains('enter')) { root.hidden = true; pendShow = true; applyUnder('none'); return; }
   const r = frameRect();
   const dock = dr.getDock ? dr.getDock() : null;
   const up = (dock === 'bottom');
   const switched = (up !== upMode);
   upMode = up;
   root.hidden = false;
-  root.classList.toggle('bc-up', up);
+  root.classList.toggle('bc-clps', !mem.open);   // 收起态：露边盖干净「纸口」
+  applyUnder(up ? 'up' : 'left');
+  if (pendShow) {
+    pendShow = false;
+    root.classList.remove('bc-appear');
+    void root.offsetWidth;
+    root.classList.add('bc-appear');
+    clearTimeout(tAppear);
+    tAppear = setTimeout(() => root.classList.remove('bc-appear'), 280);
+  }
   if (switched) root.classList.add('bc-noanim');
   if (!up) {
     mem.w = clamp(Math.round(mem.w) || DEF_W, MIN_W, MAX_W);

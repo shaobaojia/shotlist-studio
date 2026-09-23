@@ -331,7 +331,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 .prompt-text.empty-hint { color: var(--dim); }
 .pb-tips { font-size: 11px; color: var(--dim); margin-top: 3px; opacity: .8; }
 
-.hotbox { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.hotbox { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; flex: 1; min-height: 0; }
 .hotbox-editor {
   width: 100%; min-height: 130px; resize: none; overflow: hidden;
   border: 1px solid rgba(60, 50, 30, 0.20); border-radius: 7px;
@@ -340,7 +340,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
 }
 .hotbox-editor:focus { outline: none; border-color: rgba(60, 50, 30, 0.38); }
 .hotbox-editor::placeholder { color: var(--dim); }
-.hotbox-foot { display: flex; align-items: center; gap: 8px; }
+.hotbox-foot { display: flex; align-items: center; gap: 8px; border-top: 1px dashed rgba(60, 50, 30, 0.2); padding-top: 9px; }
 .hotbox-hint { font-size: 11px; color: var(--dim); margin-right: auto; }
 .hotbox-shelf { border-top: 1px dashed rgba(60, 50, 30, 0.2); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 .shelf-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -779,8 +779,9 @@ table.shots tr.shot.cover-off:hover td { opacity: 1; }
 .pd-stat-r { flex: none; }
 /* 呼吸微调（② 三段固定） */
 .drawer-body { padding: 11px 13px 13px; gap: 9px; }
+[data-drawer="prompt"] .drawer-body { overflow: hidden; }
 /* 块库卡（下层卡纸） */
-.bcard { position: fixed; z-index: 42; background: var(--paper); border: 1px solid var(--rule);
+.bcard { position: fixed; z-index: 42; background: var(--card); border: 1px solid var(--rule);
   border-radius: 10px; display: flex; flex-direction: column; overflow: visible;
   box-shadow: -4px 6px 16px rgba(50, 38, 20, 0.15);
   transition: transform 0.18s ease-out; }
@@ -803,23 +804,57 @@ table.shots tr.shot.cover-off:hover td { opacity: 1; }
 .bcard.bc-up .bc-rz { left: 22px; right: 22px; top: -3px; bottom: auto; height: 7px; width: auto; cursor: ns-resize; }
 .bcard.bc-up .bc-rz:hover { background: linear-gradient(180deg, rgba(188, 63, 44, 0.15), transparent); }
 /* 列表 */
-.bc-head { display: flex; align-items: center; gap: 8px; padding: 7px 42px 7px 10px; border-bottom: 1px solid var(--rule); }
+.bc-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--rule); }
 .bc-title { font-size: 12px; font-weight: 700; color: var(--head); }
 .bc-count { font-size: 10.5px; color: var(--dim); margin-right: auto; }
 .bc-mng { font-size: 10.5px; padding: 2px 7px; }
-.bc-filters { display: flex; flex-wrap: wrap; gap: 4px; padding: 7px 42px 4px 10px; }
+.bc-filters { display: flex; flex-wrap: wrap; gap: 4px; padding: 7px 10px 4px; }
 .bc-fchip { font-size: 10.5px; color: var(--ink2); border: 1px solid var(--rule); background: var(--card);
   border-radius: 999px; padding: 1px 8px; cursor: pointer; }
 .bc-fchip:hover { border-color: rgba(188, 63, 44, 0.4); color: var(--accent); }
 .bc-fchip.on { color: #fff; background: var(--accent); border-color: var(--accent); }
-.bc-search { margin: 2px 42px 6px 10px; font-size: 11px; color: var(--text); font-family: inherit;
+.bc-search { margin: 2px 10px 6px; font-size: 11px; color: var(--text); font-family: inherit;
   border: 1px solid var(--rule); background: var(--card); border-radius: 5px; padding: 4px 8px; }
 .bc-search:focus { outline: none; border-color: var(--accent); }
-.bc-list { flex: 1; overflow: auto; padding: 0 6px 34px; }
-.bc-row { position: relative; border: 1px solid transparent; border-radius: 5px;
-  padding: 5px 7px 5px 18px; margin-bottom: 2px; cursor: pointer; }
-.bc-row:hover { background: rgba(188, 63, 44, 0.07); border-color: rgba(188, 63, 44, 0.3); }
-.bc-star { position: absolute; left: 5px; top: 5px; font-size: 9px; color: var(--accent); }
+.bc-list { flex: 1; overflow: auto; padding: 0 6px 8px; }
+.bc-row { position: relative; border: 1px solid var(--rule); background: var(--card);
+  border-radius: 6px; padding: 6px 10px 6px 14px; margin-bottom: 4px; cursor: pointer;
+  box-shadow: var(--shadow-mini); }
+.bc-row::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+  border-radius: 6px 0 0 6px; background: var(--bc-cat, var(--rule)); }
+.bc-row::after { content: '＋ 插入'; position: absolute; right: 7px; bottom: 3px; font-size: 10px;
+  color: var(--accent); opacity: 0; }
+.bc-row:hover { border-color: rgba(188, 63, 44, 0.45); box-shadow: 0 3px 8px rgba(60, 40, 20, 0.15); }
+.bc-row:hover::after { opacity: 1; }
+.bc-star { position: absolute; right: 7px; top: 4px; font-size: 9px; color: var(--accent); }
 .bc-text { font-size: 11px; color: var(--ink2); line-height: 1.5;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .bc-empty { font-size: 11px; color: var(--dim); padding: 6px 8px; }
+
+/* ── M5d-4：三区固定 / 影子方向 / 时序 / 块样 ── */
+.hb-scroll { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+.hb-scroll .hotbox-editor { flex: none; }   /* 生长高度不被 flex 收缩，滚动交给容器 */
+.pd-scroll { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.pd-foot { border-top: 1px dashed rgba(60, 50, 30, 0.2); padding-top: 9px; display: flex; flex-direction: column; gap: 6px; }
+/* 压边避让（方向化）：左模式避右缘的 30px 压边区；上模式避底缘 */
+.bcard:not(.bc-up) .bc-head { padding-right: 42px; }
+.bcard:not(.bc-up) .bc-filters { padding-right: 42px; }
+.bcard:not(.bc-up) .bc-search { margin-right: 42px; }
+.bcard:not(.bc-up) .bc-list { padding-right: 40px; }
+.bcard.bc-up .bc-list { padding-bottom: 34px; }
+/* 面板影子：与卡纸紧贴时不留向左（或向上）的投影——两层紧贴的物理；不贴时默认影子不变 */
+.drawer.bc-under { box-shadow: 10px 6px 24px -12px rgba(50, 38, 20, 0.34), 0 -8px 18px -14px rgba(50, 38, 20, 0.16), 0 12px 26px -14px rgba(50, 38, 20, 0.24); }
+.drawer.bc-under.bc-under-up { box-shadow: -10px 6px 24px -14px rgba(50, 38, 20, 0.26), 10px 6px 24px -14px rgba(50, 38, 20, 0.26), 0 12px 26px -14px rgba(50, 38, 20, 0.22); }
+.drawer.bc-under.dragging { box-shadow: 14px 8px 30px -12px rgba(50, 38, 20, 0.42), 0 -8px 18px -14px rgba(50, 38, 20, 0.18), 0 14px 30px -14px rgba(50, 38, 20, 0.30); }
+.drawer.bc-under.bc-under-up.dragging { box-shadow: -14px 8px 30px -14px rgba(50, 38, 20, 0.34), 14px 8px 30px -14px rgba(50, 38, 20, 0.34), 0 14px 30px -14px rgba(50, 38, 20, 0.28); }
+/* 卡纸随面板入场：等面板入场动画完再浮现 */
+@keyframes bcAppear { from { opacity: 0; } }
+.bcard.bc-appear { animation: bcAppear 0.2s ease-out; }
+
+/* ── M5d-7：收起态露边盖干净「纸口」 ── */
+.bcard.bc-clps::after { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 12px;
+  background: var(--card); border-right: 1px solid var(--rule); border-radius: 10px 0 0 10px;
+  z-index: 4; pointer-events: none; }
+.bcard.bc-clps.bc-up::after { top: 0; left: 0; right: 0; bottom: auto; width: auto; height: 12px;
+  border-right: 0; border-bottom: 1px solid var(--rule); border-radius: 10px 10px 0 0; }
+.bcard .bc-tab { z-index: 6; }

@@ -300,6 +300,8 @@ function renderRichText(box, text) {
 }
 
 function renderView(bodyEl, s, g, data) {
+  const scroll = el('div', 'pd-scroll');
+  let footZone = null;
   const wrap = el('div', 'pd-view');
   const rich = el('div', 'prompt-text pd-rich');
   const text = (g && g.text) ? String(g.text) : '';
@@ -335,15 +337,19 @@ function renderView(bodyEl, s, g, data) {
     b2.addEventListener('click', () => splitOp(g.id, s.id));
     ops.appendChild(b1);
     ops.appendChild(b2);
-    wrap.appendChild(ops);
-    wrap.appendChild(el('div', 'pd-tips', '换成员：选区条「并为一组 / 独立成组」 · 右键「并入上一组」'));
+    footZone = el('div', 'pd-foot');
+    footZone.appendChild(ops);
+    footZone.appendChild(el('div', 'pd-tips', '换成员：选区条「并为一组 / 独立成组」 · 右键「并入上一组」'));
   }
-  bodyEl.appendChild(wrap);
+  scroll.appendChild(wrap);
+  bodyEl.appendChild(scroll);
+  if (footZone) bodyEl.appendChild(footZone);
 }
 
 // ── 编辑态 DOM（正文 + 脚部 + 块库条）──
 function buildEditorDom(bodyEl, g) {
   const box = el('div', 'hotbox');
+  const scroll = el('div', 'hb-scroll');
   const ta = document.createElement('textarea');
   ta.className = 'hotbox-editor';
   ta.spellcheck = false;
@@ -366,7 +372,8 @@ function buildEditorDom(bodyEl, g) {
   foot.appendChild(copyBtn);
   foot.appendChild(blockBtn);
 
-  box.appendChild(ta);
+  scroll.appendChild(ta);
+  box.appendChild(scroll);
   box.appendChild(foot);
   bodyEl.appendChild(box);
   return { ta: ta, draftBtn: draftBtn, saveBtn: saveBtn, copyBtn: copyBtn, blockBtn: blockBtn };

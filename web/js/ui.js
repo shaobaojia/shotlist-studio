@@ -44,8 +44,21 @@ export function growTextarea(ta, min) {
   requestAnimationFrame(() => {
     ta.__grow = false;
     if (!ta.isConnected) return;
+    // 高度塌缩（'auto' 那一瞬）会把祖先滚动容器的 scrollTop 挤回顶部——先存后还；
+    // 否则长文打字时面板「跳顶」、光标看不到（M5d-4 实测根因）
+    const scrollers = [];
+    for (let p = ta.parentElement; p && p !== document.body; p = p.parentElement) {
+      const oy = getComputedStyle(p).overflowY;
+      if ((oy === 'auto' || oy === 'scroll') && p.scrollHeight > p.clientHeight + 1) {
+        scrollers.push([p, p.scrollTop]);
+      }
+    }
     ta.style.height = 'auto';
     ta.style.height = Math.max(min || 0, ta.scrollHeight) + 'px';
+    ta.scrollTop = 0;                                   // 生长后内容全展，内部无须滚动
+    for (const pair of scrollers) {
+      pair[0].scrollTop = Math.max(0, Math.min(pair[1], pair[0].scrollHeight - pair[0].clientHeight));
+    }
   });
 }
 
