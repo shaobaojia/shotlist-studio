@@ -415,7 +415,11 @@ function addShotBar(b, data, opts) {
         type: 'custom', label: '添加镜头',
         undo: async () => { await api.del({ table: 'shots', ids: [ns.id] }); },
       });
-      if (opts.refresh) await opts.refresh();
+      if (opts.incremental && opts.incremental() && addShotRow(btn, b, data, opts, ns)) {   // F1-L2：同节拍尾插单行（结构操作增量路径）
+        if (opts.syncLive) opts.syncLive();
+      } else if (opts.refresh) {
+        await opts.refresh();
+      }
       const ntr = document.querySelector('tr.shot[data-id="' + ns.id + '"]');
       if (ntr) flashIntoView(ntr);
     } catch (err) {
@@ -424,6 +428,37 @@ function addShotBar(b, data, opts) {
   });
   bar.appendChild(btn);
   return bar;
+}
+
+// 结构操作增量（F1-L2）：同节拍尾插单行——数据挂载 + tr/det 插入（shotRows 的 DocumentFragment 复用）；
+// 返回 false 时调用方回退全量（找不到 section / 表列定义缺失等结构异常，数据不改）
+function addShotRow(btn, b, data, opts, ns) {
+  const sec = btn.closest('section.beat');
+  if (!sec) return false;
+  const groups = opts.groups || groupsById(data);
+  const emptyDiv = sec.querySelector('.empty.small');
+  const t = sec.querySelector('table.shots');
+  if (!b.shots) b.shots = [];
+  b.shots.push(ns);
+  if (emptyDiv && !t) {
+    emptyDiv.replaceWith(buildTable([ns], {          // 空节拍首镜：占位「（暂无镜头）」换单行表
+      data: data, prefs: opts.prefs, sortable: true,
+      sortState: opts.sortState, onSort: opts.onSort, savePrefs: opts.savePrefs,
+      groups: groups,
+    }));
+  } else if (t) {
+    const cols = tableCols.get(t);
+    if (!cols) { b.shots.pop(); return false; }
+    t.querySelector('tbody').appendChild(shotRows(ns, cols, groups, data));
+  } else {
+    b.shots.pop();
+    return false;
+  }
+  const lab = sec.querySelector('.space-label');     // 「未归节拍」计数（若有——数字节拍无此 label）
+  if (lab) lab.textContent = '▸ ' + (b.name || '未归节拍') + ' (' + b.shots.length + ' 镜)';
+  const bt = sec.querySelector('.beat-title');       // 数字节拍头「(N 镜)」计数同步
+  if (bt) bt.textContent = beatTitle(b);
+  return true;
 }
 
 // 空节拍里「第一颗镜头」的插入位：前序节拍镜头之后（全空则 0）

@@ -39,6 +39,12 @@ function allShotsCached() {
   return _shotsCache;
 }
 
+// 结构操作增量（F1-L2）：引用不变但内容已增删——强制失效（原按引用判失效覆盖不到）
+function invalidateShotsCache() {
+  _shotsCache = null;
+  _shotsCacheFor = null;
+}
+
 const fctx = {
   getData: () => currentData,
   allShots: () => allShotsCached(),
@@ -252,8 +258,10 @@ function paintScene(view) {
   }
   freeze.appendChild(viewTools());
   promptGroupsMap = groupsById(data);
-  const topts = { prefs: prefs, sortState: sortState, onSort: cycleSort, refresh: refreshCurrentView, savePrefs: savePrefs, groups: promptGroupsMap };
   const flat = !!sortState || prefs.viewMode === 'flat';
+  const topts = { prefs: prefs, sortState: sortState, onSort: cycleSort, refresh: refreshCurrentView, savePrefs: savePrefs, groups: promptGroupsMap,
+    incremental: () => !flat && !filterActive(),                    // F1-L2：增量开关（调用时求值——筛选可在渲染后动态激活）
+    syncLive: () => { invalidateShotsCache(); syncLive(); } };      // 增量后：先失效整场缓存再刷活体件
   if (flat) {
     if (shots.length) {
       const fwrap = buildTable(sortState ? sortedShots(shots) : shots, {
@@ -373,7 +381,9 @@ function addBeatBar(withDraft) {
         type: 'custom', label: '添加节拍',
         undo: async () => { await api.del({ table: 'beats', id: nb.id }); },
       });
-      await refreshCurrentView();
+      if (!addBeatSection(nb)) {
+        await refreshCurrentView();
+      }
       const nsec = document.querySelector('section.beat[data-beat-id="' + nb.id + '"]');
       if (nsec) {
         flashIntoView(nsec);
@@ -385,6 +395,26 @@ function addBeatBar(withDraft) {
   bar.appendChild(btn);
   if (withDraft) scriptTools(bar, { draft: true, import: true });
   return bar;
+}
+
+// 结构操作增量（F1-L2）：场末追加节拍 section——排序/筛选/平铺/空场（无 section 结构）回退全量
+function addBeatSection(nb) {
+  const view = fctx.getView();
+  if (!view || !currentData) return false;
+  if (sortState || filterActive() || prefs.viewMode === 'flat') return false;
+  const bar = view.querySelector('.add-beat-bar');
+  if (!bar || !view.querySelector('section.beat')) return false;
+  nb.shots = nb.shots || [];
+  currentData.beats.push(nb);
+  const topts = {
+    prefs: prefs, sortState: sortState, onSort: cycleSort, refresh: refreshCurrentView,
+    savePrefs: savePrefs, groups: promptGroupsMap || groupsById(currentData),
+    incremental: true, syncLive: syncLive,
+  };
+  view.insertBefore(beatSection(nb, currentData, topts), bar);
+  invalidateShotsCache();
+  syncLive();
+  return true;
 }
 
 // 场号写入与撤销共用（F1-W5）：双对象同步 + 路由跟随 + 广播；返回撤销体（无变化 → null）
