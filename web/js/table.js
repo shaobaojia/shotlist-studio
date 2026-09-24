@@ -1,6 +1,6 @@
 // 表格模块：列构建 / 单元格渲染 / 就地编辑绑定 / 节拍区 / 详情区。
 // 显示规格 = cells.js（老库移植）；编辑引擎 = edit.js；页面组装在 scene.js。
-import { state, fieldOf, groupsById, fieldsOf } from './state.js';
+import { state, fieldOf, groupsById, fieldsOf, fieldLabel } from './state.js';
 import { el, fmt, toast, flashIntoView } from './ui.js';
 import { cellContent } from './cells.js';
 import { attachEditable, attachCamEditor, parseCam, recordUndo, batchUpdate } from './edit.js';
@@ -384,7 +384,7 @@ export function beatSection(b, data, opts) {
     if (!b.beat_action) act.classList.add('empty');
     renderBeatAction(act, b);
     attachEditable(act, {
-      table: 'beats', id: b.id, field: 'beat_action', label: '节拍概述', multiline: isMultiline(fieldOf('beat_action', 'beats')),
+      table: 'beats', id: b.id, field: 'beat_action', label: fieldLabel('beat_action', 'beats'), multiline: isMultiline(fieldOf('beat_action', 'beats')),   // F4-B5：与字段字典一致
       aiOpen: aiOpenFor,
       getValue: () => b.beat_action,
       onLocal: (v) => { b.beat_action = v; },
@@ -479,7 +479,7 @@ function renderBeatAction(act, b) {
   act.textContent = '';
   const text = String(b.beat_action || '');
   if (!text.trim()) {
-    act.appendChild(el('span', 'beat-action-hint', '＋ 填写节拍概述（外界动作 / 人物反应 / 闭环…）'));
+    act.appendChild(el('span', 'beat-action-hint', '＋ 填写节拍动作（外界动作 / 人物反应 / 闭环…）'));   // F4-B5：与字段字典一致
     return;
   }
   text.split('\n').forEach((line, i) => {
@@ -488,7 +488,7 @@ function renderBeatAction(act, b) {
   });
 }
 
-// 节拍概述单处重画（AI 改写原地回显）
+// 节拍动作单处重画（AI 改写原地回显）
 export function refreshBeatAction(b) {
   document.querySelectorAll('section.beat[data-beat-id="' + b.id + '"] .beat-action').forEach((act) => {
     act.classList.toggle('empty', !b.beat_action);
@@ -530,6 +530,11 @@ export function writableFieldKeys(table) {
 }
 
 // 单格重画 + 详情区同步（批量/清空/粘贴共用）；root 可限定作用域（P1⑤：粘贴走本表）
+// 按镜号取行单点（F4-W41）：原全库 12 处手拼 tr.shot[data-id=…]
+export function shotRow(id, root) {
+  return (root || document).querySelector('tr.shot[data-id="' + id + '"]');
+}
+
 export function refreshShotCell(s, key, root) {
   if (!s) return;
   const f = fieldOf(key);

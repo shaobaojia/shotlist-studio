@@ -41,7 +41,7 @@ function build() {
 
   // 外壳基类（L6）：.float-card 补齐点外豁免（此前漏挂＝点面板清选区/收编辑面/关相机表单）
   const sh = panelShell({
-    id: 'audit-panel', headCls: 'ap-head', title: '审计问题', bodyCls: null, onClose: closeAuditPanel,
+    id: 'audit-panel', headCls: 'ap-head', title: '审计问题', noBody: true, onClose: closeAuditPanel,   // F4-W25：不建体显式化（原 bodyCls:null 双关）
     fillHead: (h) => { h.appendChild(inputEl); h.appendChild(runBtn); h.appendChild(set); },
   });
   panel = sh.card;

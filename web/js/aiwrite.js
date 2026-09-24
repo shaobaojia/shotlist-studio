@@ -2,37 +2,49 @@
 // 单格 = 就近 diff 卡（接受/拒绝/再来一版）；多格 = 右下预览浮卡（逐条勾选 → 应用 = 一步撤销）。
 // 服务端通道（M4b-1）：POST /api/ai/preview → GET /api/ai/job → POST /api/ai/apply。
 import { api } from './api.js';
-import { el, toast } from './ui.js';
+import { el, toast, placeNear } from './ui.js';
 import { openMenu } from './menu.js';
 import { commitField } from './edit.js';
 import { refreshShotCell } from './table.js';
-import { state, fieldOf } from './state.js';
+import { state, fieldOf, fieldLabel } from './state.js';
 import { eachSelCell, batchWrite } from './selection.js';
-import { pollJob, cardLife, taskShell, spinHead, cancelBtn, renderFail } from './aicard.js';
+import { pollJob, cardLife, taskShell, spinHead, cancelBtn, renderFail, POLL, failText, aiApplyItems, joinedToast } from './aicard.js';
 import { floatEnter, floatLeave, floatClose } from './float.js';
 
-const AIS_FALLBACK = ['blocking', 'dialogue', 'director_note', 'beat_action'];   // /api/meta 未载入前兜底（批4/P8）
+// 动作表单点（F4-W22）：菜单 label 与中文名同源（原 ACTIONS / ACTION_CN 两张同键表）
 const ACTIONS = [
-  { key: 'rewrite', label: '改写 · 换更准更顺的说法' },
-  { key: 'concretize', label: '具象化 · 模糊动作钉成可见细节' },
-  { key: 'strengthen', label: '强化 · 冲突 / 张力加一档' },
-  { key: 'expand', label: '扩写 · 一句话扩成拍得出的一拍' },
+  { key: 'rewrite', cn: '改写', hint: '换更准更顺的说法' },
+  { key: 'concretize', cn: '具象化', hint: '模糊动作钉成可见细节' },
+  { key: 'strengthen', cn: '强化', hint: '冲突 / 张力加一档' },
+  { key: 'expand', cn: '扩写', hint: '一句话扩成拍得出的一拍' },
 ];
-const ACTION_CN = { rewrite: '改写', concretize: '具象化', strengthen: '强化', expand: '扩写' };
-const maxTargets = () => ((state.meta && state.meta.ai_max_targets) || 30);   // 上限单点：/api/meta（批4/P8）
+const ACTION_CN = {};
+for (const a of ACTIONS) ACTION_CN[a.key] = a.cn;
+const actionLabel = (a) => '✦ ' + a.cn + ' · ' + a.hint;
+const maxTargets = () => (state.meta && state.meta.ai_max_targets) || 0;   // F4-W27：0＝未知（meta 未载入）→ 不设限
 
 let ctx = { getShot: () => null, sceneId: () => null };
 export function initAiWrite(c) { ctx = Object.assign(ctx, c); }
 
 export function isAiField(key) {
-  const m = state.meta;
-  const list = (m && m.ai_fields) || AIS_FALLBACK;   // 单源：/api/meta（批4/P8）
+  const list = state.meta && state.meta.ai_fields;
+  if (!list) return false;   // F4-W27：meta 未载入＝禁用 AI 入口，不再手抄兜底子集（fields.py 明令勿前端手抄）
   return list.indexOf(key) !== -1;
 }
 
-function fieldLabel(key) {
-  const f = fieldOf(key);
-  return f ? f.label : key;
+// AI 字段文案单点（F4-W27）：从服务端 meta 标签派生（原文案手抄 3 键，单源是 4 键已分叉）
+function aiFieldLabels() {
+  const list = (state.meta && state.meta.ai_fields) || [];
+  return list.map((k) => fieldLabel(k)).filter(Boolean).join(' / ');
+}
+
+// 「一次最多 N 格」守卫单点（F4-W21）：超限即 toast 并拒绝
+function guardTargets(targets) {
+  if (maxTargets() && targets.length > maxTargets()) {
+    toast('一次最多 ' + maxTargets() + ' 格（本次 ' + targets.length + '）——请分批', 'err');
+    return false;
+  }
+  return true;
 }
 
 // 重绘/换场前收起（scene.js paintScene 调用）：同层（'ai'）全量闭合（L6 注册表）
@@ -45,8 +57,11 @@ export function closeAiCards() {
 // 选区 → 目标清单（仅 AI 可改字段；shots 行序 × 列序）
 export function targetsFromSel() {
   const out = [];
+  const cap = maxTargets();
   eachSelCell((shot, key) => {                       // F2-P2：选区遍历原语（行序 × 列序同旧）
-    if (isAiField(key)) out.push({ table: 'shots', id: shot.id, field: key });
+    if (isAiField(key)) {
+      if (!cap || out.length <= cap) out.push({ table: 'shots', id: shot.id, field: key });   // F4-W28①：超限即停收
+    }
   });
   return out;
 }
@@ -54,7 +69,7 @@ export function targetsFromSel() {
 // A. 右键（格子 / 选区）：单格 → 近处卡；多格 → 批量卡
 export function aiMenu(anchor, targets) {
   if (!targets.length) { toast('这里没有可改写的字段'); return; }
-  if (targets.length > maxTargets()) { toast('一次最多 ' + maxTargets() + ' 格（本次 ' + targets.length + '）——请分批', 'err'); return; }
+  if (!guardTargets(targets)) return;
   openActionMenu(anchor, targets, {});
 }
 
@@ -62,7 +77,7 @@ export function aiMenu(anchor, targets) {
 export function aiMenuForBeat(anchor, b, renderCell) {
   openActionMenu(anchor, [{ table: 'beats', id: b.id, field: 'beat_action' }], {
     ac: {
-      table: 'beats', id: b.id, field: 'beat_action', label: '节拍概述',
+      table: 'beats', id: b.id, field: 'beat_action', label: fieldLabel('beat_action', 'beats'),   // F4-B5：与字段字典一致（原手写「节拍概述」）
       onLocal: (v) => { b.beat_action = v; },
       renderCell: renderCell || (() => {}),
     },
@@ -89,15 +104,15 @@ export function aiOpenFor(cfg, ed, anchor) {
 export function runCmdbarFromSel(instruction) {
   if (!instruction) { toast('先写一句指令（比如：都具象化）'); return; }
   const targets = targetsFromSel();
-  if (!targets.length) { toast('选区内没有可改写的字段（支持：动作调度 / 台词 / 导演备注）', 'err'); return; }
-  if (targets.length > maxTargets()) { toast('一次最多 ' + maxTargets() + ' 格（本次 ' + targets.length + '）——请分批', 'err'); return; }
+  if (!targets.length) { toast('选区内没有可改写的字段（支持：' + aiFieldLabels() + '）', 'err'); return; }
+  if (!guardTargets(targets)) return;
   startBatchCard({ instruction: instruction, targets: targets });
 }
 
 function openActionMenu(anchor, targets, opts) {
   const o = opts || {};
   o.anchor = anchor;
-  openMenu(anchor, ACTIONS.map((a) => ({ key: a.key, label: '✦ ' + a.label })), (k) => {
+  openMenu(anchor, ACTIONS.map((a) => ({ key: a.key, label: actionLabel(a) })), (k) => {
     runPreview(k, targets, o);
   });
 }
@@ -136,35 +151,23 @@ function startSingleCard(action, target, o) {
 
   let lastAnchorRect = (o.anchor && o.anchor.nodeType === 1 && o.anchor.isConnected)
     ? o.anchor.getBoundingClientRect() : null;
-  const place = () => {
-    let a;
+  const place = () => {                          // F4-W24：越界翻上 + 夹回视口并入 ui.placeNear（第 4 份手抄退役）
     if (o.anchor && o.anchor.nodeType === 1) {
       if (o.anchor.isConnected) lastAnchorRect = o.anchor.getBoundingClientRect();
-      a = lastAnchorRect;                        // 锚点被重绘销毁：用最后一次矩形，不跳左上角（L8）
-      if (!a) a = { left: 24, right: 24, top: 80, bottom: 80 };
+      placeNear(lastAnchorRect || o.anchor, card);   // 锚点被重绘销毁：用最后一次矩形，不跳左上角（L8）
     } else {
-      a = { left: (o.anchor && o.anchor.x) || 24, right: (o.anchor && o.anchor.x) || 24,
-            top: (o.anchor && o.anchor.y) || 80, bottom: (o.anchor && o.anchor.y) || 80 };
+      placeNear(o.anchor, card);
     }
-    const w = card.offsetWidth;
-    const h = card.offsetHeight;
-    let x = a.left;
-    let y = a.bottom + 8;
-    if (y + h > window.innerHeight - 8) y = Math.max(8, a.top - h - 8);
-    x = Math.max(8, Math.min(x, window.innerWidth - w - 8));
-    card.style.left = x + 'px';
-    card.style.top = y + 'px';
   };
   const onScroll = () => { if (!life.isClosed()) place(); };
 
-  const close = () => { life.close(); };
   life.onClose(() => {
     document.removeEventListener('scroll', onScroll, true);
     window.removeEventListener('resize', onScroll);
     card.remove();
-    floatLeave('ai', close);
+    floatLeave('ai', life.close);
   });
-  floatEnter('ai', close);   // 互斥：AI 卡同层开新关旧（L6）
+  floatEnter('ai', life.close);   // 互斥：AI 卡同层开新关旧（L6）
   document.addEventListener('scroll', onScroll, true);   // 跟随锚点（与 onClose 的 remove 严格对齐）（P0·F4-B3）
   window.addEventListener('resize', onScroll);
 
@@ -172,12 +175,12 @@ function startSingleCard(action, target, o) {
     spinHead(head, '✦ ' + ACTION_CN[action] + ' · 生成中…');
     body.textContent = '';
     foot.textContent = '';
-    foot.appendChild(cancelBtn(close));
+    foot.appendChild(cancelBtn(life.close));
     place();
   };
 
   const setError = (msg) => {
-    renderFail(head, body, foot, ACTION_CN[action], msg, { retry: start, close: close });
+    renderFail(head, body, foot, ACTION_CN[action], msg, { retry: start, close: life.close });
     place();
   };
 
@@ -185,16 +188,16 @@ function startSingleCard(action, target, o) {
     try {
       if (o.textAccept) {
         o.textAccept(it.after);
-        close();
+        life.close();
         return;
       }
-      const res = await api.aiApply(jobId, [it.i]);
-      const skip = (res.skipped || []).find((s) => s.i === it.i);
+      const { results, skipped } = await aiApplyItems(jobId, [it.i]);   // F4-W23：薄封装单点
+      const skip = skipped.find((s) => s.i === it.i);
       if (skip) { setError('未应用：' + skip.reason); return; }   // 终态卡，不再只 toast（P9）
       // 落定三件（模型 / 编辑面基线 / 撤销）走单点：edit.commitField（L7）
       commitField(Object.assign({}, o.ac, { label: 'AI ' + ACTION_CN[action] }), it.before, it.after);
       toast('已应用（Ctrl+Z 可撤）');
-      close();
+      life.close();
     } catch (err) {
       toast('应用失败：' + err.message, 'err');
     }
@@ -204,8 +207,8 @@ function startSingleCard(action, target, o) {
     const items = job.items || [];
     const it = items.find((x) => x.kind === 'db' && x.table === target.table
                               && x.id === target.id && x.field === target.field)
-            || items.find((x) => x.kind === 'text' && x.before === (target.text || ''))
-            || items[0] || {};   // 并入任务时按目标定位，不再写死 [0]（P9）
+            || items.find((x) => x.kind === 'text' && x.before === (target.text || ''));
+    if (!it) { setError('并入任务未能定位本格结果——请重试'); return; }   // F4-B7：定位失败即报错（items[0] 兜底会把别人那条的值套到本格）
     if (it.error || !it.after) { setError(it.error || '模型未返回内容'); return; }
     head.textContent = '✦ ' + ACTION_CN[action] + ' · 一版就绪';
     body.textContent = '';
@@ -225,7 +228,7 @@ function startSingleCard(action, target, o) {
       accept(it).finally(() => { ok.disabled = false; });
     });
     const no = el('button', 'aid-btn', '拒绝');
-    no.addEventListener('click', (e) => { e.preventDefault(); close(); });
+    no.addEventListener('click', (e) => { e.preventDefault(); life.close(); });
     const again = el('button', 'aid-btn', '再来一版');
     again.addEventListener('click', (e) => { e.preventDefault(); start(); });
     foot.appendChild(ok);
@@ -243,14 +246,15 @@ function startSingleCard(action, target, o) {
     try {
       const res = await api.aiPreview({ scene_id: sid, action: action, targets: [target] });
       jobId = res.job.id;
-      if (res.job.joined) toast('本场已有生成任务在跑——已并入，出稿一起看');
-      const r = await pollJob(() => api.aiJob(jobId).then((x) => x.job), { interval: 650, alive: life.alive, tolerant: true });
+      if (res.job.joined) joinedToast('ai');   // F4-W20：文案单点
+      const r = await pollJob(() => api.aiJob(jobId).then((x) => x.job), {
+        interval: POLL.fast, alive: life.alive, tolerant: true,   // F4-W26：节奏单点
+        onRetry: (n) => { if (!life.isClosed()) head.textContent = '✦ ' + ACTION_CN[action] + ' · 网络重试 ' + n + ' 次…'; },
+      });
       if (r.st === 'abort') return;
       if (life.isClosed()) return;
       if (r.st === 'done') { setDone(r.job); return; }
-      if (r.st === 'gone') { setError('任务已丢失（服务可能重启过）——请重试'); return; }
-      if (r.st === 'timeout') { setError('超时（约 4 分钟未完成）'); return; }
-      setError(r.err ? r.err.message : '生成失败');
+      setError(failText(r));   // F4-P8：终态文案单点
     } catch (err) {
       if (!life.isClosed()) setError(err.message);
     }
@@ -281,10 +285,9 @@ function startBatchCard(opts) {
   let applyBtn = null;
   let allBtn = null;
 
-  const close = () => { life.close(); };
-  life.onClose(() => { card.remove(); floatLeave('ai', close); });
-  floatEnter('ai', close);   // 互斥：AI 卡同层开新关旧（L6）
-  x.addEventListener('click', () => close());
+  life.onClose(() => { card.remove(); floatLeave('ai', life.close); });
+  floatEnter('ai', life.close);   // 互斥：AI 卡同层开新关旧（L6）
+  x.addEventListener('click', () => life.close());
 
   const okItems = () => (job ? (job.items || []).filter((it) => !it.error) : []);
   const checkedIds = () => (job ? (job.items || []).filter((it) => checked[it.i]).map((it) => it.i) : []);
@@ -295,9 +298,10 @@ function startBatchCard(opts) {
   };
   const updateFoot = () => {
     if (!job) return;
+    const nChecked = checkedIds().length;   // F4-W28②：一次算，不再每钮各 filter 一遍
     if (applyBtn) {
-      applyBtn.textContent = '应用选中（' + checkedIds().length + '）';
-      applyBtn.disabled = !checkedIds().length;
+      applyBtn.textContent = '应用选中（' + nChecked + '）';
+      applyBtn.disabled = !nChecked;
     }
     if (allBtn) {
       allBtn.textContent = '全收（' + okItems().length + '）';
@@ -310,7 +314,7 @@ function startBatchCard(opts) {
     sumEl.textContent = '';
     list.textContent = '';
     foot.textContent = '';
-    foot.appendChild(cancelBtn(close));
+    foot.appendChild(cancelBtn(life.close));
   };
 
   const applyIds = async (ids) => {
@@ -324,27 +328,27 @@ function startBatchCard(opts) {
         ops.push({ i: i, table: it.table, id: it.id, field: it.field, value: it.after, restore: it.before });
       }
     }
-    if (!ops.length) { close(); return; }
+    if (!ops.length) { life.close(); return; }
     if (applyBtn) applyBtn.disabled = true;
     if (allBtn) allBtn.disabled = true;
     // 落库 + 本地落定 + 一步撤销：走 selection.batchWrite 泛化口（L7），写口接入 aiApply
     await batchWrite(ops, 'AI ' + (isCmd ? '指挥条' : titleBase), {
       write: async (items) => {
-        const out = await api.aiApply(jobId, items.map((o) => o.i));
+        const out = await aiApplyItems(jobId, items.map((o) => o.i));   // F4-W23：薄封装单点
         const map = {};
         for (const o of items) map[o.i] = o;
         const results = [];
-        for (const r of (out.results || [])) {
+        for (const r of out.results) {
           const o = map[r.i];
           if (o) results.push({ id: o.id, field: o.field, changed: r.changed, error: r.error, restore: o.restore });
         }
-        return { results: results, skipped: out.skipped || [] };
+        return { results: results, skipped: out.skipped };
       },
       done: (n, errs, ret) => {
         const skipped = (ret && ret.skipped) || [];
         const skipTxt = skipped.length ? ('；' + skipped.length + ' 条未应用：' + skipped[0].reason) : '';
         toast('已应用 ' + n + ' 处' + skipTxt + '（Ctrl+Z 可撤）');
-        close();
+        life.close();
       },
       fail: (err) => {
         toast('应用失败：' + err.message, 'err');
@@ -388,7 +392,7 @@ function startBatchCard(opts) {
     allBtn = el('button', 'aid-btn', '全收');
     allBtn.addEventListener('click', (e) => { e.preventDefault(); applyIds(okItems().map((it) => it.i)); });
     const dis = el('button', 'aid-btn', '丢弃');
-    dis.addEventListener('click', (e) => { e.preventDefault(); close(); });
+    dis.addEventListener('click', (e) => { e.preventDefault(); life.close(); });
     foot.appendChild(applyBtn);
     foot.appendChild(allBtn);
     foot.appendChild(dis);
@@ -397,28 +401,30 @@ function startBatchCard(opts) {
     updateFoot();
   };
 
+  const setLoadingErr = (msg) => {   // F4-W19 小步：就地打洞的函数声明提出 start（全编排收口留 L2）
+    renderFail(htitle, list, foot, titleBase, msg, { close: life.close });
+  };
+
   const start = async () => {
     if (life.isClosed()) return;
     setLoading();
     const sid = ctx.sceneId ? ctx.sceneId() : null;
     if (!sid) { setLoadingErr('找不到当前场次'); return; }
-    function setLoadingErr(msg) {
-      renderFail(htitle, list, foot, titleBase, msg, { close: close });
-    }
     try {
       const payload = { scene_id: sid, targets: opts.targets };
       if (isCmd) payload.instruction = opts.instruction;
       else payload.action = opts.action;
       const res = await api.aiPreview(payload);
       jobId = res.job.id;
-      if (res.job.joined) toast('本场已有生成任务在跑——已并入，出稿一起看');
-      const r = await pollJob(() => api.aiJob(jobId).then((x) => x.job), { interval: 650, alive: life.alive, tolerant: true });
+      if (res.job.joined) joinedToast('ai');   // F4-W20：文案单点
+      const r = await pollJob(() => api.aiJob(jobId).then((x) => x.job), {
+        interval: POLL.fast, alive: life.alive, tolerant: true,   // F4-W26：节奏单点
+        onRetry: (n) => { if (!life.isClosed()) htitle.textContent = '✦ ' + titleBase + ' · 网络重试 ' + n + ' 次…'; },
+      });
       if (r.st === 'abort') return;
       if (life.isClosed()) return;
       if (r.st === 'done') { setDone(r.job); return; }
-      if (r.st === 'gone') { setLoadingErr('任务已丢失（服务可能重启过）——请重试'); return; }
-      if (r.st === 'timeout') { setLoadingErr('超时（约 4 分钟未完成）'); return; }
-      setLoadingErr(r.err ? r.err.message : '生成失败');
+      setLoadingErr(failText(r));   // F4-P8：终态文案单点
     } catch (err) {
       if (!life.isClosed()) setLoadingErr(err.message);
     }

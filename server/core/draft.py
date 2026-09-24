@@ -69,8 +69,16 @@ def parse_shots(text, nbeats):
                     "camera_move": str(s.get("camera_move") or "").strip()[:60],
                     "camera_pos": pos[:40],
                     "blocking": blk, "dialogue": dlg,
-                    "duration": str(s.get("duration") or "").strip()[:20]})
+                    "duration": _strip_dur(s.get("duration"))})
     return out
+
+
+def _strip_dur(v):
+    # F4-B6：剥尾缀单位（s/S/秒），落库后 ribbon 统一拼「s」，防「2ss / 2秒s」
+    v = str(v or "").strip()
+    while v and (v[-1] in "sS" or v.endswith("秒")):
+        v = v[:-1]
+    return v[:20]
 
 
 def _strip_fence(t):

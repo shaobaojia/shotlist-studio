@@ -1,7 +1,7 @@
 // 浮层抽屉基件（M5 批3「右缘抽屉体系」）
 // 形态基准 = 旧版提示词面板：浮动卡片 + 标题栏拖拽 + 八向缩放 + 贴附（右/下）+ 钉住 + 位置尺寸记忆。
 // 按钮行由使用方按序装配（panel-btn 统一样式：红底白字 11px 中文全词）。
-import { el, lsGet, lsSet, clamp, readVarPx, trackDrag, onResizeCoalesced, flashClass } from './ui.js';
+import { el, lsGet, lsSet, clamp, readVarPx, trackDrag, onResizeCoalesced, flashClass, isTypingTarget } from './ui.js';
 
 const MIN_W = 320, MIN_H = 200;
 // 屏内夹取与停靠常量单点（F3-W23：原先六处手抄同一组数）
@@ -24,6 +24,24 @@ const LS = (id) => 'studio.drawer.' + id;
 function headTop() {
   const h = readVarPx('--topbar-h');
   return Math.max(48, h || 0) + 6;
+}
+
+// 活动抽屉栈：Esc 焦点在两抽屉之外时只让最后打开的抽屉接管（F4-W39）
+const ACTIVE = [];
+
+// Esc 优先级阶梯单点（F4-W39）：菜单自管 → 焦点在别家抽屉让给它 → 别处输入不介入 → 焦点在两家之外只顶层接管 → onEsc
+export function bindDrawerEsc(dr, onEsc) {
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!dr.isOpen()) return;
+    const t = e.target;
+    if (t && t.closest && t.closest('.menu')) return;                        // 菜单自管优先
+    const inDrawer = !!(t && dr.el.contains(t));
+    if (!inDrawer && t && t.closest && t.closest('.drawer')) return;        // 焦点在别的抽屉：让它家处理
+    if (!inDrawer && isTypingTarget(t)) return;                               // 别处编辑中：不介入
+    if (!inDrawer && ACTIVE[ACTIVE.length - 1] !== dr) return;               // 焦点在两家之外：只让最后打开的抽屉接管
+    onEsc();
+  });
 }
 
 export function createDrawer(opts) {
@@ -217,6 +235,7 @@ export function createDrawer(opts) {
   function open() {
     if (st.open) return;
     st.open = true;
+    ACTIVE.push(dr);                                  // F4-W39：Esc 归属
     frame.hidden = false;
     applyRect();
     frame.classList.add('open');
@@ -235,6 +254,8 @@ export function createDrawer(opts) {
     clearTimeout(tIn);                               // F3-W25：关掉入场/回弹计时器（原先悬挂，当前无害）
     clearTimeout(tBn);
     document.removeEventListener('mousedown', onDoc, true);
+    const ai = ACTIVE.indexOf(dr);
+    if (ai !== -1) ACTIVE.splice(ai, 1);
     if (opts.onClose) opts.onClose();
   }
 
@@ -259,7 +280,7 @@ export function createDrawer(opts) {
     return tb;
   }
 
-  return {
+  const dr = {
     el: frame, bodyEl: body, headEl: head, titleEl: title, btnsEl: btns,
     open, close,
     isOpen: () => st.open,
@@ -268,4 +289,5 @@ export function createDrawer(opts) {
     addButton, addPinButton, addDockButton, addCloseButton, addStandardButtons,
     getDock: () => st.dock,
   };
+  return dr;
 }

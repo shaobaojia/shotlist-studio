@@ -1,7 +1,7 @@
 // 场级页——页面组装：头部（可编）/ 工具条（整理镜号·开关·筛选·跳转）/ 分组与平铺；
 // 表格与节拍区在 table.js；编辑引擎在 edit.js；拖动在 drag.js；筛选在 filter.js。
 import { api, exportUrl, downloadUrl } from './api.js';
-import { state, fieldOf, groupsById, fieldsOf } from './state.js';
+import { state, fieldOf, groupsById, fieldsOf, fieldLabel } from './state.js';
 import { hashOf, isCurrentScene } from './route.js';
 import { el, fmt, toast, once, durTick, flashIntoView, silent, lsGet, lsSet, setVarPx, filmChanged } from './ui.js';
 import { JIWEI_LEGEND } from './cells.js';
@@ -103,6 +103,7 @@ export async function renderScene(view, sceneNo) {
     allShots: fctx.allShots,
     groupsMap: () => promptGroupsMap,
     reapply: fctx.apply,
+    reapplyActive: () => filterActive(),          // F4-W5：无筛选时提示词写路径不再无条件重评
   });
   initScriptDrawer({
     getScene: fctx.scene,
@@ -504,9 +505,9 @@ function buildViewModeSeg() {
 // 排序提示条（有排序才出现；无 → null）
 function buildSortInfo() {
   if (!sortState) return null;
-  const f = fieldOf(sortState.key);
+  const f = fieldOf(sortState.key);   // （fieldOf 供 getView 等继续用；下方标签走 fieldLabel 单点）
   const info = el('span', 'sort-info',
-    '视图排序：' + (f ? f.label : sortState.key) + (sortState.dir === 1 ? ' ↑' : ' ↓') + '（仅视图）');
+    '视图排序：' + fieldLabel(sortState.key) + (sortState.dir === 1 ? ' ↑' : ' ↓') + '（仅视图）');   // F4-W44①：标签兜底单点
   const btn = el('button', 'tool-btn', '清除排序');
   btn.addEventListener('click', () => {
     sortState = null;

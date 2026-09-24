@@ -12,6 +12,12 @@ export function fieldOf(key, table) {
   return fieldsOf(table || 'shots').find((x) => x.key === key) || null;
 }
 
+// 字段标签单点（F4-W44①）：查标签 + 兜底键名；各模块勿再手写「f ? f.label : key」
+export function fieldLabel(key, table) {
+  const f = fieldOf(key, table);
+  return f ? f.label : key;
+}
+
 // 提示词组映射单点（F1-P7）：id → group（scene 注入 / 各表缺省各拿一份）
 export function groupsById(data) {
   const m = {};

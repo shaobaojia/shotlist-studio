@@ -2,13 +2,16 @@
 // 口径：生成走后台任务轮询；预览零写入——「落入」才落库（一步撤销走全局栈）；
 // 组级初稿只出稿，插进编辑面由调用方决定（未保存，保存才落库）。
 import { api } from './api.js';
-import { el, toast } from './ui.js';
-import { recordUndo } from './edit.js';
-import { pollJob } from './aicard.js';
+import { el, toast, durText } from './ui.js';
+import { recordCustomUndo } from './edit.js';
+import { pollJob, POLL, failText, joinedToast } from './aicard.js';
 import { panelShell, floatEnter, floatLeave, floatClose } from './float.js';
 
 let card = null;      // 场次草稿卡
 let pd = null;        // 组级初稿小卡
+
+// 场次草稿卡会话态（F4-W37：原 _sceneId/_onApplied/_prescript/_jobId/_lastScript/_stage 六键挂 DOM expando）
+const D = { body: null, sceneId: null, onApplied: null, prescript: '', jobId: null, lastScript: '', stage: null };
 
 // 重绘/换场前收起（scene.js paintScene 调用）：同层（'draft'）全量闭合（L6 注册表）
 export function closeDraftCards() {
@@ -27,10 +30,10 @@ export function openSceneDraft(sceneId, onApplied, prescript) {
   if (!card) buildCard();
   floatEnter('draft', closeScene);   // 互斥：场次草稿 ↔ 组级初稿（开新关旧，L6）
   card.hidden = false;
-  card._sceneId = sceneId;
-  card._onApplied = onApplied;
-  card._prescript = prescript || '';
-  card._jobId = null;
+  D.sceneId = sceneId;
+  D.onApplied = onApplied;
+  D.prescript = prescript || '';
+  D.jobId = null;
   showForm();
 }
 
@@ -38,20 +41,20 @@ function buildCard() {
   const sh = panelShell({ id: 'draft-card', title: '✦ 从台本出草稿', onClose: closeDraftCards });
   card = sh.card;
   card.hidden = true;
-  card._body = sh.body;
+  D.body = sh.body;
   document.body.appendChild(card);
 }
 
 function showForm() {
-  const b = card._body;
+  const b = D.body;
   b.textContent = '';
   b.appendChild(el('div', 'as-sec-t', '把这一场的台本段贴进来（几百字～两千字）。生成的是初稿——结构对、细节你来过手；只新增、不覆盖，落入后一步可撤。'));
   const ta = document.createElement('textarea');
   ta.className = 'as-input as-area dz-script';
   ta.placeholder = '例：\n内景 旧公寓客厅 深夜\n男人坐在沙发上反复解锁手机……';
   ta.spellcheck = false;
-  if (card._lastScript) ta.value = card._lastScript;
-  else if (card._prescript) ta.value = card._prescript;
+  if (D.lastScript) ta.value = D.lastScript;
+  else if (D.prescript) ta.value = D.prescript;
   b.appendChild(ta);
   const bar = el('div', 'as-bar');
   const go = el('button', 'tool-btn small dz-violet', '生成草稿');
@@ -68,11 +71,11 @@ async function startRun(script) {
     toast('台本太短——至少贴 30 字', 'err');
     return;
   }
-  card._lastScript = script;
+  D.lastScript = script;
   try {
-    const res = await api.draft(card._sceneId, script);
-    card._jobId = res.job.id;
-    if (res.job.joined) toast('本场已有草稿任务在跑——已并入');
+    const res = await api.draft(D.sceneId, script);
+    D.jobId = res.job.id;
+    if (res.job.joined) joinedToast('draft');   // F4-W20：文案单点
     showRun();
     pollScene();
   } catch (err) {
@@ -81,20 +84,20 @@ async function startRun(script) {
 }
 
 function showRun() {
-  const b = card._body;
+  const b = D.body;
   b.textContent = '';
   b.appendChild(el('div', 'as-sec-t', '两段生成中：① 节拍骨架 → ② 镜头行。约 20～60 秒，请稍候……'));
-  card._stage = el('div', 'dz-stage', '① 分析节拍骨架…');
-  b.appendChild(card._stage);
+  D.stage = el('div', 'dz-stage', '① 分析节拍骨架…');
+  b.appendChild(D.stage);
 }
 
 function pollScene() {
-  const jid = card._jobId;
+  const jid = D.jobId;
   pollJob(() => api.draftJob(jid).then((x) => x.job), {
-    interval: 1200, limit: 420, tolerant: true,   // 网络抖动：下轮再试
-    alive: () => !card.hidden && card._jobId === jid,
+    interval: POLL.slow, tolerant: true,   // F4-W26：节奏单点
+    alive: () => !card.hidden && D.jobId === jid,
     onTick: (j) => {
-      card._stage.textContent = j.stage === 'shots'
+      D.stage.textContent = j.stage === 'shots'
         ? ('② 出镜头行…（骨架 ' + (j.beats_n != null ? j.beats_n : (j.beats || []).length) + ' 拍已就绪）')
         : '① 分析节拍骨架…';
     },
@@ -105,16 +108,22 @@ function pollScene() {
       showPreview(r.job);
       return;
     }
-    if (r.st === 'gone') { toast('任务丢失（服务重启？）——请重来', 'err'); showForm(); return; }
-    if (r.st === 'timeout') { toast('任务超时——请重来', 'err'); showForm(); return; }
+    toast(failText(r, POLL.slow), 'err');   // F4-P8：终态文案单点（原 err 态静默）
+    showForm();
   });
 }
 
 function showPreview(j) {
-  const b = card._body;
+  const b = D.body;
   b.textContent = '';
-  b.appendChild(el('div', 'as-sec-t', '共 ' + j.beats.length + ' 拍 · ' + j.shots.length + ' 镜（初稿——落入后每行可改）。'));
+  b.appendChild(el('div', 'as-sec-t', countText(j.beats.length, j.shots.length) + '（初稿——落入后每行可改）。'));
   const list = el('div', 'dz-list');
+  const byBeat = new Map();                       // F4-W34：一次分桶（原每拍 j.shots.filter 一趟 O(beats×shots)）
+  for (const s of j.shots) {
+    const arr = byBeat.get(s.beat) || [];
+    arr.push(s);
+    byBeat.set(s.beat, arr);
+  }
   for (let i = 0; i < j.beats.length; i++) {
     const bt = j.beats[i];
     const bh = el('div', 'dz-beat');
@@ -124,31 +133,28 @@ function showPreview(j) {
     list.appendChild(bh);
     const sum = [bt.outside_action, bt.reaction, bt.closed_loop].filter(Boolean).join(' ／ ');
     if (sum) list.appendChild(el('div', 'dz-bsum', sum));
-    for (const s of j.shots.filter((x) => x.beat === i + 1)) {
+    for (const s of (byBeat.get(i + 1) || [])) {
       const row = el('div', 'dz-shot');
       row.appendChild(el('b', null, [s.camera_move, s.camera_pos].filter(Boolean).join(' · ') || '—'));
       row.appendChild(el('span', null, s.blocking));
       if (s.dialogue) row.appendChild(el('span', 'dz-dim', '「' + s.dialogue + '」'));
-      if (s.duration) row.appendChild(el('span', 'dz-dim', s.duration + 's'));
+      if (s.duration) row.appendChild(el('span', 'dz-dim', durText(s.duration)));   // F4-B6/W45：时长显示走单点（原 +'s' 会拼出 2ss）
       list.appendChild(row);
     }
   }
   b.appendChild(list);
   const bar = el('div', 'as-bar');
-  const ok = el('button', 'tool-btn small dz-violet', '落入草稿（' + j.beats.length + ' 拍 / ' + j.shots.length + ' 镜）');
+  const ok = el('button', 'tool-btn small dz-violet', '落入草稿（' + countText(j.beats.length, j.shots.length) + '）');
   ok.addEventListener('click', async () => {
     ok.disabled = true;
     try {
-      const res = await api.draftApply(card._jobId);
-      recordUndo({
-        type: 'custom', label: 'AI 草稿落入',
-        undo: async () => {
-          await api.del({ table: 'shots', ids: res.shot_ids });
-          if (res.beat_ids && res.beat_ids.length) await api.del({ table: 'beats', ids: res.beat_ids });   // 一次批删，不再 N+1（批4/D 尾）
-        },
+      const res = await api.draftApply(D.jobId);
+      recordCustomUndo('AI 草稿落入', async () => {          // F4-W36：统一 catch + toast（原份无 catch＝unhandled rejection）
+        await api.del({ table: 'shots', ids: res.shot_ids });
+        if (res.beat_ids && res.beat_ids.length) await api.del({ table: 'beats', ids: res.beat_ids });   // 一次批删，不再 N+1（批4/D 尾）
       });
-      toast('已落入：' + res.applied.beats + ' 拍 / ' + res.applied.shots + ' 镜（Ctrl+Z 可撤）');
-      const cb = card._onApplied;
+      toast('已落入：' + countText(res.applied.beats, res.applied.shots) + '（Ctrl+Z 可撤）');
+      const cb = D.onApplied;
       closeDraftCards();
       if (cb) await cb();
     } catch (err) {
@@ -157,13 +163,18 @@ function showPreview(j) {
     }
   });
   const again = el('button', 'tool-btn small', '重来');
-  again.addEventListener('click', () => startRun(card._lastScript));
+  again.addEventListener('click', () => startRun(D.lastScript));
   const cancel = el('button', 'tool-btn small', '取消');
   cancel.addEventListener('click', closeDraftCards);
   bar.appendChild(ok);
   bar.appendChild(again);
   bar.appendChild(cancel);
   b.appendChild(bar);
+}
+
+// 「拍 × 镜」计数文案单点（F4-W35）：预览头与落入钮同一格式（原两种格式）
+function countText(beats, shots) {
+  return '共 ' + beats + ' 拍 · ' + shots + ' 镜';
 }
 
 // ── 组级初稿小卡 ────────────────────────────────────────────
@@ -218,14 +229,13 @@ export function openPromptDraft(opts) {
       const res = await api.draftPrompt(opts.sceneId, opts.shotId);
       if (pd !== self || seq !== my) return;      // 卡已被替换/关闭：本轮作废
       const jid = res.job.id;
-      if (res.job.joined) toast('这个镜头的初稿正在生成——已并入');
+      if (res.job.joined) joinedToast('pdraft');   // F4-W20：文案单点
       const r = await pollJob(() => api.draftJob(jid).then((x) => x.job), {
-        interval: 1200, limit: 420, tolerant: true,
+        interval: POLL.slow, tolerant: true,   // F4-W26：节奏单点
         alive: () => pd === self && seq === my,
       });
       if (r.st === 'abort') return;
-      if (r.st === 'timeout') { stage.textContent = '任务超时——请重试'; return; }
-      if (r.st === 'gone') { stage.textContent = '任务丢失（服务重启？）——请重试'; return; }
+      if (r.st !== 'done') { stage.textContent = failText(r, POLL.slow); return; }   // F4-P8：终态文案单点
       if (r.job.error) { stage.textContent = '生成失败：' + r.job.error; return; }
       renderText(r.job.text);
     } catch (err) {

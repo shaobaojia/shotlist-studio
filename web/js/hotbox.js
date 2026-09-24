@@ -2,18 +2,19 @@
 // 交互口径：Ctrl+Enter 保存并下一镜 · Esc 编辑→查看（不保存）· 查看态 Esc→关闭 · 未钉住点抽屉外＝保存并关闭 · 钉住＝不关（切镜跟随）。
 // 写作逻辑不变：块库点插（插入即固化）+ 自由手写；{占位符} 在插入瞬间代入当前镜的值。
 import { api } from './api.js';
-import { el, toast, growTextarea, durText, isFloatTarget, isTypingTarget, flashIntoView } from './ui.js';
+import { el, toast, durText, isFloatTarget, isTypingTarget, flashIntoView } from './ui.js';
 import { groupsById } from './state.js';
 import { openMenu, menuEl } from './menu.js';
-import { recordUndo, undo as globalUndo } from './edit.js';
+import { recordCustomUndo, undo as globalUndo } from './edit.js';
 import { storeAsBlock, byPosition, PLACEHOLDERS } from './blocks.js';
+import { shotRow } from './table.js';
 import { initBlockCard, cardSetActive, cardSetInsert } from './blockcard.js';
 import { writeClipboard, copyText } from './clipboard.js';
 import { aiTextMenu } from './aiwrite.js';
 import { openPromptDraft } from './draft.js';
-import { createDrawer } from './drawer.js';
+import { createDrawer, bindDrawerEsc } from './drawer.js';
 import {
-  EDITOR_MIN_H, editorReset, editorUndo, editorRedo,
+  EDITOR_MIN_H, editorPane, editorReset, editorUndo, editorRedo, editorRev,
   editorHasUndo, editorOnInput, editorOnBeforeInput, editorOnCompositionEnd, insertInto, replaceAll, replaceRange,
 } from './hbedit.js';
 
@@ -22,12 +23,12 @@ let ctx = { getData: () => null, refresh: async () => {}, allShots: () => [], gr
 export function initHotbox(c) { ctx = Object.assign(ctx, c); }
 
 let dr = null;                    // 抽屉实例（懒建）
-let escWired = false;
-const S = {                       // 抽屉会话状态
+let listenersWired = false;   // F4-W18②：原 escWired 一旗管三监听（selectionchange/Esc/钉住浏览），名字如实化
+const S = {                       // 抽屉会话状态（F4-W9①：selStatEl 补入字面量，关抽屉即清）
   shotId: null, s: null,
   mode: 'edit',                   // 'view' | 'edit'
   ta: null, original: '', unsub: null,
-  toggleBtn: null,
+  toggleBtn: null, selStatEl: null,
 };
 
 function groupOf(s, groups) {
@@ -74,25 +75,17 @@ function ensureDrawer() {
     onClose: () => commitClose(),
   });
 
-  if (!escWired) {
-    escWired = true;
+  if (!listenersWired) {
+    listenersWired = true;
     // 选区字数：查看态（抽屉内渲染文本的 DOM 选区）
     document.addEventListener('selectionchange', () => {
       if (!dr || !dr.isOpen() || S.mode !== 'view') return;
       const sel = document.getSelection();
       if (!sel || sel.isCollapsed) { setSelCount(0); return; }
       const n = sel.anchorNode;
-      setSelCount((n && dr.el.contains(n)) ? [...String(sel)].length : 0);
+      setSelCount((n && dr.el.contains(n)) ? String(sel).length : 0);   // F4-W11：码点展开退役（BMP 中文 .length 语义等同）
     });
-    // 焦点在抽屉内时：Esc 编辑→查看（不保存）/ 查看→关闭（未钉住）
-    document.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape') return;
-      if (!dr || !dr.isOpen()) return;
-      const t = e.target;
-      if (t && t.closest && t.closest('.menu')) return;                       // 菜单自管优先
-      const inDrawer = !!(t && dr.el.contains(t));
-      if (!inDrawer && t && t.closest && t.closest('.drawer')) return;        // 焦点在别的抽屉：让它家处理
-      if (!inDrawer && isTypingTarget(t)) return;                               // 别处编辑中：不介入（编辑面内由 ta 自管）
+    bindDrawerEsc(dr, () => {                        // F4-W39：阶梯单点（原 12 行逐字两份）
       if (S.mode === 'edit') { renderDrawer('view'); return; }
       if (!dr.isPinned()) commitClose();
     });
@@ -134,10 +127,7 @@ export async function openPromptDrawer(shotId, opts) {
   renderDrawer(mode);
 }
 
-// 兼容旧出口：聚焦某镜的拼装台（供刷新后回位 / 保存并下一镜用）
-export function focusShotComposer(shotId) {
-  openPromptDrawer(shotId, { mode: 'edit' });
-}
+// （F4-W14：focusShotComposer 死导出已退役——全库 0 调用；回位走 openPromptDrawer）
 
 // 重绘前释放：编辑态＝丢弃关闭（防陈旧上下文写库）；查看态＝重挂内容（钉住/记忆保持）
 export function releaseComposer() {
@@ -149,14 +139,19 @@ export function releaseComposer() {
   renderDrawer('view');
 }
 
-function onDrawerClosed() {
-  detachEditor();
-  clearCover();
-  cardSetActive(false);
+function resetSession() {                        // F4-W9③：会话态一处归零（原四处散落，selStatEl 漏清）
   S.shotId = null;
   S.s = null;
   S.mode = 'edit';
   S.original = '';
+  S.selStatEl = null;
+}
+
+function onDrawerClosed() {
+  detachEditor();
+  clearCover();
+  cardSetActive(false);
+  resetSession();
 }
 
 function detachEditor() {
@@ -166,11 +161,16 @@ function detachEditor() {
 
 // ── 渲染（view / edit 两态）──
 function promptTitle(s, g) {
+  return '提示词 · ' + (g && g.member_shots.length > 1 ? groupLabel(g) : shotLabel(s));
+}
+
+// 镜/组标签格式化单点（F4-W10）：原三套方言（标题 / 状态行 / 预览头）各手拼
+function shotLabel(s) {
   const no = s.shot_no != null ? String(s.shot_no) : String(s.id);
-  if (g && g.member_shots.length > 1) {
-    return '提示词 · 本组 ' + g.member_shots.length + ' 镜（' + g.member_shots.join(' / ') + '）';
-  }
-  return '提示词 · 镜 ' + no;
+  return '镜 ' + no;
+}
+function groupLabel(g) {
+  return '本组 ' + g.member_shots.length + ' 镜（' + g.member_shots.join(' / ') + '）';
 }
 
 function renderDrawer(mode) {
@@ -197,11 +197,6 @@ function renderDrawer(mode) {
     cardSetActive(true);
     editorReset(box.ta);
     wireEditorEvents(box, s);
-    growTextarea(box.ta, EDITOR_MIN_H);
-    const n = box.ta.value.length;
-    setTimeout(() => {
-      try { box.ta.focus(); box.ta.setSelectionRange(n, n); } catch (e) { /* ignore */ }
-    }, 0);
   } else {
     cardSetActive(false);
     renderView(d.bodyEl, s, g);
@@ -218,11 +213,14 @@ function coverIdsOf(s) {
 function refreshCover() {
   const on = !!(dr && dr.isOpen() && S.s);
   const ids = on ? coverIdsOf(S.s) : null;
-  document.querySelectorAll('tr.shot').forEach((tr) => {
-    tr.classList.remove('cover', 'cover-off');
-    if (!on) return;
-    if (ids.indexOf(Number(tr.dataset.id)) !== -1) tr.classList.add('cover');
-    else tr.classList.add('cover-off');
+  document.querySelectorAll('tr.shot').forEach((tr) => {          // F4-W4c：差量写类（新/旧态一致时不再整表重写）
+    const want = !on ? '' : (ids.indexOf(Number(tr.dataset.id)) !== -1 ? 'cover' : 'cover-off');
+    const hasC = tr.classList.contains('cover');
+    const hasO = tr.classList.contains('cover-off');
+    if (want === 'cover' && !hasC) tr.classList.add('cover');
+    else if (hasC) tr.classList.remove('cover');
+    if (want === 'cover-off' && !hasO) tr.classList.add('cover-off');
+    else if (hasO) tr.classList.remove('cover-off');
   });
 }
 
@@ -243,8 +241,7 @@ function setSelCount(n) {
 function buildStatRow(s, g) {
   const row = el('div', 'pd-stat');
   const left = el('span');
-  const no = s.shot_no != null ? String(s.shot_no) : String(s.id);
-  left.appendChild(el('span', 'k', '镜 ' + no));
+  left.appendChild(el('span', 'k', shotLabel(s)));
   if (g && g.member_shots.length > 1) {
     const n = groupOrdinal(g, ctx.getData());
     left.appendChild(document.createTextNode(
@@ -269,8 +266,13 @@ function focusTaSoft() {
 }
 
 // ── 查看态：徽标着色解析（旧版基准确认：人物绿/场景琥珀/空间锚蓝/镜头紫/风格紫+动作三件套石板灰）──
+// F4-W13：内联巨正则 → 词表小表（正则由表生成；色值冻结不变＝视觉零变化）
+const PR_WORDS = [
+  '@图片\\d+', '镜头[一二三四五六七八九十百零〇\\d]+', '场景', '空间锚', '人物', '风格', '主光方位', '视角', '光线', '调色',
+  '氛围', '时长', '景别', '焦段', '景深', '机位', '运镜', '动作表演', '拍摄方式', '画面呈现',
+];
 const PR_NODOT = new Set(['动作表演', '拍摄方式', '画面呈现']);
-const PR_RE = /^(@图片\d+|镜头[一二三四五六七八九十百零〇\d]+|场景|空间锚|人物|风格|主光方位|视角|光线|调色|氛围|时长|景别|焦段|景深|机位|运镜|动作表演|拍摄方式|画面呈现)\s*[：:]/;
+const PR_RE = new RegExp('^(' + PR_WORDS.join('|') + ')\\s*[：:]');
 
 function prColor(lab) {
   if (lab === '场景') return '#f59e0b';
@@ -317,7 +319,7 @@ function renderRichText(box, text) {
   }
 }
 
-function renderView(bodyEl, s, g, data) {
+function renderView(bodyEl, s, g) {   // F4-W18①：死参 data 退役（函数体零引用）
   const scroll = el('div', 'pd-scroll');
   let footZone = null;
   const wrap = el('div', 'pd-view');
@@ -366,17 +368,21 @@ function renderView(bodyEl, s, g, data) {
 
 // ── 编辑态 DOM（正文 + 脚部 + 块库条）──
 function buildEditorDom(bodyEl, g) {
-  const box = el('div', 'hotbox');
-  const scroll = el('div', 'hb-scroll');
-  const ta = document.createElement('textarea');
-  ta.className = 'hotbox-editor';
-  ta.spellcheck = false;
-  ta.placeholder = '拼装提示词：点左侧块库插入积木，或直接手写…';
-  ta.value = (g && g.text) ? g.text : '';
+  const pane = editorPane({                        // F4-W1：六连写收进 hbedit.editorPane 单点
+    cls: 'hotbox',
+    parent: bodyEl,
+    placeholder: '拼装提示词：点左侧块库插入积木，或直接手写…',
+    value: (g && g.text) ? g.text : '',
+    hint: 'Ctrl+Enter 存 → 下一镜 · Esc 返回',
+    minH: EDITOR_MIN_H,
+    onSave: () => saveAndNext(),
+    onEsc: () => renderDrawer('view'),             // 收起（不保存）——原口径
+  });
+  const box = pane.box;
+  const ta = pane.ta;
 
   const foot = el('div', 'hotbox-foot');
-  foot.appendChild(el('span', 'hotbox-hint', 'Ctrl+Enter 存 → 下一镜 · Esc 返回'));
-
+  if (pane.hintEl) foot.appendChild(pane.hintEl);
   const draftBtn = el('button', 'tool-btn small dz-violet', '✦ 初稿');
   draftBtn.title = '按本镜数据 + 块库出一版初稿（进编辑面、未保存）';
   const saveBtn = el('button', 'tool-btn small', '存 → 下一镜');
@@ -389,24 +395,25 @@ function buildEditorDom(bodyEl, g) {
   foot.appendChild(saveBtn);
   foot.appendChild(copyBtn);
   foot.appendChild(blockBtn);
-
-  scroll.appendChild(ta);
-  box.appendChild(scroll);
   box.appendChild(foot);
-  bodyEl.appendChild(box);
   return { ta: ta, draftBtn: draftBtn, saveBtn: saveBtn, copyBtn: copyBtn, blockBtn: blockBtn };
 }
 
-// 编辑面事件接线（键处理 / 脚部按钮 / 右键菜单）
+// 编辑面事件接线（键处理 / 脚部按钮 / 右键菜单）——F4-W8：111 行四职拆三分
 function wireEditorEvents(box, s) {
   const ta = box.ta;
   const selText = () => ta.value.slice(ta.selectionStart, ta.selectionEnd);
+  bindEditorKeys(ta);
+  bindEditorFooter(box, s, ta, selText);
+  bindEditorMenu(ta, s, selText);
+}
 
+function bindEditorKeys(ta) {
   ta.addEventListener('input', () => editorOnInput(ta));
   ta.addEventListener('beforeinput', (e) => editorOnBeforeInput(ta, e));   // F2-W21：按输入事务分段（组合期不切段）
   ta.addEventListener('compositionend', () => editorOnCompositionEnd(ta));
   // 选区字数：编辑面（textarea 选区）
-  const selCount = () => { const v = selText(); setSelCount(v.trim() ? [...v].length : 0); };
+  const selCount = () => { const v = ta.value.slice(ta.selectionStart, ta.selectionEnd); setSelCount(v.trim() ? v.length : 0); };   // F4-W11
   ta.addEventListener('select', selCount);
   ta.addEventListener('keyup', selCount);
   ta.addEventListener('mouseup', selCount);
@@ -425,16 +432,11 @@ function wireEditorEvents(box, s) {
       editorRedo(ta);
       return;
     }
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      e.stopPropagation();
-      renderDrawer('view');       // 收起（不保存）——原口径
-    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      saveAndNext();
-    }
+    // Esc / Ctrl+Enter 已由 editorPane 装配（F4-W1）
   });
+}
 
+function bindEditorFooter(box, s, ta, selText) {
   box.draftBtn.addEventListener('mousedown', (e) => e.preventDefault());
   box.draftBtn.addEventListener('click', () => {
     openPromptDraft({
@@ -456,7 +458,9 @@ function wireEditorEvents(box, s) {
     if (!sel) { toast('先在编辑面里选中要存成块的文字'); return; }
     storeAsBlock(box.blockBtn, sel);
   });
+}
 
+function bindEditorMenu(ta, s, selText) {
   // 编辑面内右键：独立菜单（选中文字 → 添加块 / 拷上组全文 / 复制剪切全选）
   ta.addEventListener('contextmenu', (e) => {
     e.preventDefault();
@@ -480,19 +484,19 @@ function wireEditorEvents(box, s) {
         if (!hasSel) { toast('先选中要改写的文字'); return; }
         const seg = selText();
         const sPos = ta.selectionStart;
+        const rev = editorRev(ta);                      // F4-W12：选段身份＝rev + 选区（锚点过期不再退化成首个相同段）
         aiTextMenu(pt, seg, ta.value, (after) => {
-          let p0 = sPos;
-          if (ta.value.slice(p0, p0 + seg.length) !== seg) {
-            p0 = ta.value.indexOf(seg);           // 锚点过期（卡片开着时编辑过）→ 退化：首个相同段
-            if (p0 < 0) { toast('选段已变化，未替换——请重新选中再试', 'err'); return; }
+          if (editorRev(ta) !== rev || ta.value.slice(sPos, sPos + seg.length) !== seg) {
+            toast('选段已变化，未替换——请重新选中再试', 'err');
+            return;
           }
-          replaceRange(ta, p0, p0 + seg.length, after);   // 范围替换单点（L7）
+          replaceRange(ta, sPos, sPos + seg.length, after);   // 范围替换单点（L7）
           toast('已替换选段（Ctrl+Z 可撤）');
         });
       } else if (k === 'all') {
         copyPrevInto(ta, s);
       } else if (k === 'copy') {
-        copyText(selText(), '已复制选中文字', '复制失败：浏览器限制，请用 Ctrl+C');
+        copyText(selText(), '已复制选中文字');
       } else if (k === 'cut') {
         const s0 = ta.selectionStart;
         const s1 = ta.selectionEnd;
@@ -518,12 +522,18 @@ async function saveCurrent() {
 }
 
 // 保存正文（未组镜头自动建组）；返回 {ok, changed}
+// 未变判定（F4-W18③）：有组＝与组文同；无组＝与基线同且非空白
+function unchanged(text, base, g) {
+  if (g) return text === base;
+  return text === base && !String(text).trim();
+}
+
 async function saveText(s, text, original) {
   const data = ctx.getData();
   let g = groupOf(s, ctx.groupsMap());
   // 基线现场推导：有组 = 组上现文（别处改过也不会误判「没变」）；无组 = 编辑面本次会话起点
   const base = g ? (g.text || '') : (original || '');
-  if (text === base && (g || !String(text).trim())) return { ok: true, changed: false };
+  if (unchanged(text, base, g)) return { ok: true, changed: false };   // F4-W18③：三合一判拆谓词
   try {
     if (!g) {
       if (!String(text).trim()) { S.original = text; return { ok: true, changed: false }; }
@@ -539,22 +549,14 @@ async function saveText(s, text, original) {
       changed = true;
       const gid = g.id;
       g.text = text;
-      recordUndo({
-        type: 'custom', label: '提示词',
-        undo: async () => {
-          try {
-            await api.promptOp('set_text', { group_id: gid, text: prior });
-            const map = ctx.groupsMap ? ctx.groupsMap() : null;
-            if (map && map[gid]) map[gid].text = prior;
-            refreshPreviewsForGroup(gid);
-            refreshDrawerSoft();
-          } catch (err) {
-            toast('撤销失败：' + err.message, 'err');
-          }
-        },
+      recordCustomUndo('提示词', async () => {          // F4-W36：撤销登记单点
+        await api.promptOp('set_text', { group_id: gid, text: prior });
+        const map = ctx.groupsMap ? ctx.groupsMap() : null;
+        if (map && map[gid]) map[gid].text = prior;
+        refreshPromptViews(gid);                        // F4-W2：扇出单点
       });
-      if (ctx.reapply) ctx.reapply();          // 「未写提示词」等筛选口径随文本变化重评
-      refreshPreviewsForGroup(gid);
+      if (ctx.reapplyActive && ctx.reapplyActive()) ctx.reapply();   // F4-W5：无筛选时不重评（原无条件清选区+全表重算）
+      refreshPromptViews(gid);
     }
     return { ok: true, changed: changed };
   } catch (err) {
@@ -591,7 +593,7 @@ function onCopy() {
   const g = groupOf(s, ctx.groupsMap());
   const text = (g && g.text) ? String(g.text).replace(/\[[^\]]*\]/g, '') : '';
   if (!text.trim()) { toast('还没有提示词可复制'); return; }
-  copyText(text, '已复制全文（已过滤 [镜XX] 注释）', '复制失败：浏览器限制，请手动选择');
+  copyText(text, '已复制全文（已过滤 [镜XX] 注释）');   // F4-W44②：失败文案走单点默认
 }
 
 function onOutside(e) {
@@ -632,36 +634,27 @@ async function saveAndNext() {
   S.s = t;
   renderDrawer('edit');
   toast('已存 · 跳到镜 ' + t.shot_no);
-  flashRow(t.id);
-}
-
-function flashRow(shotId) {
-  const tr = document.querySelector('tr.shot[data-id="' + shotId + '"]');
-  if (!tr) return;
-  try { tr.scrollIntoView({ block: 'nearest' }); } catch (e) { /* ignore */ }
-  tr.classList.add('flash');
-  setTimeout(() => tr.classList.remove('flash'), 1600);
+  jumpToShot(t.id);                        // F4-W17：闪烁三件套单点（flashRow 逐字两份退役）
 }
 
 // ── 只读预览（详情行内；点击在抽屉中打开）──
+const PB_CTX = new WeakMap();                      // F4-W37：预览上下文进 WeakMap（原 DOM expando）
 export function buildPromptBox(s, groups, data) {
   const pb = el('div', 'prompt-box');
-  pb._ctx = { s, groups, data };
+  PB_CTX.set(pb, { s, groups, data });
   renderPreview(pb);
   return pb;
 }
 
 function renderPreview(pb) {
-  const { s, groups } = pb._ctx;
+  const { s, groups } = PB_CTX.get(pb) || {};
   const g = groupOf(s, groups);
   pb.textContent = '';
 
   const head = el('div', 'pb-head');
   const label = el('div', 'kv-label');
   label.textContent = g
-    ? (g.member_shots.length > 1
-        ? '提示词（本组 ' + g.member_shots.length + ' 镜：' + g.member_shots.join(' / ') + '）'
-        : '提示词（镜 ' + g.member_shots[0] + '）')
+    ? (g.member_shots.length > 1 ? '提示词（' + groupLabel(g) + '）' : '提示词（镜 ' + g.member_shots[0] + '）')
     : '提示词（未组 —— 写入时自动建组）';
   head.appendChild(label);
   const openBtn = el('button', 'tool-btn small', '在抽屉中打开');
@@ -688,7 +681,7 @@ function renderPreview(pb) {
 
 function refreshPreviewsForGroup(gid) {
   document.querySelectorAll('.prompt-box').forEach((pb) => {
-    const c = pb._ctx;
+    const c = PB_CTX.get(pb);
     if (!c) return;
     const g = groupOf(c.s, c.groups);
     if (g && g.id === gid) renderPreview(pb);
@@ -696,11 +689,21 @@ function refreshPreviewsForGroup(gid) {
 }
 
 function refreshAllPreviews() {
-  document.querySelectorAll('.prompt-box').forEach((pb) => renderPreview(pb));
+  document.querySelectorAll('.prompt-box').forEach((pb) => {
+    if (pb.offsetParent === null) return;   // F4-W4b：隐藏详情行里的预览卡不重建（纯废功）
+    renderPreview(pb);
+  });
 }
 
 function refreshDrawerSoft() {
   if (dr && dr.isOpen() && S.mode === 'view') renderDrawer('view');
+}
+
+// 提示词写响应扇出单点（F4-W2）：组预览 → 抽屉查看态 → 覆盖高亮
+function refreshPromptViews(gid) {
+  refreshPreviewsForGroup(gid);
+  refreshDrawerSoft();
+  refreshCover();
 }
 
 // 提示词格渲染（初始表 + 组态刷新共用；成组多镜出徽标「组N · x镜」）
@@ -719,15 +722,20 @@ export function paintPromptCell(td, g, data) {
   else td.removeAttribute('title');
 }
 
-function updatePromptCell(s, g) {
-  const data = ctx.getData();
-  document.querySelectorAll('tr.shot[data-id="' + s.id + '"] td.cell-prompt').forEach((td) => paintPromptCell(td, g, data));
+function updatePromptCell(s, g, data) {
+  shotRow(s.id).querySelectorAll('td.cell-prompt').forEach((td) => paintPromptCell(td, g, data));   // F4-W41：行单点
 }
 
-// 写响应就地套用：组态 + 各镜归属 + 提示词格 + 只读预览 + 抽屉（查看态）+ 筛选重评
+// 写响应就地套用（F4-W3）：组归属落定（adoptGroups）与重画扇出（repaintPromptViews）拆开，map 只建一次
 export function applyPromptGroups(list) {
   const data = ctx.getData();
   if (!data) return;
+  adoptGroups(list, data);
+  repaintPromptViews(data);
+}
+
+// 组态 → 本地数据模型（list 落 data + 各镜归属；共享 map 同步）
+function adoptGroups(list, data) {
   data.prompt_groups.length = 0;
   for (const g of list) data.prompt_groups.push(g);
   const map = ctx.groupsMap ? ctx.groupsMap() : null;
@@ -740,19 +748,22 @@ export function applyPromptGroups(list) {
   for (const s of (ctx.allShots() || [])) {
     s.prompt_group_id = (byShot[s.id] != null ? byShot[s.id] : null);
   }
-  syncPromptCells();
+}
+
+// 组态变更后的重画扇出（F4-W2 单点）：组序号缓存失效 → 提示词格 → 预览 → 抽屉 → 覆盖 → 筛选重评
+function repaintPromptViews(data) {
+  groupOrdinalMap = null;                          // F4-W6：组序号缓存随组态失效
+  syncPromptCells(data);
   refreshAllPreviews();
   refreshDrawerSoft();
   refreshCover();
-  if (ctx.reapply) ctx.reapply();               // 筛选重评（「未写提示词」等）
+  if (ctx.reapplyActive && ctx.reapplyActive()) ctx.reapply();   // F4-W5：无筛选时不重评
 }
 
-function syncPromptCells() {
-  const data = ctx.getData();
-  if (!data) return;
+function syncPromptCells(data) {
   const map = groupsById(data);
   for (const s of (ctx.allShots() || [])) {
-    updatePromptCell(s, s.prompt_group_id != null ? (map[s.prompt_group_id] || null) : null);
+    updatePromptCell(s, s.prompt_group_id != null ? (map[s.prompt_group_id] || null) : null, data);
   }
 }
 
@@ -781,17 +792,10 @@ async function runPromptOp(action, payload, focusId, label) {
   detachEditor();                                // 丢弃编辑面（组态将变，旧上下文作废）
   try {
     const res = await api.promptOp(action, payload);
-    recordUndo({
-      type: 'custom', label: label,
-      undo: async () => {
-        try {
-          const r2 = await api.promptOp('restore', { scene_id: snap.scene_id, groups: snap.groups });
-          if (r2 && r2.groups) applyPromptGroups(r2.groups);
-          else await ctx.refresh();
-        } catch (err) {
-          toast('撤销失败：' + err.message, 'err');
-        }
-      },
+    recordCustomUndo(label, async () => {                    // F4-W36：撤销登记单点
+      const r2 = await api.promptOp('restore', { scene_id: snap.scene_id, groups: snap.groups });
+      if (r2 && r2.groups) applyPromptGroups(r2.groups);
+      else await ctx.refresh();
     });
     if (res && res.groups) applyPromptGroups(res.groups);   // 就地套用写响应（全量组态），不再全量重拉
     else await ctx.refresh();
@@ -846,53 +850,55 @@ export async function detachShotsByIds(ids) {
 
 // 跳镜：滚到该行并闪烁（成员 chips 用）
 function jumpToShot(shotId) {
-  const tr = document.querySelector('tr.shot[data-id="' + shotId + '"]');
+  const tr = shotRow(shotId);              // F4-W41：行单点
   if (!tr) { toast('该镜不在当前视图（可能被筛选隐藏）'); return; }
   flashIntoView(tr);
 }
 
-// 组序号（按场序：全部组一起数）
-function groupOrdinal(g, data) {
+// 组序号（按场序：全部组一起数）；F4-W6：预建 id→序 Map，组态变更时失效（O(G log G)→O(1)）
+let groupOrdinalMap = null;
+function ordinalMapOf(data) {
+  if (groupOrdinalMap) return groupOrdinalMap;
   const list = (data.prompt_groups || []).slice().sort(byPosition);
-  const i = list.findIndex((x) => x.id === g.id);
-  return i >= 0 ? i + 1 : null;
+  groupOrdinalMap = new Map();
+  for (let i = 0; i < list.length; i++) groupOrdinalMap.set(list[i].id, i + 1);
+  return groupOrdinalMap;
+}
+function groupOrdinal(g, data) {
+  const i = ordinalMapOf(data).get(g.id);
+  return i == null ? null : i;
 }
 
 // 本镜能否并入上一组（上方存在其它提示词组）
 export function canJoinPrev(shotId) {
-  const data = ctx.getData();
-  if (!data) return false;
-  const shots = ctx.allShots() || [];
-  const i = shots.findIndex((x) => x.id === shotId);
-  if (i <= 0) return false;
-  const map = ctx.groupsMap ? ctx.groupsMap() : null;
-  const g = groupOf(shots[i], map);
-  for (let k = i - 1; k >= 0; k--) {
-    const pg = groupOf(shots[k], map);
-    if (pg && (!g || pg.id !== g.id)) return true;
-  }
-  return false;
+  return !!prevGroupBefore(shotId);
 }
 
 // 并入上一组：本镜所在组整体并入上方最近的另一组（上一组为主组）
 export async function joinPrevGroup(shotId) {
-  const data = ctx.getData();
-  if (!data) return false;
-  const shots = ctx.allShots() || [];
-  const i = shots.findIndex((x) => x.id === shotId);
-  if (i <= 0) { toast('上方没有可并入的组'); return false; }
-  const map = ctx.groupsMap ? ctx.groupsMap() : null;
-  const g = groupOf(shots[i], map);
-  let prev = null;
-  for (let k = i - 1; k >= 0; k--) {
-    const pg = groupOf(shots[k], map);
-    if (pg && (!g || pg.id !== g.id)) { prev = pg; break; }
-  }
-  if (!prev) { toast('上方没有可并入的提示词组'); return false; }
+  const found = prevGroupBefore(shotId);
+  if (!found) { toast('上方没有可并入的组'); return false; }
+  const { g, prev } = found;
   const ids = [prev.member_ids[0]];
   for (const mid of (g ? g.member_ids : [shotId])) if (!ids.includes(mid)) ids.push(mid);
   await promptOpUI('merge', { shot_ids: ids }, ids[0], ids.length);
   return true;
+}
+
+// 向上找最近的其它组（F4-W7）：canJoinPrev / joinPrevGroup / prevGroupOf 三处共用（原判定循环逐字三份）
+function prevGroupBefore(shotId) {
+  const data = ctx.getData();
+  if (!data) return null;
+  const shots = ctx.allShots() || [];
+  const i = shots.findIndex((x) => x.id === shotId);
+  if (i <= 0) return null;
+  const map = ctx.groupsMap ? ctx.groupsMap() : null;
+  const g = groupOf(shots[i], map);
+  for (let k = i - 1; k >= 0; k--) {
+    const pg = groupOf(shots[k], map);
+    if (pg && (!g || pg.id !== g.id)) return { g: g, prev: pg };
+  }
+  return null;
 }
 
 // ── 拷上组：整组拷「上一条提示词组」全文（提示词单一概念，不拆声明段） ──

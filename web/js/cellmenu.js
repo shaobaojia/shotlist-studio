@@ -8,6 +8,7 @@ import { copyText, pasteBlock, toTSV } from './clipboard.js';
 import { refreshShotCell, refreshBeatAction, writableFieldKeys } from './table.js';
 import { jumpToShotById } from './filter.js';
 import { isAiField, aiMenu, aiMenuForBeat, targetsFromSel } from './aiwrite.js';
+import { fieldLabel } from './state.js';
 import { joinPrevGroup, canJoinPrev } from './hotbox.js';
 import { current as selCurrent, inCell, copySelection, clearSelectionCells, tlCell, rectOf, selRowIds, selectCell } from './selection.js';
 
@@ -259,7 +260,7 @@ function openBeatMenu(sec, e) {
   const items = [
     { key: 'dupBeat', label: '创建节拍副本（含 ' + n + ' 镜）' },
     { sep: true },
-    { key: 'ai', label: '✦ AI 改写…（节拍概述）' },
+    { key: 'ai', label: '✦ AI 改写…（' + fieldLabel('beat_action', 'beats') + '）' },   // F4-B5：与字段字典一致（原手写「节拍概述」）
     { sep: true },
     { key: 'delBeat', label: '删除节拍' },
   ];

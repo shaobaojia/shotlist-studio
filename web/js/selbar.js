@@ -1,7 +1,7 @@
 // 表底选区条（M2-4）：选区出现时浮出——计数 / 批量设值（枚举走菜单、文本走输入）/ 复制 / 清空。
 // F2-W15 域单点：每域＝字段清单（服务端 batch 能力位派生，W14）+ 落值函数 + 菜单前缀 + 计数文案。
 // F2-W13：字段变更才重建；值变更走局部同步（输入框焦点不再被重建吞掉）。
-import { state, fieldOf, fieldsOf } from './state.js';
+import { state, fieldOf, fieldsOf, fieldLabel } from './state.js';
 import { el } from './ui.js';
 import { openMenu, optItems } from './menu.js';
 import { onChange, current, clearSel, rectOf, copySelection, clearSelectionCells, applyFieldValue, applyBeatFieldValue, applySceneFieldValue, selBeatIds, selRowIds } from './selection.js';
@@ -90,7 +90,7 @@ function updateCount(s) {
   let txt;
   if (colsN === 1) {
     const f = fieldOf(s.cols[rc.c1]);
-    txt = '已选 ' + m + ' 镜 · ' + (f ? f.label : s.cols[rc.c1]);
+    txt = '已选 ' + m + ' 镜 · ' + fieldLabel(s.cols[rc.c1]);   // F4-W44①：标签兜底单点
   } else {
     txt = '已选 ' + (m * colsN) + ' 格 · ' + m + ' 镜 · ' + colsN + ' 列';
   }

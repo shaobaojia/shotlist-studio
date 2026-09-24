@@ -187,6 +187,27 @@ export function isTypingTarget(t, opts) {
 
 // 浮层翻转定位单点（F2-P5）：优先锚点下方，越界翻上方；返回 {x, y, flipped}。
 // gapBelow/gapAbove＝下/上间距；maxBottom＝夹取下边界（默认视口底）；pad 边缘留白。
+// 就近浮层定位单点（F4-W24）：anchor 元素 | {x,y} | 矩形 → 下方贴放、放不下翻上、夹回视口；
+// rAF 合并（F4-W18④）：每卡每帧只算一次（滚动跟随高频触发时不抖）。
+const PLACE_FALLBACK = { left: 24, right: 24, top: 80, bottom: 80 };
+export function placeNear(anchor, card) {
+  if (card.__placeNear) return;
+  card.__placeNear = true;
+  requestAnimationFrame(() => {
+    card.__placeNear = false;
+    let a;
+    if (anchor && anchor.nodeType === 1) a = anchor.getBoundingClientRect();
+    else if (anchor && anchor.x != null) a = { left: anchor.x, right: anchor.x, top: anchor.y, bottom: anchor.y };
+    else a = anchor || PLACE_FALLBACK;
+    const w = card.offsetWidth, h = card.offsetHeight;
+    let y = a.bottom + 8;
+    if (y + h > window.innerHeight - 8) y = Math.max(8, a.top - h - 8);
+    const x = Math.max(8, Math.min(a.left, window.innerWidth - w - 8));
+    card.style.left = x + 'px';
+    card.style.top = y + 'px';
+  });
+}
+
 export function placeFlip(anchorRect, boxW, boxH, opts) {
   const o = opts || {};
   const gapBelow = o.gapBelow == null ? 4 : o.gapBelow;

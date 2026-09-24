@@ -14,6 +14,20 @@ export function recordUndo(op) {
   if (undoStack.length > UNDO_MAX) undoStack.shift();
 }
 
+// 自定义撤销登记单点（F4-W36）：统一包 catch + 失败 toast（原 5 份闭包、2 套失败口径，1 份无 catch）
+export function recordCustomUndo(label, run) {
+  recordUndo({
+    type: 'custom', label: label,
+    undo: async () => {
+      try {
+        await run();
+      } catch (err) {
+        toast('撤销失败：' + err.message, 'err');
+      }
+    },
+  });
+}
+
 // 批量写单点（F2-W12）：一次请求、逐项结果；任一项被拒 → 抛出（撤销路径可感知失败）
 export async function batchUpdate(items) {
   const ret = await api.batch(items);

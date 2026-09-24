@@ -2,14 +2,19 @@
 // 独立模块：挂在 textarea.__hb 上（每只编辑面一条栈）。视图与组操作在 hotbox.js。
 // F2-W21：打字分段改挂 beforeinput（按 inputType 切段——连续 insertText 同段，删除/替换等独立成段）；
 // 时间阈值（SEGMENT_MS）退役；IME 组合期不切段，组合结束补标记。
-import { growTextarea } from './ui.js';
+import { el, growTextarea } from './ui.js';
 
 export const EDITOR_MIN_H = 130;   // 编辑面最小高度（px）
 const STACK_MAX = 200;             // 栈深上限
 
 function state(ta) {
-  if (!ta.__hb) ta.__hb = { undo: [], redo: [], last: null, kind: '' };
+  if (!ta.__hb) ta.__hb = { undo: [], redo: [], last: null, kind: '', rev: 0 };
   return ta.__hb;
+}
+
+// 内容版本（F4-W12）：每次入栈/撤销/重做自增——AI 选段身份（rev + 选区），rev 不匹配即拒绝替换
+export function editorRev(ta) {
+  return state(ta).rev;
 }
 
 function snap(ta) {
@@ -86,6 +91,7 @@ function editorPush(ta) {
   }
   hb.redo.length = 0;
   hb.last = cur;
+  hb.rev++;          // F4-W12：内容版本（选段身份用）
 }
 
 function editorMark(ta) {
@@ -106,6 +112,7 @@ export function editorUndo(ta) {
   if (!hb.undo.length) return;
   hb.redo.push(snap(ta));
   cap(hb);
+  hb.rev++;          // F4-W12：撤销也推进版本
   apply(ta, hb.undo.pop());
 }
 
@@ -114,6 +121,7 @@ export function editorRedo(ta) {
   if (!hb.redo.length) return;
   hb.undo.push(snap(ta));
   cap(hb);
+  hb.rev++;          // F4-W12
   apply(ta, hb.redo.pop());
 }
 
@@ -125,6 +133,35 @@ export function replaceRange(ta, s0, s1, text) {
   const pos = s0 + text.length;
   apply(ta, { v: ta.value.slice(0, s0) + text + ta.value.slice(s1), s0: pos, s1: pos });
   return pos;
+}
+
+// 编辑面装配单点（F4-W1）：建 textarea → 类名/占位/value → Esc/Ctrl+Enter 键 → 自增长 → 聚焦落光标。
+// 原 hotbox/scriptdrawer 各手抄六连写（只差最小高/回调名）；hint 以 hintEl 交回调用方决定摆放（脚部/体下）。
+export function editorPane(spec) {
+  const box = el('div', spec.cls);
+  const scroll = el('div', spec.scrollCls || 'hb-scroll');
+  const ta = document.createElement('textarea');
+  ta.className = spec.taCls || 'hotbox-editor';
+  ta.spellcheck = false;
+  ta.placeholder = spec.placeholder || '';
+  ta.value = spec.value == null ? '' : String(spec.value);
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); spec.onEsc(); return; }
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); spec.onSave(); }
+  });
+  scroll.appendChild(ta);
+  box.appendChild(scroll);
+  const parent = spec.parent;
+  if (parent) {
+    if (spec.bare) parent.appendChild(ta);   // F4-W1：bare＝不建壳（台本抽屉原样直挂，视觉零变化）
+    else parent.appendChild(box);
+  }
+  growTextarea(ta, spec.minH == null ? EDITOR_MIN_H : spec.minH);
+  const n = ta.value.length;
+  setTimeout(() => {
+    try { ta.focus(); ta.setSelectionRange(n, n); } catch (e) { /* ignore */ }
+  }, 0);
+  return { box: box, ta: ta, hintEl: spec.hint ? el('span', 'hotbox-hint', spec.hint) : null };
 }
 
 // 光标处插入（保住光标 · 自动长高；插入也进撤销栈）
