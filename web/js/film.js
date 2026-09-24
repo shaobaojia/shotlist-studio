@@ -1,6 +1,7 @@
 import { state } from './state.js';
 import { hashOf } from './route.js';
 import { el, fmt } from './ui.js';
+import { buildGrid } from './grid.js';
 
 const COLS = [
   ['scene_no', '场次', 76],
@@ -21,14 +22,7 @@ export function renderFilm(view) {
 
   const wrap = el('div', 'table-wrap');
   const t = el('table', 'shots scenes');
-  let sum = 0;
-  const cg = document.createElement('colgroup');
-  for (const [, , w] of COLS) {
-    const c = document.createElement('col');
-    c.style.width = w + 'px';
-    cg.appendChild(c);
-    sum += w;
-  }
+  const { cg, sum } = buildGrid(COLS.map(([, , w]) => ({ w })));   // F1-L1：骨架单点
   t.appendChild(cg);
   t.style.minWidth = sum + 'px';
 

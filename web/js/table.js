@@ -1,6 +1,7 @@
 // 表格模块：列构建 / 单元格渲染 / 就地编辑绑定 / 节拍区 / 详情区。
 // 显示规格 = cells.js（老库移植）；编辑引擎 = edit.js；页面组装在 scene.js。
 import { state, fieldOf, groupsById, fieldsOf, fieldLabel } from './state.js';
+import { buildGrid, applyColWidthTo } from './grid.js';
 import { el, fmt, toast, flashIntoView } from './ui.js';
 import { cellContent } from './cells.js';
 import { attachEditable, attachCamEditor, parseCam, recordUndo, batchUpdate } from './edit.js';
@@ -26,17 +27,7 @@ function allShotTables() {
 }
 
 function applyColWidth(key, w) {
-  for (const t of allShotTables()) {
-    const cols = tableCols.get(t);
-    const cg = t.querySelector('colgroup');
-    if (!cols || !cg) continue;
-    const idx = cols.findIndex((c) => c.key === key);
-    if (idx === -1 || !cg.children[idx]) continue;
-    cg.children[idx].style.width = w + 'px';
-    let sum = 0;
-    for (const cc of cg.children) sum += parseFloat(cc.style.width) || 0;
-    t.style.minWidth = sum + 'px';
-  }
+  for (const t of allShotTables()) applyColWidthTo(t, tableCols.get(t), key, w);   // F1-L1：骨架收单点
 }
 
 function startColResize(e, f, opts) {
@@ -86,15 +77,8 @@ export function buildTable(shots, opts) {
 
   const wrap = el('div', 'table-wrap');
   const t = el('table', 'shots');
-  const cg = document.createElement('colgroup');
-  let sum = 0;
   const widths = (opts.prefs && opts.prefs.widths) || {};
-  for (const f of cols) {
-    const c = document.createElement('col');
-    c.style.width = (widths[f.key] || f.w) + 'px';
-    cg.appendChild(c);
-    sum += parseFloat(c.style.width) || f.w;
-  }
+  const { cg, sum } = buildGrid(cols.map((f) => ({ w: widths[f.key] || f.w })));   // F1-L1：骨架单点
   tableCols.set(t, cols);
   t.appendChild(cg);
   t.style.minWidth = sum + 'px';
