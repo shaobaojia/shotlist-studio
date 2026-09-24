@@ -149,23 +149,22 @@ function shotRows(s, cols, groups, data) {
   const tr = el('tr', 'shot');
   tr.dataset.id = s.id;
   tr.dataset.beatId = s.beat_id;
-  for (const f of cols) tr.appendChild(shotCell(s, f, groups, data));
+  const hook = { flip: null };                      // toggle 动作在 det 建好后回填（W13：事件就地挂）
+  for (const f of cols) tr.appendChild(shotCell(s, f, groups, data, hook));
   const det = el('tr', 'detail');
   det.hidden = true;
   det.dataset.for = s.id;
   const dtd = document.createElement('td');
   dtd.colSpan = cols.length;
-  dtd.appendChild(detailBox(s, groups, data));
   det.appendChild(dtd);
-
-  const flip = () => {
+  hook.flip = () => {                               // 详情内容首开才建并缓存（F1-P3）
+    if (!det.dataset.built) {
+      dtd.appendChild(detailBox(s, groups, data));
+      det.dataset.built = '1';
+    }
     det.hidden = !det.hidden;
     tr.classList.toggle('open', !det.hidden);
   };
-  const tc = tr.querySelector('.cell-toggle');
-  if (tc) tc.addEventListener('click', (e) => { e.stopPropagation(); flip(); });
-  const pc = tr.querySelector('.cell-prompt');
-  if (pc) pc.addEventListener('click', (e) => { e.stopPropagation(); openPromptDrawer(s.id, { toggle: true }); });
 
   const frag = document.createDocumentFragment();
   frag.appendChild(tr);
@@ -173,7 +172,7 @@ function shotRows(s, cols, groups, data) {
   return frag;
 }
 
-function shotCell(s, f, groups, data) {
+function shotCell(s, f, groups, data, hook) {
   const td = document.createElement('td');
 
   if (f.type === 'toggle') {
@@ -185,6 +184,7 @@ function shotCell(s, f, groups, data) {
     d.draggable = true;
     d.title = '拖动重排';
     d.addEventListener('click', (e) => e.stopPropagation());
+    td.addEventListener('click', (e) => { e.stopPropagation(); if (hook && hook.flip) hook.flip(); });   // W13
     td.appendChild(d);
     return td;
   }
@@ -201,6 +201,7 @@ function shotCell(s, f, groups, data) {
     const g = s.prompt_group_id != null ? groups[s.prompt_group_id] : null;
     td.classList.add('prompt-cell');
     paintPromptCell(td, g, data);
+    td.addEventListener('click', (e) => { e.stopPropagation(); openPromptDrawer(s.id, { toggle: true }); });   // W13
     return td;
   }
 

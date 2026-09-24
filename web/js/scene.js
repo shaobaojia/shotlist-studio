@@ -271,7 +271,6 @@ function paintScene(view) {
     document.documentElement.style.setProperty('--dock-h', dock ? dock.offsetHeight + 'px' : '0px');
   }
   applyFilter(fctx);
-  scheduleWarm(view);
   refreshHistoryIfOpen();
   auditOnPainted(data);
   syncFreezeH();
@@ -622,31 +621,5 @@ function cmpVal(va, vb) {
 }
 
 
-// ── 详情行空闲预热 ──
-// 首开详情行有一次性的布局冷成本（实测 ~50ms 级）；渲染后在空闲时段分片强制布局一遍，
-// 让用户真正点开的第一次也是热的。（分片 + 仅处理折叠态 + 同一任务内还原，不会闪）
-let warmTimer = null;
-function scheduleWarm(view) {
-  if (warmTimer) clearTimeout(warmTimer);
-  warmTimer = setTimeout(() => {
-    warmTimer = null;
-    const rows = Array.from(view.querySelectorAll('tr.detail'));
-    let i = 0;
-    const step = () => {
-      if (!view.isConnected) return;
-      const end = Math.min(i + 6, rows.length);
-      for (; i < end; i++) {
-        const d = rows[i];
-        if (!d.hidden) continue;
-        d.hidden = false;
-        void d.offsetHeight;
-        d.hidden = true;
-      }
-      if (i < rows.length) {
-        if (window.requestIdleCallback) window.requestIdleCallback(step, { timeout: 500 });
-        else setTimeout(step, 60);
-      }
-    };
-    step();
-  }, 700);
-}
+// 详情行现为懒建（F1-P3）：骨架常驻、内容首开时构建并缓存；
+// 原 scheduleWarm 空闲预热随懒建退役（预热空骨架失去对象）。
