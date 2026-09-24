@@ -10,12 +10,14 @@ export function fmt(v) {
   return String(v);
 }
 
-// 一次性装配（F1-W21 单点）：同一 key 只执行一次（监听绑定/初始化）
+// 一次性装配（F1-W21 单点）：同一 key 只执行一次。
+// 用法一：once('k', () => {...}) —— 首见即执行；
+// 用法二：if (!once('k')) return; —— 纯守卫标记（函数体自行续写，fn 可省）。
 const ONCE = {};
 export function once(key, fn) {
   if (ONCE[key]) return false;
   ONCE[key] = true;
-  fn();
+  if (fn) fn();
   return true;
 }
 
