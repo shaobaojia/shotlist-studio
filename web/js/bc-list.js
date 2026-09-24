@@ -5,10 +5,9 @@
 // 底栏：＋新建块 / ＋新分类。「整理模式」已拆除——编辑与拖拽全部发生在平时这一屏里。
 // 操作族在 bc-ops.js（单向依赖：本模块 -> bc-ops，反向不引）。
 import { el } from './ui.js';
-import { recordUndo } from './edit.js';
 import {
-  blocksData, blockOp, moveBlockTo, togglePin, deleteBlockWithUndo,
-  sectionsOf, dropIndex, catColorOf, foldKeyOf,
+  blockUndo, blockOp, findBlock, moveBlockTo, togglePin, deleteBlockWithUndo,
+  sectionsOf, dropIndex, catColorOf, foldKeyOf, catKeyOf,
 } from './blocks.js';
 import {
   openInline, failRestore, attachSecMenu, attachRowMenu, newBlockUncat, newCatInline,
@@ -20,8 +19,7 @@ let markedEl = null;
 function clearDropMarks() { if (markedEl) { markedEl.classList.remove('drop-above', 'drop-below', 'drop-end'); markedEl = null; } }
 function setDropMark(el0, cls) { clearDropMarks(); markedEl = el0; el0.classList.add(cls); }
 function draggedBlock() {
-  const d = blocksData();
-  return d && d.blocks ? d.blocks.find((x) => x.id === dragging.id) : null;
+  return findBlock(dragging.id);   // F3-W2：块查找单点
 }
 
 function gripOf(row, b) {
@@ -121,8 +119,7 @@ function editRowInline(ctx, row, b, txtEl) {
       if (v === String(b.text)) { ctx.refresh(); return; }
       const oldText = String(b.text);
       blockOp({ action: 'update', id: b.id, text: v }).then(() => {
-        recordUndo({ type: 'custom', label: '改块',
-          undo: async () => { await blockOp({ action: 'update', id: b.id, text: oldText }); } });
+        blockUndo('改块', () => ({ action: 'update', id: b.id, text: oldText }));
       }).catch((err) => failRestore(err, unlock, el0, '保存'));
     },
   });
@@ -162,7 +159,7 @@ function blockRow(ctx, b, opts) {
 function listSection(ctx, spec, dragOn) {
   const key = spec.key;
   const secEl = el('div', 'bco-sec');
-  secEl.dataset.catkey = spec.cid == null ? 'none' : String(spec.cid);
+  secEl.dataset.catkey = catKeyOf(spec.cid);   // F3-W4：属性键单点
   const closed = ctx.folded.has(key);
   const sh = el('div', 'bc-sechead');
   sh.appendChild(el('span', 'bc-secarrow', closed ? '▸' : '▾'));
@@ -192,7 +189,7 @@ function listSection(ctx, spec, dragOn) {
 export function renderList(ctx, listEl, arr, opts) {
   opts = opts || {};
   // 模块边界适配器（F3-W10）：操作族经 ctx 访问本模块 DOM，不再自拼选择器串
-  ctx.sectionEl = (cid) => listEl.querySelector('.bco-sec[data-catkey="' + (cid == null ? 'none' : String(cid)) + '"]');
+  ctx.sectionEl = (cid) => listEl.querySelector('.bco-sec[data-catkey="' + catKeyOf(cid) + '"]');
   ctx.revealSection = (cid) => {
     const key = foldKeyOf(cid);
     if (ctx.folded.has(key)) { ctx.folded.delete(key); ctx.foldSave(); ctx.refresh(); return true; }

@@ -2,10 +2,9 @@
 // 写操作一律走 blocks.js（blockOp / moveBlockTo / togglePin / deleteBlockWithUndo），撤销与提示统一在那里。
 // 单向依赖（F3-W15②更新）：bc-list.js（列表渲染）从本模块引操作；本模块不依赖 bc-list。
 import { el, toast } from './ui.js';
-import { recordUndo } from './edit.js';
 import { openMenu } from './menu.js';
 import {
-  blocksData, blockOp, moveMenu, togglePin, deleteBlockWithUndo,
+  blockOp, blockUndo, blockOpToast, catOf, findBlock, moveMenu, togglePin, deleteBlockWithUndo,
 } from './blocks.js';
 import { copyText } from './clipboard.js';
 
@@ -67,18 +66,16 @@ export function failRestore(err, unlock, el0, label) {
 }
 
 // ── 分类操作 ──
-export function deleteCat(cat) {
-  blockOp({ action: 'cat_delete', id: cat.id })
-    .then(() => toast('分类已删（块落「未分类」）'))
-    .catch((err) => toast(err.message, 'err'));
+export async function deleteCat(cat) {
+  const res = await blockOpToast({ action: 'cat_delete', id: cat.id }, '删除分类');
+  if (res) toast('分类已删（块落「未分类」）');
 }
 
-export function catMove(cat, dir) {
-  blockOp({ action: 'cat_move', id: cat.id, dir }).then((res) => {
-    if (res.moved === false) { toast(dir === -1 ? '已经在最上面了' : '已经在最下面了'); return; }
-    recordUndo({ type: 'custom', label: dir === -1 ? '分类上移' : '分类下移',
-      undo: async () => { await blockOp({ action: 'cat_move', id: cat.id, dir: -dir }); } });
-  }).catch((err) => toast(err.message, 'err'));
+export async function catMove(cat, dir) {
+  const res = await blockOpToast({ action: 'cat_move', id: cat.id, dir }, '分类调整');
+  if (!res) return;
+  if (res.moved === false) { toast(dir === -1 ? '已经在最上面了' : '已经在最下面了'); return; }
+  blockUndo(dir === -1 ? '分类上移' : '分类下移', () => ({ action: 'cat_move', id: cat.id, dir: -dir }));
 }
 
 export function renameCatInline(ctx, nameEl, cat) {
@@ -91,8 +88,7 @@ export function renameCatInline(ctx, nameEl, cat) {
       if (v === cat.name) { ctx.refresh(); return; }
       const oldName = cat.name;
       blockOp({ action: 'cat_update', id: cat.id, name: v }).then(() => {
-        recordUndo({ type: 'custom', label: '改分类名',
-          undo: async () => { await blockOp({ action: 'cat_update', id: cat.id, name: oldName }); } });
+        blockUndo('改分类名', () => ({ action: 'cat_update', id: cat.id, name: oldName }));
       }).catch((err) => failRestore(err, unlock, el0, '改名'));
     },
   });
@@ -111,8 +107,7 @@ export function newCatInline(listEl) {
         newCatInput = null;
         wrap.remove();
         const cid = res.category.id;
-        recordUndo({ type: 'custom', label: '新分类',
-          undo: async () => { await blockOp({ action: 'cat_delete', id: cid }); } });
+        blockUndo('新分类', () => ({ action: 'cat_delete', id: cid }));
       }).catch((err) => failRestore(err, unlock, el0b, '建分类'));
     },
   });
@@ -135,8 +130,7 @@ export function draftBlockInline(sec, cat) {
         wrap.remove();
         if (res && res.block) {
           const bid = res.block.id;
-          recordUndo({ type: 'custom', label: '添加块',
-            undo: async () => { await blockOp({ action: 'delete', id: bid }); } });
+          blockUndo('添加块', () => ({ action: 'delete', id: bid }));
         }
       }).catch((err) => failRestore(err, unlock, el0b, '创建'));
     },
@@ -157,8 +151,7 @@ export function newBlockUncat(ctx) { newBlockInCat(ctx, null); }
 
 // 入口：就地打开某块的编辑器（供「编辑块…」）——不切任何模式
 export function startEditBlock(ctx, id) {
-  const d = blocksData();
-  const b = d && d.blocks ? d.blocks.find((x) => x.id === id) : null;
+  const b = findBlock(id);   // F3-W2：块查找单点
   if (b && ctx.revealSection) ctx.revealSection(b.category_id);   // 展开+重绘（F3-W10 适配器）
   if (ctx.editRow) ctx.editRow(id);                               // 滚达 + 进入编辑（滚动由 _startEdit 一处负责）
 }
@@ -192,7 +185,7 @@ export function attachRowMenu(ctx, rowEl, b) {
 }
 
 export function attachSecMenu(ctx, headEl, cid, nameEl) {
-  const cat = cid == null ? null : (((blocksData() || { categories: [] }).categories.find((c) => c.id === cid)) || null);
+  const cat = catOf(cid);   // F3-W2：分类查找口径单点
   headEl.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     e.stopPropagation();
