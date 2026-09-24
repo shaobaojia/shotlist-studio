@@ -1,13 +1,14 @@
 // 挂件带 v2.1（M5k-2）——底部冻结通栏 + 向上浮层。
 // 一条条带三种读法：①竖向高/色＝景别 ②横向宽＝时长（横轴＝时间刻度尺）③情绪曲线叠加（平滑曲线+数据点）。
 // 交互：上沿拖拽＝面板高矮（窗口式）；滚轮＝横向缩放（时间轴式，光标锚定）；中键拖拽＝平移；shift+滚轮＝横滚。
-import { el, toast, durTick, lsGet, lsSet, clamp, flashClass } from './ui.js';
-import { jumpToShotById } from './filter.js';
+import { el, durTick, lsGet, lsSet, clamp, flashClass } from './ui.js';
+import { jumpToShotByIdOrWarn } from './filter.js';
+import { state } from './state.js';
 
 const KEY = 'studio.dock';
 // 档位：按前缀匹配（长词在前，防「中近/中景」互截）
-const TIER_SEQ = ['全景', '中全', '中景', '中近', '近景', '特写', '极特'];
-const TIER_MATCH = ['极特', '特写', '近景', '中近', '中景', '中全', '全景'];
+// F5-W7：词表在 build 时从字段字典派生（权威＝server/core/fields.py CAM_TIERS → meta.shot_fields.shot_size.options）；此序仅为兜底
+const TIER_SEQ_FB = ['全景', '中全', '中景', '中近', '近景', '特写', '极特'];
 const TIER_H = [10, 14, 18, 22, 26, 30, 34];   // 基准高度（44 高铁带内）
 const H_FLAT = 16;
 const BASE_V = 44;                              // 条带基准高（ST.h 以此为 1）
@@ -16,6 +17,7 @@ const ZMIN = 0.35, ZMAX = 4;
 
 let ST = { open: false, size: true, rhythm: false, mood: false, h: 44, zoom: 1 };
 let _bt = 0, _sv = 0;
+let _moodOffScene = null;   // F5-B2：手关过的场景 id（会话内不再自动弹回；不落盘）
 
 // ── 悬浮提示（300ms 延时；取代原生 title——原生延时不可控且 ~1s）──
 let _tipEl = null, _tipT = 0;
@@ -35,12 +37,6 @@ function tipShow(tgt) {
   _tipEl.style.left = Math.round(Math.min(Math.max(8, r.left + r.width / 2 - w / 2), vw - w - 8)) + 'px';
   _tipEl.style.bottom = Math.round(window.innerHeight - r.top + 9) + 'px';
 }
-function bindTip(node) {
-  node.addEventListener('mouseenter', () => { if (_tipT) clearTimeout(_tipT); _tipT = setTimeout(() => tipShow(node), 300); });
-  node.addEventListener('mouseleave', tipHide);
-  node.addEventListener('click', tipHide);
-}
-
 function load() {
   const o = lsGet(KEY, null);
   if (!o || typeof o !== 'object') return;
@@ -53,17 +49,12 @@ function load() {
 }
 function save() { lsSet(KEY, ST); }
 
-function tierOf(str) {
-  const v = String(str == null ? '' : str);
-  for (const t of TIER_MATCH) if (v.indexOf(t) === 0) return t;
-  return null;
-}
 export function numOf(v) {
   const m = String(v == null ? '' : v).match(/-?\d+(\.\d+)?/);
   return m ? parseFloat(m[0]) : null;
 }
 function jump(id) {
-  if (!jumpToShotById(id)) toast('该镜不在当前视图（可能被筛选隐藏）');
+  jumpToShotByIdOrWarn(id);   // F5-P8①：失败提示单点（与 ⌘K/审计同口径）
 }
 
 // Catmull-Rom → 三次贝塞尔（平滑曲线）
@@ -85,6 +76,19 @@ function smoothPath(pts) {
 export function buildRibbon(data, shots) {
   if (!shots || !shots.length) return null;
   load();
+  // F5-W7：档位词表从 meta 派生（长词在前，防「中近/中景」互截）
+  const tseq = (() => {
+    const f = ((state.meta && state.meta.shot_fields) || []).find((x) => x.key === 'shot_size');
+    const list = ((f && f.options) || []).map((x) => String(x).replace(/★/g, '').trim()).filter(Boolean);
+    return list.length ? list : TIER_SEQ_FB;
+  })();
+  const tmatch = tseq.slice().reverse();
+  const tierOf = (str) => {
+    const v = String(str == null ? '' : str);
+    for (const t of tmatch) if (v.indexOf(t) === 0) return t;
+    return null;
+  };
+  const sceneId = (data.scene && data.scene.id != null) ? data.scene.id : null;
   const NS = 'http://www.w3.org/2000/svg';
   const root = el('div', 'dock');
   root.dataset.open = ST.open ? '1' : '0';
@@ -112,7 +116,6 @@ export function buildRibbon(data, shots) {
     b.type = 'button';
     b.dataset.tip = '镜 ' + (s.shot_no || '') + ' · ' + (s.shot_size || '未填景别') + (s.duration ? ' · ' + s.duration + 's' : '') + ' · 点击跳镜';
     b.setAttribute('aria-label', b.dataset.tip);
-    bindTip(b);
     b.addEventListener('click', () => jump(s.id));
     strip.appendChild(b);
     bars.push(b);
@@ -125,17 +128,34 @@ export function buildRibbon(data, shots) {
     labels.push(l);
   }
 
+  // F5-P4④：悬浮提示改容器级委托（原逐条 mouseenter/leave/click——条+点 N×3 监听）
+  strip.addEventListener('mouseover', (e) => {
+    const t = e.target && e.target.closest ? e.target.closest('[data-tip]') : null;
+    if (!t || !strip.contains(t)) return;
+    if (_tipT) clearTimeout(_tipT);
+    _tipT = setTimeout(() => tipShow(t), 300);
+  });
+  strip.addEventListener('mouseout', (e) => {
+    const t = e.target && e.target.closest ? e.target.closest('[data-tip]') : null;
+    if (t) tipHide();
+  });
+  strip.addEventListener('click', tipHide);
+
   // ── 情绪数据点（按节拍；平滑曲线叠加）──
   const segs = [];
+  const idxById = new Map();   // F5-P4⑤：indexOf×2/节拍 → Map（原 O(节拍×镜数)）
+  shots.forEach((s, i) => idxById.set(s.id, i));
   (data.beats || []).forEach((b) => {
     const arr = b.shots || [];
     if (!arr.length) return;
-    const i0 = shots.indexOf(arr[0]), i1 = shots.indexOf(arr[arr.length - 1]);
-    if (i0 < 0 || i1 < 0) return;
+    const i0 = idxById.get(arr[0].id), i1 = idxById.get(arr[arr.length - 1].id);
+    if (i0 == null || i1 == null) return;
     segs.push({ i0, i1, v: numOf(b.mood_temp), firstId: arr[0].id, name: b.name || ('节拍' + b.beat_no) });
   });
   const hasMood = segs.some((t) => t.v != null);
-  if (hasMood && !ST.mood) { ST.mood = true; save(); }   // 有数据＝自动显示（切场即出）
+  // F5-B2：自动开启（切场即出）只在会话内、不落盘；手关＝当场景内隐蔽——切场离开即解除（对齐 AGENTS.md「下次切场再出」）
+  if (_moodOffScene !== null && _moodOffScene !== sceneId) _moodOffScene = null;
+  if (hasMood && !ST.mood && _moodOffScene !== sceneId) ST.mood = true;
   const mx = Math.max(10, ...segs.map((t) => (t.v == null ? 0 : t.v)));
   let svg = null, pHalo = null, pMain = null;
   if (hasMood) {
@@ -157,7 +177,6 @@ export function buildRibbon(data, shots) {
       dot.style.pointerEvents = 'auto';
       dot.style.cursor = 'pointer';
       dot.dataset.tip = t.name + ' · 温度 ' + t.v;
-      bindTip(dot);
       const fid = t.firstId;
       dot.addEventListener('click', () => jump(fid));
       svg.appendChild(dot);
@@ -196,8 +215,10 @@ export function buildRibbon(data, shots) {
   function layout(animate) {
     tipHide();
     const z = ST.zoom, vh = ST.h / BASE_V;
-    inner.style.height = (ST.h + 18) + 'px';
-    strip.style.height = ST.h + 'px';
+    const ih = (ST.h + 18) + 'px';
+    if (inner.style.height !== ih) inner.style.height = ih;   // F5-P4①：值变才写（原全量赋值×N）
+    const shh = ST.h + 'px';
+    if (strip.style.height !== shh) strip.style.height = shh;
     const timeMode = ST.rhythm;
     const xs = [], ws = [];
     let acc = 0;
@@ -214,23 +235,31 @@ export function buildRibbon(data, shots) {
       xs.push(acc); ws.push(w); acc += w + gap;
     }
     const lastGap = timeMode ? GAP_TIME : Math.max(2, Math.round(GAP_IDX * z));
-    inner.style.width = Math.max(acc - lastGap, 40) + 'px';
+    const iw = Math.max(acc - lastGap, 40) + 'px';
+    if (inner.style.width !== iw) inner.style.width = iw;
     for (let i = 0; i < bars.length; i++) {
       const b = bars[i], s = shots[i];
-      b.style.left = xs[i] + 'px';
-      b.style.width = ws[i] + 'px';
+      const lx = xs[i] + 'px';
+      if (b.style.left !== lx) b.style.left = lx;
+      const wtxt = ws[i] + 'px';
+      if (b.style.width !== wtxt) b.style.width = wtxt;
       if (ST.size) {
         const t = tierOf(s.shot_size);
-        const lv = t ? TIER_SEQ.indexOf(t) + 1 : 0;
-        b.dataset.lv = String(lv);
-        b.style.height = Math.round((t ? TIER_H[lv - 1] : 14) * vh) + 'px';
+        const lv = t ? tseq.indexOf(t) + 1 : 0;
+        const lvs = String(lv);
+        if (b.dataset.lv !== lvs) b.dataset.lv = lvs;
+        const ht = Math.round((t ? TIER_H[lv - 1] : 14) * vh) + 'px';
+        if (b.style.height !== ht) b.style.height = ht;
       } else {
-        b.dataset.lv = '';
-        b.style.height = Math.round(H_FLAT * vh) + 'px';
+        if (b.dataset.lv !== '') b.dataset.lv = '';
+        const ht = Math.round(H_FLAT * vh) + 'px';
+        if (b.style.height !== ht) b.style.height = ht;
       }
     }
-    unitEl.textContent = timeMode ? '轴·时长' : '轴·镜号';
-    legendEl.textContent = ST.size ? '红＝近/特写 · 点击跳镜' : '点击跳镜';
+    const ut = timeMode ? '轴·时长' : '轴·镜号';
+    if (unitEl.textContent !== ut) unitEl.textContent = ut;
+    const lg = ST.size ? '红＝近/特写 · 点击跳镜' : '点击跳镜';
+    if (legendEl.textContent !== lg) legendEl.textContent = lg;
     renderAxis(animate);
     if (svg) {
       if (animate && ST.mood) {                     // 换轴：曲线淡出→重定位→淡入
@@ -246,10 +275,12 @@ export function buildRibbon(data, shots) {
   }
 
   // 横轴：节奏开＝时间刻度尺；关＝每格镜号
+  let axisMode = null;
   function renderAxis(fade) {
     const draw = () => {
-      axis.textContent = '';
-      if (ST.rhythm) {
+      const mode = ST.rhythm ? 'time' : 'idx';
+      if (mode === 'time') {
+        axis.textContent = '';
         const pps = PXS * ST.zoom;
         let totalSec = 0;
         for (const s of shots) totalSec += (numOf(s.duration) || 0);
@@ -262,15 +293,22 @@ export function buildRibbon(data, shots) {
           axis.appendChild(tk);
         }
       } else {
-        for (let i = 0; i < labels.length; i++) {
+        if (axisMode === 'time') {                  // F5-P4②：从时间尺切回——清 tick 一次并重挂镜号标
+          axis.textContent = '';
+          for (const l of labels) axis.appendChild(l);
+        }
+        for (let i = 0; i < labels.length; i++) {   // 常驻元素只写值（原每帧清空重挂 N 个）
           const b = bars[i];
           const w = parseFloat(b.style.width) || 0;
-          labels[i].style.left = (parseFloat(b.style.left) || 0) + 'px';
-          labels[i].style.width = w + 'px';
-          labels[i].textContent = w >= 14 ? (shots[i].shot_no || String(i + 1)) : '';
-          axis.appendChild(labels[i]);
+          const lx = (parseFloat(b.style.left) || 0) + 'px';
+          if (labels[i].style.left !== lx) labels[i].style.left = lx;
+          const wv = w + 'px';
+          if (labels[i].style.width !== wv) labels[i].style.width = wv;
+          const tx = w >= 14 ? (shots[i].shot_no || String(i + 1)) : '';
+          if (labels[i].textContent !== tx) labels[i].textContent = tx;
         }
       }
+      axisMode = mode;
     };
     if (fade) {
       axis.classList.add('dk-faded');
@@ -328,13 +366,16 @@ export function buildRibbon(data, shots) {
     e.stopPropagation();
     const sy = e.clientY, sv = ST.h;
     root.classList.add('dk-noanim');
+    let rzRaf = 0;
     const mv = (ev) => {
       ST.h = clamp(Math.round(sv - (ev.clientY - sy)), 40, 380);
-      layout(false);
+      if (rzRaf) return;                              // F5-P4①：拖拽期 rAF 合并（mousemove 高于帧频时只算一帧）
+      rzRaf = requestAnimationFrame(() => { rzRaf = 0; layout(false); });
     };
     const up = () => {
       document.removeEventListener('mousemove', mv);
       document.removeEventListener('mouseup', up);
+      if (rzRaf) { cancelAnimationFrame(rzRaf); rzRaf = 0; layout(false); }   // 松手结算最终帧
       noanimBurst();
       save();
     };
@@ -357,6 +398,7 @@ export function buildRibbon(data, shots) {
     b.addEventListener('click', (e) => {
       e.stopPropagation();
       ST[k] = !ST[k];
+      if (k === 'mood' && !ST[k]) _moodOffScene = sceneId;   // F5-B2：手关＝本场景内不再自动弹回
       b.classList.toggle('on', ST[k]);
       save();
       layout(true);
@@ -380,7 +422,7 @@ export function buildRibbon(data, shots) {
   root.appendChild(panel);
   root.appendChild(bar);
   root.addEventListener('mouseleave', tipHide);
-  root.classList.add('dk-noanim');
+  root.classList.add('dk-noanim');   // F5-D14：首帧禁动画（双 rAF 摘除；ms 口径与 CSS .dk-noanim 同源）
   layout(false);
   requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove('dk-noanim')));
   return root;

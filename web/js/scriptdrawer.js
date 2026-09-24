@@ -9,6 +9,7 @@ import { copyText } from './clipboard.js';
 import { createDrawer, bindDrawerEsc } from './drawer.js';
 import { editorPane, EDITOR_MIN_H } from './hbedit.js';
 import { panelShell, floatEnter, floatLeave } from './float.js';
+import { sceneLabel } from './state.js';
 
 let ctx = { getScene: () => null };
 export function initScriptDrawer(c) { ctx = Object.assign(ctx, c); }
@@ -95,7 +96,7 @@ function render(mode) {
   const sc = S.scene;
   if (!sc || !d.isOpen()) return;
   S.mode = mode;
-  d.setTitle('剧本 · ' + sc.scene_no + (sc.title ? ' ' + sc.title : ''));
+  d.setTitle('剧本 · ' + sceneLabel(sc));
   if (toggleBtn) toggleBtn.textContent = (mode === 'edit') ? '💾 保存' : '编辑';
   S.ta = null;
   d.bodyEl.textContent = '';

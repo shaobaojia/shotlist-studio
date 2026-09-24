@@ -2,12 +2,18 @@
 // 配方口径：一个功能一份，保存即生效（不重启）；保存/恢复前自动备份旧版。
 // key 明文永不出后端（只显示「已配置（留空＝不改）」）。
 import { api } from './api.js';
-import { el, toast } from './ui.js';
+import { el, toast, stageText, failToast, busy, fmtStamp } from './ui.js';
 import { fieldRow, collect } from './formkit.js';
 import { panelShell, floatEnter, floatLeave } from './float.js';
 
-let card = null, bodyEl = null, listBox = null;
+let card = null, bodyEl = null, listBox = null, refs = {};   // refs：AI 区控件句柄（F5-W24）
 let viewDirty = null;    // 编辑态脏检查（批4：未保存返回提示）
+
+// F5-B1：离卡脏检查单点（返回列表 / 关闭共用——原仅「返回列表」有）
+function guardLeave(what) {
+  if (viewDirty && viewDirty() && !confirm('有未保存的修改，确定丢弃并' + what + '？')) return false;
+  return true;
+}
 
 export function bindSettingsBtn(btn) {
   if (btn) btn.addEventListener('click', toggleSettings);
@@ -19,6 +25,7 @@ export function toggleSettings() {
 }
 
 function closeSettings() {
+  if (!guardLeave('关闭')) return;   // F5-B1：编辑态关卡需确认（原静默丢弃）
   if (card) card.hidden = true;
   floatLeave('panel', closeSettings);
 }
@@ -38,10 +45,12 @@ function build() {
   document.body.appendChild(card);
 }
 
+let _loading = false;
 function loadAll() {
+  if (_loading) return;   // F5-P6③：单飞（在飞时重入忽略——原每次开卡清空重拉）
+  _loading = true;
   bodyEl.textContent = '';
-  loadAI();
-  loadRecipes();
+  Promise.allSettled([loadAI(), loadRecipes()]).then(() => { _loading = false; });
 }
 
 // ── 一区：AI 通道（自审计 ⚙ 搬迁）────────────────────────────
@@ -54,38 +63,43 @@ async function loadAI() {
     const res = await api.aiSettings();
     renderAI(sec, (res && res.config) || {});
   } catch (err) {
-    sec.appendChild(el('div', 'as-desc', '加载失败：' + err.message));
+    const d = el('div', 'as-desc');   // F5-W20/W22：错误态统一（stageText + err-note）
+    stageText(d, 'error', err);
+    sec.appendChild(d);
   }
 }
 
 function renderAI(sec, cfg) {
-  sec.appendChild(fieldRow('provider', { key: 'provider', value: cfg.provider }).row);
-  sec.appendChild(fieldRow('model', { key: 'model', value: cfg.model }).row);
-  sec.appendChild(fieldRow('base_url', { key: 'base_url', value: cfg.base_url }).row);
-  sec.appendChild(fieldRow('api_key', { key: 'api_key', value: '',
-    placeholder: cfg.has_key ? '已配置（留空＝不改）' : '未配置' }).row);
+  // F5-W24：控件句柄留 ref（原 fillAI 按 data-k 反查 DOM）
+  const fprovider = fieldRow('provider', { key: 'provider', value: cfg.provider });
+  const fmodel = fieldRow('model', { key: 'model', value: cfg.model });
+  const fbase = fieldRow('base_url', { key: 'base_url', value: cfg.base_url });
+  const fkey = fieldRow('api_key', { key: 'api_key', value: '',
+    placeholder: cfg.has_key ? '已配置（留空＝不改）' : '未配置' });
+  refs = { provider: fprovider.inp, model: fmodel.inp, base_url: fbase.inp, api_key: fkey.inp };
+  sec.appendChild(fprovider.row);
+  sec.appendChild(fmodel.row);
+  sec.appendChild(fbase.row);
+  sec.appendChild(fkey.row);
 
   const bar = el('div', 'as-bar');
   const save = el('button', 'tool-btn small', '保存配置');
-  save.addEventListener('click', async () => {
+  save.addEventListener('click', () => busy(save, async () => {   // F5-W16：忙碌模板
     const vals = collect(sec);
     const payload = {};
     for (const k of Object.keys(vals)) {
       if (k === 'api_key') { if (vals[k]) payload.api_key = vals[k]; }
       else payload[k] = vals[k];                    // 三键恒定发送：空串 = 清回默认（M14）
     }
-    save.disabled = true;
     try {
       const out = await api.aiSave(payload);
       fillAI(sec, (out && out.config) || {});       // 回读刷新值与占位符（M14）
       toast('AI 配置已保存');
-    } catch (err) { toast('保存失败：' + err.message, 'err'); }
-    save.disabled = false;
-  });
+    } catch (err) { failToast('保存失败', err); }
+  }));
   const testb = el('button', 'tool-btn small', '连通测试');
   const result = el('span', 'as-test-result', '');
-  testb.addEventListener('click', async () => {
-    testb.disabled = true;
+  testb.addEventListener('click', () => busy(testb, async () => {   // F5-W16
     result.textContent = '测试中…';
     try {
       const res = await api.aiTest();
@@ -93,8 +107,7 @@ function renderAI(sec, cfg) {
     } catch (err) {
       result.textContent = '✗ ' + err.message;
     }
-    testb.disabled = false;
-  });
+  }));
   bar.appendChild(save);
   bar.appendChild(testb);
   bar.appendChild(result);
@@ -102,16 +115,12 @@ function renderAI(sec, cfg) {
 }
 
 function fillAI(sec, cfg) {
-  const set = (k, v) => {
-    const i = sec.querySelector('.as-input[data-k="' + k + '"]');
-    if (i) i.value = v == null ? '' : v;
-  };
+  const set = (k, v) => { const i = refs[k]; if (i) i.value = v == null ? '' : v; };   // F5-W24：走 refs
   set('provider', cfg.provider);
   set('model', cfg.model);
   set('base_url', cfg.base_url);
   set('api_key', '');                               // key 明文不留在 DOM（M14）
-  const kInp = sec.querySelector('.as-input[data-k="api_key"]');
-  if (kInp) kInp.placeholder = cfg.has_key ? '已配置（留空＝不改）' : '未配置';
+  if (refs.api_key) refs.api_key.placeholder = cfg.has_key ? '已配置（留空＝不改）' : '未配置';
 }
 
 // ── 二区：配方（列表 → 就地编辑）────────────────────────────
@@ -126,15 +135,10 @@ async function loadRecipes() {
 }
 
 function fmtSize(b) { return b < 1024 ? (b + ' B') : ((b / 1024).toFixed(1) + ' KB'); }
-function fmtTime(sec) {
-  const d = new Date(sec * 1000);
-  const p = (n) => String(n).padStart(2, '0');
-  return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
-}
 
 async function refreshList() {
   viewDirty = null;
-  listBox.textContent = '加载中…';
+  stageText(listBox, 'loading');
   try {
     const res = await api.recipes();
     listBox.textContent = '';
@@ -143,7 +147,7 @@ async function refreshList() {
       for (const it of (g.items || [])) {
         const row = el('div', 'sc-r' + (it.exists ? '' : ' missing'));
         row.appendChild(el('span', 'sc-r-t', it.title));
-        row.appendChild(el('span', 'sc-r-m', it.exists ? (fmtSize(it.size) + ' · ' + fmtTime(it.mtime)) : '文件缺失'));
+        row.appendChild(el('span', 'sc-r-m', it.exists ? (fmtSize(it.size) + ' · ' + fmtStamp(it.mtime * 1000, 'md-hm')) : '文件缺失'));   // F5-P8③：时间戳单点
         if (it.exists) {
           row.appendChild(el('span', 'sc-r-go', '改 ›'));
           row.addEventListener('click', () => openEdit(it.name));
@@ -154,7 +158,7 @@ async function refreshList() {
       }
     }
   } catch (err) {
-    listBox.textContent = '加载失败：' + err.message;
+    stageText(listBox, 'error', err);
   }
 }
 
@@ -171,7 +175,7 @@ async function openEdit(name) {
   const head = el('div', 'sc-e-head');
   const back = el('button', 'tool-btn small', '‹ 返回列表');
   back.addEventListener('click', () => {
-    if (viewDirty && viewDirty() && !confirm('有未保存的修改，确定丢弃并返回列表？')) return;
+    if (!guardLeave('返回列表')) return;   // F5-B1：单点
     refreshList();
   });
   head.appendChild(back);
@@ -185,28 +189,25 @@ async function openEdit(name) {
   viewDirty = () => ta.value !== r.content;    // 脏检查（批4）
   listBox.appendChild(ta);
 
-  const meta = el('div', 'as-desc', fmtSize(r.size) + ' · 改于 ' + fmtTime(r.mtime));
+  const meta = el('div', 'as-desc', fmtSize(r.size) + ' · 改于 ' + fmtStamp(r.mtime * 1000, 'md-hm'));
   listBox.appendChild(meta);
 
   const bar = el('div', 'as-bar');
   const save = el('button', 'tool-btn small', '保存');
-  save.addEventListener('click', async () => {
-    save.disabled = true;
+  save.addEventListener('click', () => busy(save, async () => {   // F5-W16
     try {
       const out = await api.recipeSave(name, ta.value);
       const rr = out.recipe;
       r.content = ta.value;                       // 基线同步：脏检查归零（批4）
-      meta.textContent = fmtSize(rr.size) + ' · 改于 ' + fmtTime(rr.mtime) + ' · 旧版已备份';
+      meta.textContent = fmtSize(rr.size) + ' · 改于 ' + fmtStamp(rr.mtime * 1000, 'md-hm') + ' · 旧版已备份';
       toast('已保存：' + r.title + '（立即生效，旧版已备份）');
     } catch (err) {
-      toast('保存失败：' + err.message, 'err');
+      failToast('保存失败', err);
     }
-    save.disabled = false;
-  });
+  }));
   const dft = el('button', 'tool-btn small', '恢复默认');
   dft.title = '回到出厂文本（当前版本会先备份）';
-  dft.addEventListener('click', async () => {
-    dft.disabled = true;
+  dft.addEventListener('click', () => busy(dft, async () => {   // F5-W16
     try {
       const out = await api.recipeDefault(name);
       ta.value = out.recipe.content;
@@ -214,10 +215,9 @@ async function openEdit(name) {
       meta.textContent = '已恢复出厂文本（旧版已备份）';
       toast('已恢复默认：' + r.title);
     } catch (err) {
-      toast('恢复失败：' + err.message, 'err');
+      failToast('恢复失败', err);
     }
-    dft.disabled = false;
-  });
+  }));
   bar.appendChild(save);
   bar.appendChild(dft);
   listBox.appendChild(bar);

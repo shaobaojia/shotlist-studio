@@ -238,6 +238,23 @@ function refreshDetailValue(s, key, root) {
     });
 }
 
+// F5-W31：行下副行单点（审计问题卡行等）——data-for＝行 id（筛选联动单点）、全宽、插到 detail 之后
+export function rowPanelRow(row, node, cls) {
+  const tr = el('tr');
+  if (cls) tr.className = cls;
+  tr.dataset.for = String(row.dataset.id);
+  const td = document.createElement('td');
+  const table = row.closest('table');
+  td.colSpan = table ? table.querySelectorAll('colgroup col').length : 99;
+  td.appendChild(node);
+  tr.appendChild(td);
+  let anchorRow = row;
+  const nxt = row.nextElementSibling;
+  if (nxt && nxt.classList && nxt.classList.contains('detail')) anchorRow = nxt;
+  anchorRow.parentNode.insertBefore(tr, anchorRow.nextSibling);
+  return tr;
+}
+
 function camOptions() {
   const sz = fieldOf('shot_size');
   const fo = fieldOf('focal');

@@ -3,28 +3,28 @@
 // 跳镜一律 filter.jumpToShotById（滚行+闪烁单点）；命令复用既有工具栏按钮（有则点，无则提示）。
 import { el, toast } from './ui.js';
 import { exportUrl, downloadUrl } from './api.js';
-import { state } from './state.js';
+import { state, sceneLabel } from './state.js';
 import { sceneNo, hashOf } from './route.js';
-import { jumpToShotById } from './filter.js';
+import { jumpToShotByIdOrWarn } from './filter.js';
 
 let wrap = null, inputEl = null, listEl = null;
 let items = [], sel = 0, isOpen = false;
 
 const CMDS = [
-  { key: 'film', label: '全片总览', alias: 'quanpian film 所有场次 总览', hint: '跳转', run: () => { location.hash = '#/'; } },
-  { key: 'group', label: '切换到分组视图', alias: 'fenzu group 分组', hint: '视图', run: () => clickToolbar('分组') },
-  { key: 'flat', label: '切换到平铺视图', alias: 'pingpu flat 平铺', hint: '视图', run: () => clickToolbar('平铺') },
-  { key: 'script', label: '打开本场台本', alias: 'taiben script 台本 剧本', hint: '工具', run: () => clickToolbar('台本') },
-  { key: 'audit', label: '跑审计（本场）', alias: 'shenji audit 审计 检查', hint: '工具', run: () => clickToolbar('审计') },
+  { key: 'film', label: '全片总览', alias: 'quanpian film 所有场次 总览', hint: '跳转', run: () => clickCmd('film', '全片总览') },
+  { key: 'group', label: '切换到分组视图', alias: 'fenzu group 分组', hint: '视图', run: () => clickCmd('group', '分组') },
+  { key: 'flat', label: '切换到平铺视图', alias: 'pingpu flat 平铺', hint: '视图', run: () => clickCmd('flat', '平铺') },
+  { key: 'script', label: '打开本场台本', alias: 'taiben script 台本 剧本', hint: '工具', run: () => clickCmd('script', '台本') },
+  { key: 'audit', label: '跑审计（本场）', alias: 'shenji audit 审计 检查', hint: '工具', run: () => clickCmd('audit', '审计') },
   { key: 'export-page', label: '导出本场 · 静态页', alias: 'daochu export 导出 分享 存档', hint: '导出', run: () => exportScene('page') },
   { key: 'export-print', label: '导出本场 · A4 打印版', alias: 'daochu export a4 打印 dayin 导出', hint: '导出', run: () => exportScene('print') },
 ];
 
-function clickToolbar(text) {
-  const btns = Array.from(document.querySelectorAll('#view .tool-btn, #view .seg-b'));
-  const b = btns.find((x) => x.textContent.trim() === text);
+// F5-W25：命令入口一律 data-cmd 单点（原按按钮文本匹配——含全片 chip 一并统一）
+function clickCmd(cmd, label) {
+  const b = document.querySelector('[data-cmd="' + cmd + '"]');
   if (b && !b.disabled) { b.click(); return; }
-  toast('当前视图没有「' + text + '」入口');
+  toast('没有「' + label + '」入口');
 }
 
 function exportScene(fmt) {
@@ -46,9 +46,21 @@ function rank(text, q) {
 function cellText(tr, key, firstLine) {
   const td = tr.querySelector('td[data-field="' + key + '"]');
   if (!td) return '';
-  let t = (td.innerText || td.textContent || '').trim();
+  let t = (td.textContent || '').trim();   // F5-P7④：原 innerText 触发布局重算
   if (firstLine) t = (t.split('\n')[0] || '').trim();
   return t;
+}
+
+let _shotIdx = null;
+function shotIndexOf() {   // F5-P7④：候选索引一次收集（原每次 collect 全表扫 DOM）
+  if (_shotIdx) return _shotIdx;
+  _shotIdx = [];
+  for (const tr of document.querySelectorAll('tr.shot[data-id]')) {
+    const no = cellText(tr, 'shot_no');
+    if (!no) continue;
+    _shotIdx.push({ tr: tr, id: Number(tr.dataset.id), no: no, short: no.replace(/^0+(?=\d)/, '') });
+  }
+  return _shotIdx;
 }
 
 function collect(q) {
@@ -60,25 +72,21 @@ function collect(q) {
   }
   if (ql) {
     for (const sc of state.scenes || []) {
-      const label = sc.scene_no + (sc.title ? ' ' + sc.title : '');
+      const label = sceneLabel(sc);
       const r = Math.max(rank(sc.scene_no, ql), rank(label, ql), rank(sc.title, ql));
       if (r) scn.push({ group: '场次', label, hint: '跳转', run: () => { location.hash = hashOf(sc.scene_no); } });
     }
     let n = 0;
-    for (const tr of document.querySelectorAll('tr.shot[data-id]')) {
-      const no = cellText(tr, 'shot_no');
-      if (!no) continue;
-      const short = no.replace(/^0+(?=\d)/, '');
-      const r = Math.max(rank(no, ql), rank(short, ql), rank('镜' + short, ql));
+    for (const row of shotIndexOf()) {
+      const r = Math.max(rank(row.no, ql), rank(row.short, ql), rank('镜' + row.short, ql));
       if (!r) continue;
-      const size = cellText(tr, 'shot_size', true);
-      const dur = cellText(tr, 'duration');
-      const id = Number(tr.dataset.id);
+      const size = cellText(row.tr, 'shot_size', true);
+      const dur = cellText(row.tr, 'duration');
       sht.push({
         group: '镜头',
-        label: '镜 ' + no + (size ? ' · ' + size : '') + (dur ? ' · ' + dur : ''),
+        label: '镜 ' + row.no + (size ? ' · ' + size : '') + (dur ? ' · ' + dur : ''),
         hint: '跳镜',
-        run: () => { if (!jumpToShotById(id)) toast('该镜不在当前视图（可能被筛选隐藏）'); },
+        run: () => { jumpToShotByIdOrWarn(row.id); },   // F5-P8①：失败提示单点
       });
       if (++n >= 8) break;
     }
@@ -131,6 +139,9 @@ function refresh() {
   render();
 }
 
+let _rfT = 0;
+function refreshSoon() { clearTimeout(_rfT); _rfT = setTimeout(refresh, 120); }   // F5-P7④：输入防抖
+
 function ensure() {
   if (wrap) return;
   wrap = el('div', 'cmdk-mask');
@@ -140,7 +151,7 @@ function ensure() {
   inputEl.className = 'cmdk-input';
   inputEl.placeholder = '跳场次 / 镜号 / 命令…';
   inputEl.autocomplete = 'off';
-  inputEl.addEventListener('input', refresh);
+  inputEl.addEventListener('input', refreshSoon);
   listEl = el('div', 'cmdk-list');
   const foot = el('div', 'cmdk-foot', '↑↓ 选择 · Enter 执行 · Esc 关闭');
   card.appendChild(inputEl);
@@ -153,6 +164,7 @@ function ensure() {
 
 export function openCmdK() {
   ensure();
+  _shotIdx = null;   // F5-P7④：每次打开重建候选索引
   isOpen = true;
   wrap.hidden = false;
   inputEl.value = '';
@@ -178,7 +190,7 @@ export function bindCmdK() {
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePalette(); }
     else if (e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); move(1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); e.stopPropagation(); move(-1); }
-    else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); runAt(sel); }
+    else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); if (_rfT) { clearTimeout(_rfT); _rfT = 0; refresh(); } runAt(sel); }
   }, true);
   const chip = document.querySelector('.cmdk-open');
   if (chip) chip.addEventListener('click', () => { if (isOpen) closePalette(); else openCmdK(); });

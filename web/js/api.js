@@ -1,5 +1,6 @@
-async function get(path) {
-  const res = await fetch(path);
+// F5-P6②：请求层单点（get/post 共用同一 ok 检查与错误解析）
+async function req(path, opts) {
+  const res = await fetch(path, opts);
   if (!res.ok) {
     let msg = String(res.status);
     try { msg = (await res.json()).error || msg; } catch (e) { /* ignore */ }
@@ -8,18 +9,14 @@ async function get(path) {
   return res.json();
 }
 
-async function post(path, payload) {
-  const res = await fetch(path, {
+function get(path) { return req(path); }
+
+function post(path, payload) {
+  return req(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload || {}),
   });
-  if (!res.ok) {
-    let msg = String(res.status);
-    try { msg = (await res.json()).error || msg; } catch (e) { /* ignore */ }
-    throw new Error(msg);
-  }
-  return res.json();
 }
 
 export const api = {

@@ -347,6 +347,7 @@ function scriptTools(bar, flags) {
     bar.appendChild(d);
   }
   const sb = el('button', 'tool-btn', '台本');
+  sb.dataset.cmd = 'script';   // F5-W25：⌘K 命令经 data-cmd 单点
   sb.title = '本场台本（浮动抽屉：查看 / 修订 / 复制）';
   sb.addEventListener('click', () => openScriptDrawer());
   bar.appendChild(sb);
@@ -491,6 +492,7 @@ function buildViewModeSeg() {
   [['group', '分组'], ['flat', '平铺']].forEach(function (pair) {
     const mode = pair[0];
     const b = el('button', 'seg-b' + (((mode === 'flat') === effFlat) ? ' on' : ''), pair[1]);
+    b.dataset.cmd = mode;   // F5-W25：⌘K 命令经 data-cmd 单点
     b.addEventListener('click', () => {
       if (mode === 'group') sortState = null;
       prefs.viewMode = mode;
@@ -620,6 +622,7 @@ function viewTools() {
   scriptTools(bar);
 
   const ab = el('button', 'tool-btn audit-btn', '审计');
+  ab.dataset.cmd = 'audit';   // F5-W25：⌘K 命令经 data-cmd 单点
   ab.title = '审计问题清单（灯＝待处理；每次按设置跑）';
   ab.addEventListener('click', toggleAuditPanel);
   bindAuditBtn(ab);

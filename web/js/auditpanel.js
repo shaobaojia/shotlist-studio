@@ -1,9 +1,9 @@
 // 问题清单浮卡（M4a-2）：状态分组 / 搜索 / 跑审计 / 进度 / 设置入口。做派对「痕迹回看」。
 // 数据源：audit.js 的缓存状态（经 'shotlist:audit-changed' 事件同步刷新）。
-import { el } from './ui.js';
+import { el, stageText, fmtStamp } from './ui.js';
 import * as audit from './audit.js';
 import { openAuditSettings } from './auditset.js';
-import { panelShell } from './float.js';
+import { panelShell, floatEnter, floatLeave } from './float.js';
 
 let panel = null, listEl = null, statsEl = null, inputEl = null, runBtn = null, errEl = null;
 let btn = null;   // 工具排「审计」按钮
@@ -14,10 +14,11 @@ export function toggleAuditPanel() {
   if (panel && !panel.hidden) { panel.hidden = true; return; }
   openPanel();
 }
-export function closeAuditPanel() { if (panel) panel.hidden = true; }
+export function closeAuditPanel() { if (panel) panel.hidden = true; floatLeave('panel', closeAuditPanel); }
 
 function openPanel() {
   if (!panel) build();
+  floatEnter('panel', closeAuditPanel);   // F5-P1③：入互斥注册表（原漏挂——设置卡 z=47 会盖 z=42 的清单）
   panel.hidden = false;
   render();
 }
@@ -31,7 +32,7 @@ function build() {
   inputEl = document.createElement('input');
   inputEl.className = 'ap-search';
   inputEl.placeholder = '搜索规则 / 内容 / 位置…';
-  inputEl.addEventListener('input', render);
+  inputEl.addEventListener('input', renderSoon);
   runBtn = el('button', 'tool-btn small ap-run', '跑审计');
   runBtn.title = '按审计设置跑全部启用规则（后台执行，可继续编辑）';
   runBtn.addEventListener('click', () => audit.runAudit());
@@ -57,19 +58,34 @@ function build() {
   document.body.appendChild(panel);
 }
 
-function doneCount(job) { return job.rules.filter((r) => r.state === 'done' || r.state === 'error' || r.state === 'skipped').length; }
-
-function skipNote(job) {
-  const sk = job ? job.rules.filter((r) => r.state === 'skipped') : [];
-  return sk.length ? '跳过（无候选）：' + sk.map((r) => r.title).join('、') : '';
+// F5-W18：一次算完（done/running/errors/skipped——原三处各扫一遍）
+function jobStats(job) {
+  const out = { done: 0, total: 0, running: [], errors: [], skipped: [] };
+  if (!job || !job.rules) return out;
+  out.total = job.rules.length;
+  for (const r of job.rules) {
+    if (r.state === 'done' || r.state === 'error' || r.state === 'skipped') out.done++;
+    if (r.state === 'running') out.running.push(r.title);
+    if (r.state === 'error') out.errors.push(r);
+    if (r.state === 'skipped') out.skipped.push(r.title);
+  }
+  return out;
 }
+
+function skipNote(s) {
+  return s.skipped.length ? '跳过（无候选）：' + s.skipped.join('、') : '';
+}
+
+let _renT = 0;
+function renderSoon() { clearTimeout(_renT); _renT = setTimeout(render, 120); }   // F5-P5③：搜索防抖
 
 function renderBtn() {
   if (!btn) return;
   const st = audit.getState();
   const job = st && st.job;
   if (job && job.running) {
-    btn.textContent = '审计中 ' + doneCount(job) + '/' + job.rules.length;
+    const s = jobStats(job);
+    btn.textContent = '审计中 ' + s.done + '/' + s.total;
     btn.classList.add('busy');
     return;
   }
@@ -86,28 +102,28 @@ function render() {
   const data = audit.getData();
   const job = st && st.job;
 
+  const s = jobStats(job);
   if (job && job.running) {
-    const running = job.rules.filter((r) => r.state === 'running').map((r) => r.title).join('、');
-    const sk = skipNote(job);
-    statsEl.textContent = '审计中 ' + doneCount(job) + '/' + job.rules.length + (running ? '（' + running + '）' : '') + (sk ? ' · ' + sk : '');
+    const sk = skipNote(s);
+    statsEl.textContent = '审计中 ' + s.done + '/' + s.total + (s.running.length ? '（' + s.running.join('、') + '）' : '') + (sk ? ' · ' + sk : '');
     statsEl.classList.add('busy');
     runBtn.disabled = true;
     runBtn.textContent = '审计中…';
   } else {
-    const c = (st && st.counts) || { open: 0, fixed: 0, waived: 0 };
-    const sk = job ? skipNote(job) : '';
+    const c = (st && st.counts) || audit.EMPTY_COUNTS;
+    const sk = skipNote(s);
     statsEl.textContent = '未处理 ' + c.open + ' · 已修 ' + c.fixed + ' · 豁免 ' + c.waived + (sk ? ' · ' + sk : '');
     statsEl.classList.remove('busy');
     runBtn.disabled = false;
     runBtn.textContent = '跑审计';
   }
 
-  const errs = job ? job.rules.filter((r) => r.state === 'error') : [];
+  const errs = s.errors;
   errEl.hidden = !errs.length;
   if (errs.length) errEl.textContent = '⚠ ' + errs.map((r) => r.title + '：' + (r.error || '失败')).join('；');
 
   listEl.textContent = '';
-  if (!st) { listEl.appendChild(el('div', 'ap-empty', '加载中…')); return; }
+  if (!st) { const d0 = el('div', 'ap-empty'); stageText(d0, 'loading'); listEl.appendChild(d0); return; }
   const issues = st.issues || [];
   const q = (inputEl.value || '').trim();
   const shown = issues.filter((i) => {
@@ -121,9 +137,11 @@ function render() {
     return;
   }
   listEl.appendChild(el('div', 'ap-hint', '点条目 → 跳到该处并展开问题卡（去改 · 重检 · 豁免）'));
+  const bucket = { open: [], fixed: [], waived: [] };   // F5-P5③：一次分桶（原三趟 filter）
+  for (const i of shown) { const b = bucket[i.status]; if (b) b.push(i); }
   const groups = [['open', '未处理'], ['fixed', '已修'], ['waived', '豁免']];
   for (const pair of groups) {
-    const items = shown.filter((i) => i.status === pair[0]);
+    const items = bucket[pair[0]];
     if (!items.length) continue;
     listEl.appendChild(el('div', 'ap-grp', pair[1] + ' · ' + items.length));
     for (const i of items) listEl.appendChild(item(i, data));
@@ -133,14 +151,14 @@ function render() {
 function item(i, data) {
   const d = el('div', 'ap-item' + (i.status !== 'open' ? ' done' : ''));
   d.dataset.issueId = i.id;
-  d.appendChild(el('span', 'ap-dot' + (i.kind === 'llm' ? ' llm' : '')));
+  d.appendChild(el('span', audit.issueKindCls(i.kind, 'ap-dot')));   // F5-W17：种类类名单点
   d.appendChild(el('span', 'ap-tag', audit.carrierText(i.carrier, i.target_id, data)));
   const t = el('div', 'ap-t');
   t.appendChild(el('b', 'ap-rule', i.rule_title));
   t.appendChild(document.createTextNode('　' + (i.message || '')));
-  if (i.status === 'waived' && i.waive_note) t.appendChild(el('span', 'ap-note', '豁免理由：' + i.waive_note));
+  if (i.status === 'waived' && i.waive_note) t.appendChild(el('span', 'ap-note', audit.waiveText(i)));   // F5-W17：文案单点
   d.appendChild(t);
-  d.appendChild(el('span', 'ap-time', String(i.updated_at || '').slice(5, 16)));
+  d.appendChild(el('span', 'ap-time', fmtStamp(i.updated_at, 'md-hm')));
   d.title = '点击跳到该处并展开问题卡';
   d.addEventListener('click', () => {
     const res = audit.jumpToIssue(i, {});

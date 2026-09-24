@@ -170,7 +170,7 @@ export function flashIntoView(node, opts) {
 // 浮层豁免单点（批4/L1 + F1-B5）：结构浮层根名单；点外监听一律走这里，勿再手抄。
 // .scene-freeze（吸顶场头）是在流页面元素、不挂 .float-card：天然不算浮层（F1-B5）。
 // opts.prompt：附加「提示词预览 / 提示词列」（抽屉点外判定用）。
-const FLOAT_SEL = '.float-card, .menu, #draft-card, #hist-panel, #sel-bar, .ai-diff, [id^="ai-"]';   // F3-W28：抽屉/块库经 .float-card 收敛；#block-manager 死项撤
+const FLOAT_SEL = '.float-card, .menu, #draft-card, #hist-panel, #sel-bar, .ai-diff, [id^="ai-"], .cmdk-mask, .audit-card-tr, .audit-card';   // F3-W28 收敛；F5-P1：⌘K 模态层 + 审计行内卡（退浮层类，改走名单）入豁免
 const FLOAT_SEL_PROMPT = FLOAT_SEL + ', .prompt-box, .cell-prompt';
 export function isFloatTarget(t, opts) {
   if (!t || !t.closest) return false;
@@ -280,7 +280,7 @@ export function installWheelGuards() {
     document.addEventListener('wheel', (ev) => {
       const t = ev.target;
       if (!(t instanceof Element) || !ev.deltaY) return;
-      if (!t.closest('.menu, .float-card, #hist-panel')) return;
+      if (!t.closest('.menu, .float-card, #hist-panel, .cmdk-mask')) return;   // F5-P1：⌘K 入护栏名单
       let n = t;
       while (n && n !== document.documentElement) {
         if (wheelCanConsume(n, ev.deltaY)) return;     // 有可消费的内层 → 放行
@@ -289,4 +289,46 @@ export function installWheelGuards() {
       ev.preventDefault();                             // 无处可滚 → 吞掉，防穿到分镜表
     }, { passive: false, capture: true });
   });
+}
+
+// ── F5 底座小件 ──
+
+// 失败 toast 单点（F5-D9）：机制统一（前缀 + 错误消息）；前缀词各站自定
+export function failToast(prefix, err) {
+  toast(prefix + '：' + (err && err.message ? err.message : String(err == null ? '' : err)), 'err');
+}
+
+// 时间戳显示单点（F5-P8③）：'hms'＝时:分:秒；'md-hm'＝月-日 时:分；数字入参＝epoch 毫秒
+export function fmtStamp(s, mode) {
+  if (typeof s === 'number') {
+    const d = new Date(s);
+    const p = (n) => String(n).padStart(2, '0');
+    const hm = p(d.getHours()) + ':' + p(d.getMinutes());
+    if (mode === 'hms') return hm + ':' + p(d.getSeconds());
+    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + hm;
+  }
+  const t = String(s == null ? '' : s);
+  return mode === 'hms' ? t.slice(11, 19) : t.slice(5, 16);
+}
+
+// 拖放指示类清单（F5-W29）：同族指示类单点（以 drag.js 原「单次选择器清单」为模板）
+export const DND_DROP = ['drop-before', 'drop-after', 'drop-end', 'beat-drop-before', 'beat-drop-after'];
+export const DND_MARKS = DND_DROP.concat(['dragging']);
+export function clearDndMarks(root, names) {
+  const list = names || DND_MARKS;
+  const scope = root || document;
+  scope.querySelectorAll('.' + list.join(', .')).forEach((n) => { for (const c of list) n.classList.remove(c); });
+}
+
+// 面板占位单点（F5-W22）：「加载中…／加载失败：」两态 + 错误色类（F5-W20）
+export function stageText(el0, kind, err) {
+  if (kind === 'loading') { el0.textContent = '加载中…'; el0.classList.remove('err-note'); return; }
+  el0.textContent = '加载失败：' + (err && err.message ? err.message : String(err == null ? '' : err));
+  el0.classList.add('err-note');
+}
+
+// 按钮忙碌模板（F5-W16）：禁用 → 跑 → finally 恢复（失败 toast 由任务自理）
+export async function busy(btn, task) {
+  if (btn) btn.disabled = true;
+  try { return await task(); } finally { if (btn) btn.disabled = false; }
 }

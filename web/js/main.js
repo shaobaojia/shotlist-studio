@@ -1,6 +1,6 @@
 // 入口：导航（场次标签：切换 / 拖动排序 / 右键副本·删除 / 末尾＋加场）、路由、全局快捷键。
 import { api } from './api.js';
-import { state } from './state.js';
+import { state, sceneLabel } from './state.js';
 import { el, toast, once, installWheelGuards, isTypingTarget, filmChanged, FILM_CHANGED, silent, setVarPx } from './ui.js';
 import { parseHash, sceneNo, hashOf } from './route.js';
 import { renderFilm } from './film.js';
@@ -17,10 +17,11 @@ function buildNav() {
   const nav = document.getElementById('scene-nav');
   nav.textContent = '';
   const all = el('a', 'chip', '全片');
+  all.dataset.cmd = 'film';   // F5-W25：⌘K「全片总览」经此单点
   all.href = '#/';
   nav.appendChild(all);
   for (const sc of state.scenes) {
-    const a = el('a', 'chip', sc.scene_no + (sc.title ? ' ' + sc.title : ''));
+    const a = el('a', 'chip', sceneLabel(sc));
     a.href = '#/' + sc.scene_no;
     a.dataset.sceneId = sc.id;
     a.draggable = true;

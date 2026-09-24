@@ -55,10 +55,10 @@ export function buildFilterTools(bar, ctx) {
 
   bar.appendChild(el('span', 'filter-info'));
   const clr = el('button', 'tool-btn clear-filter', '清除筛选');
-  clr.style.display = filterActive() ? '' : 'none';
+  clr.style.display = 'none';   // F5-W23：初藏；显隐由 applyFilter 单点写（原构造期读状态＝双写）
   clr.addEventListener('click', () => {
     resetFilter();
-    ctx.repaint();
+    ctx.apply();   // F5-W27：纯显示切换走 DOM 级（原全量重建）
   });
   bar.appendChild(clr);
 }
@@ -86,6 +86,7 @@ export function applyFilter(ctx) {
   const data = ctx.getData();
   if (!view || !data) return;
   const active = filterActive();
+  if (!active && !view.querySelector('tr.shot[style*="display: none"]')) return;   // F5-P7①：非筛选态且无残留——提前返回（原空跑全表）
   const groups = groupsById(data);
   const map = {};
   for (const s of ctx.allShots()) map[s.id] = s;
@@ -99,8 +100,8 @@ export function applyFilter(ctx) {
     if (ok) shown++;
     tr.style.display = ok ? '' : 'none';
     // 同行附加行联动（详情行 + 审计问题卡行 + 未来同类）：跟着本行一起藏/显（M6）
-    let n = tr.nextElementSibling;
-    while (n && (n.classList.contains('detail') || n.classList.contains('audit-card-tr'))) {
+    let n = tr.nextElementSibling;                  // F5-B4：附加行判定走 data-for（写侧单点），不再嗅探类名名单
+    while (n && n.dataset && n.dataset.for != null) {
       n.style.display = ok ? '' : 'none';
       n = n.nextElementSibling;
     }
@@ -134,7 +135,7 @@ export function jumpToShot(raw, ctx) {
   }
   if (filterActive()) {
     resetFilter();
-    ctx.repaint();
+    ctx.apply();   // F5-W27：纯显示切换走 DOM 级（原全量重建）
   }
   jumpToShotById(target.id);
 }
@@ -149,4 +150,11 @@ export function jumpToShotById(id) {
   const tr = document.querySelector('tr.shot[data-id="' + id + '"]');
   if (!tr) return false;
   return flashIntoView(tr, { block: 'center' });
+}
+
+// F5-P8①：跳镜失败提示单点（ribbon / cmdk / audit 消费——原三处各写一遍文案）
+export function jumpToShotByIdOrWarn(id) {
+  if (jumpToShotById(id)) return true;
+  toast('该镜不在当前视图（可能被筛选隐藏）');
+  return false;
 }

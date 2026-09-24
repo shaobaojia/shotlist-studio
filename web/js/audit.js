@@ -2,9 +2,10 @@
 // 面板在 auditpanel.js，设置在 auditset.js。约定：灯只锚「未处理」；重绘后 decorate 幂等重建。
 // 灯：绝对定位钉在载体左缘（镜头行 / 节拍头 / 场签 / 行接缝），不占列、不改列宽、不参与排序框选。
 import { api } from './api.js';
-import { el, toast } from './ui.js';
+import { el, toast, failToast } from './ui.js';
 import { refreshHistoryIfOpen } from './history.js';
 import { isRowVisible } from './filter.js';
+import { rowPanelRow } from './table.js';
 
 let ctx = null;        // { getData }
 let cur = null;        // { sceneId, issues, counts, job }
@@ -14,6 +15,9 @@ let openKey = null;    // 'carrier:target' 当前展开的问题卡
 let seq = 0;           // 读序号：在飞读取遇更新的读/本地写即作废（M5 乱序覆盖）
 let inFlight = false;  // 轮询单飞（上一拍未回不叠发）
 let lastKey = '';      // 状态指纹：无变化不 notify（省徽标/清单重刷）
+
+const EMPTY_COUNTS = { open: 0, fixed: 0, waived: 0 };   // F5-W15：空计数单点（本件与 auditpanel 共用）
+export { EMPTY_COUNTS };
 
 export function initAudit(c) { ctx = c; }
 export function getState() { return cur; }
@@ -40,7 +44,7 @@ function fetchState(sid, force) {
     decorate(d);
     if (st.changed) notify();
     if (cur.job && cur.job.running) startPoll();
-  }).catch(() => {});
+  }).catch((err) => { console.warn('[audit] 状态拉取失败', err); });   // F5-P6④：不再静默
 }
 
 function notify() { window.dispatchEvent(new CustomEvent('shotlist:audit-changed')); }
@@ -48,7 +52,7 @@ function notify() { window.dispatchEvent(new CustomEvent('shotlist:audit-changed
 // 读取落地（fetchState/tick 共用）：返回 { changed, wasRunning }
 function applyRead(res, sid) {
   const wasRunning = !!(cur && cur.job && cur.job.running);
-  cur = { sceneId: sid, issues: res.issues || [], counts: res.counts || { open: 0, fixed: 0, waived: 0 },
+  cur = { sceneId: sid, issues: res.issues || [], counts: res.counts || EMPTY_COUNTS,
           job: res.job || null };
   const key = stateKey();
   const changed = key !== lastKey;
@@ -70,7 +74,8 @@ function splitKey(k) { const i = k.indexOf(':'); return [k.slice(0, i), k.slice(
 function shotIdOf(carrier, target) { return carrier === 'seam' ? String(target).split('>')[0] : String(target); }
 
 // 载体解析（单点）：灯 / 卡 / 清单跳转 / 去改 全走这里——平铺视图节拍回退「首镜行」（G4）
-function resolveCarrier(carrier, target, data) {
+// F5-P5①：可选 rowIdx（行索引 Map；decorate 传入避免每 key 各查 DOM，其余调用点走兜底查询）
+function resolveCarrier(carrier, target, data, rowIdx) {
   if (carrier === 'scene') {
     const node = document.querySelector('.scene-freeze .scene-head') || document.querySelector('.scene-head');
     return node ? { node: node, lamp: node, head: node, row: null, sec: null } : null;
@@ -83,21 +88,25 @@ function resolveCarrier(carrier, target, data) {
     }
     const b = ((data && data.beats) || []).find((x) => String(x.id) === String(target));
     const first = b && b.shots && b.shots[0];
-    const row = first && document.querySelector('tr.shot[data-id="' + first.id + '"]');
+    const row = first && (rowIdx ? rowIdx.get(String(first.id)) : document.querySelector('tr.shot[data-id="' + first.id + '"]'));
     if (!row) return null;
     return { node: row, lamp: row.querySelector('td.cell-toggle') || row, head: null, row: row, sec: null,
              hidden: !isRowVisible(row) };
   }
-  const row = document.querySelector('tr.shot[data-id="' + shotIdOf(carrier, target) + '"]');
+  const sid2 = shotIdOf(carrier, target);
+  const row = (rowIdx && rowIdx.get(String(sid2))) || document.querySelector('tr.shot[data-id="' + sid2 + '"]');
   if (!row) return null;
   return { node: row, lamp: row.querySelector('td.cell-toggle') || row, head: null, row: row, sec: null,
            hidden: !isRowVisible(row) };
 }
 
 function decorate(data) {
-  document.querySelectorAll('.audit-lamp').forEach((n) => n.remove());
+  const marks = document.querySelectorAll('.audit-lamp, tr.shot.has-lamp');   // F5-P5①：一趟扫（原三趟）
+  for (const n of marks) {
+    if (n.classList.contains('audit-lamp')) n.remove();
+    else n.classList.remove('has-lamp');
+  }
   clearCards();
-  document.querySelectorAll('tr.shot.has-lamp').forEach((n) => n.classList.remove('has-lamp'));
   if (!cur || cur.sceneId !== data.scene.id) { openKey = null; return; }
   const by = {};
   for (const i of cur.issues) {
@@ -105,14 +114,16 @@ function decorate(data) {
     const k = i.carrier + ':' + i.target_id;
     (by[k] = by[k] || []).push(i);
   }
+  const rowIdx = new Map();   // F5-P5①：行索引一次建（原每 key 各查 DOM）
+  for (const tr of document.querySelectorAll('tr.shot[data-id]')) rowIdx.set(tr.dataset.id, tr);
   for (const k of Object.keys(by)) {
     const [carrier, target] = splitKey(k);
-    const r = resolveCarrier(carrier, target, data);
+    const r = resolveCarrier(carrier, target, data, rowIdx);
     if (!r) continue;
     r.lamp.appendChild(buildLamp(k, by[k].length, by[k][0].message || ''));
     if (r.row) r.row.classList.add('has-lamp');
   }
-  if (openKey && openCard(openKey, data, true) === 'gone') openKey = null;   // 暂时隐藏（筛选）不清 openKey
+  if (openKey && openCard(openKey, data, true) === CARD_GONE) openKey = null;   // 暂时隐藏（筛选）不清 openKey
 }
 
 function buildLamp(key, count, msg) {
@@ -135,6 +146,9 @@ function buildLamp(key, count, msg) {
 }
 
 // ── 问题卡（行下就地展开 / 节拍头下 / 场头下）──
+// F5-W12：openCard 结果哨兵（'gone'＝目标已不存在；'hidden'＝被筛选隐藏；true＝已展开）
+const CARD_GONE = 'gone';
+const CARD_HIDDEN = 'hidden';
 function clearCards() {
   document.querySelectorAll('tr.audit-card-tr').forEach((n) => n.remove());
   document.querySelectorAll('.audit-card').forEach((n) => n.remove());
@@ -152,12 +166,12 @@ function openCard(key, data, silent) {
   const [carrier, target] = splitKey(key);
   const list = (cur ? cur.issues : []).filter(
     (i) => i.carrier === carrier && String(i.target_id) === String(target));
-  if (!list.length) { openKey = null; return 'gone'; }
+  if (!list.length) { openKey = null; return CARD_GONE; }
   const r = resolveCarrier(carrier, target, data);
-  if (!r) { openKey = null; return 'gone'; }
+  if (!r) { openKey = null; return CARD_GONE; }
   if (r.hidden) {   // 行被筛选隐藏：暂时态——静默重绘不弹 toast（L7）
     if (!silent) toast('该行被筛选隐藏了');
-    return 'hidden';
+    return CARD_HIDDEN;
   }
   const card = buildCard(carrier, target, list, data);
   let host = null;
@@ -170,32 +184,17 @@ function openCard(key, data, silent) {
     else r.sec.insertBefore(card, r.sec.firstChild);
     host = card;
   } else {   // 平铺节拍 / 镜 / 接缝：行下卡
-    host = insertCardTr(r.row, card);
+    host = rowPanelRow(r.row, card, 'audit-card-tr');   // F5-W31：行下副行单点
   }
-  if (!host) { openKey = null; return 'gone'; }
+  if (!host) { openKey = null; return CARD_GONE; }
   openKey = key;
   if (carrier === 'scene') window.dispatchEvent(new Event('resize'));   // 吸顶区高度重算
   if (!silent) notify();
   return true;
 }
 
-function insertCardTr(row, card) {
-  const tr = el('tr', 'audit-card-tr float-card');
-  tr.dataset.for = String(row.dataset.id);   // 同行标记（筛选隐藏联动，M6）
-  const td = document.createElement('td');
-  const table = row.closest('table');
-  td.colSpan = table ? table.querySelectorAll('colgroup col').length : 99;
-  td.appendChild(card);
-  tr.appendChild(td);
-  let anchorRow = row;
-  const nxt = row.nextElementSibling;
-  if (nxt && nxt.classList && nxt.classList.contains('detail')) anchorRow = nxt;
-  anchorRow.parentNode.insertBefore(tr, anchorRow.nextSibling);
-  return tr;
-}
-
 function buildCard(carrier, target, list, data) {
-  const card = el('div', 'audit-card float-card');
+  const card = el('div', 'audit-card');   // F5-P1：行内卡不挂浮层基类
   const head = el('div', 'ac-head');
   head.appendChild(el('b', null, '审计 · ' + carrierText(carrier, target, data)));
   head.appendChild(el('span', 'sp'));
@@ -211,10 +210,10 @@ function buildCard(carrier, target, list, data) {
 
 function issueRow(i, data) {
   const row = el('div', 'ac-item' + (i.status === 'fixed' ? ' done' : '') + (i.status === 'waived' ? ' waived' : ''));
-  row.appendChild(el('span', 'rule-chip' + (i.kind === 'llm' ? ' llm' : ''), i.rule_title));
+  row.appendChild(el('span', issueKindCls(i.kind, 'rule-chip'), i.rule_title));
   const txt = el('div', 'ac-txt');
   txt.appendChild(document.createTextNode(i.message || ''));
-  if (i.status === 'waived') txt.appendChild(el('span', 'ac-note', '（已豁免' + (i.waive_note ? '：' + i.waive_note : '') + '）'));
+  if (i.status === 'waived') txt.appendChild(el('span', 'ac-note', '（' + waiveText(i) + '）'));
   if (i.status === 'fixed') txt.appendChild(el('span', 'ac-note', '（已修 · 重跑若再现会重新点亮）'));
   row.appendChild(txt);
   const acts = el('div', 'ac-acts');
@@ -288,7 +287,7 @@ export async function runAudit() {
     notify();
     startPoll();
     toast(res.job && res.job.joined ? '审计正在进行——本轮先等它跑完（完成即出结果）' : '审计已开始（按设置跑）');
-  } catch (err) { toast('启动失败：' + err.message, 'err'); }
+  } catch (err) { failToast('启动失败', err); }
 }
 
 export async function recheckIssue(i) {
@@ -303,7 +302,7 @@ export async function recheckIssue(i) {
     } else {
       toast('重检中：' + i.rule_title + ' …');
     }
-  } catch (err) { toast('重检失败：' + err.message, 'err'); }
+  } catch (err) { failToast('重检失败', err); }
 }
 
 async function doWaive(i) {
@@ -311,7 +310,7 @@ async function doWaive(i) {
     const res = await api.auditIssue({ id: i.id, action: 'waive' });
     applyIssues(res);
     toast('已豁免（灯已熄灭）');
-  } catch (err) { toast('豁免失败：' + err.message, 'err'); }
+  } catch (err) { failToast('豁免失败', err); }
 }
 
 async function doUnwaive(i) {
@@ -319,7 +318,7 @@ async function doUnwaive(i) {
     const res = await api.auditIssue({ id: i.id, action: 'unwaive' });
     applyIssues(res);
     toast('已取消豁免');
-  } catch (err) { toast('操作失败：' + err.message, 'err'); }
+  } catch (err) { failToast('操作失败', err); }
 }
 
 function editWaiveNote(i, rowEl) {
@@ -341,7 +340,7 @@ function editWaiveNote(i, rowEl) {
       const res = await api.auditIssue({ id: i.id, action: 'waive', note: inp.value });
       applyIssues(res);
       toast('理由已留痕');
-    } catch (err) { toast('保存失败：' + err.message, 'err'); }
+    } catch (err) { failToast('保存失败', err); }
   });
   acts.appendChild(ok);
   acts.appendChild(qb('✕', cancel));
@@ -363,12 +362,14 @@ function applyIssues(res) {
 function startPoll() { if (!pollTimer) { pollTimer = setInterval(tick, 2000); tick(); } }
 function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 
+let _pending = false;   // F5-P6①：被单飞拒的拍 → 本拍回来后补
+let _warnedTick = false;
 async function tick() {
   if (!cur) return stopPoll();
   const data = ctx && ctx.getData();
   if (!data || data.scene.id !== cur.sceneId) return stopPoll();
   if (document.hidden) return;                 // 后台页不拉；回前台立即补一拍
-  if (inFlight) return;                        // 单飞：上一拍未回不叠发
+  if (inFlight) { _pending = true; return; }   // 单飞：上一拍未回——记待补（F5-P6①）
   inFlight = true;
   const sid = cur.sceneId;
   const my = ++seq;
@@ -376,6 +377,7 @@ async function tick() {
     const res = await api.audit(sid);
     if (my !== seq) return;                    // 期间有更新的读/本地写：旧快照作废（防复活一拍）
     if (!cur || cur.sceneId !== sid) return stopPoll();
+    _warnedTick = false;
     const st = applyRead(res, sid);
     const d = ctx && ctx.getData();
     if (!d || d.scene.id !== sid) return stopPoll();
@@ -387,8 +389,12 @@ async function tick() {
       notify();
       if (st.wasRunning) onDone(cur.job);
     }
-  } catch (err) { /* 网络抖动：下一拍再试 */ }
-  finally { inFlight = false; }
+  } catch (err) {   // F5-P6④：不再静默（本轮只记一次，防每 2s 刷屏）
+    if (!_warnedTick) { _warnedTick = true; console.warn('[audit] 轮询失败，将自动重试', err); }
+  } finally {
+    inFlight = false;
+    if (_pending) { _pending = false; tick(); }   // F5-P6①：补发被拒拍
+  }
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -396,23 +402,37 @@ document.addEventListener('visibilitychange', () => {
 });
 
 function onDone(job) {
-  if (job && job.error) { toast('审计失败：' + job.error, 'err'); return; }
+  if (job && job.error) { failToast('审计失败', job.error); return; }
   const n = (cur && cur.counts && cur.counts.open) || 0;
   toast(n > 0 ? ('审计完成：' + n + ' 处问题已亮灯（点灯处理）') : '审计完成：没有未处理的问题');
 }
 
 // ── 共用小工具 ──
+// F5-W17/W19：问题种类单点（rule-chip / ap-dot / 设置面板 eng 三站共用）
+const KINDS = { llm: { suffix: ' llm', label: 'LLM' }, program: { suffix: '', label: '程序' } };
+export function issueKindCls(kind, base) { const k = KINDS[kind] || KINDS.program; return base + k.suffix; }
+export function kindLabel(kind) { const k = KINDS[kind] || KINDS.program; return k.label; }
+
+// F5-W17：豁免理由文案单点（卡内 ac-note 与清单 ap-note 同源）
+export function waiveText(i) { return i.waive_note ? '豁免理由：' + i.waive_note : '已豁免'; }
+
+let _cnMap = null, _cnData = null;
+function carrierNameMap(data) {   // F5-P5②：镜号映射缓存（原每次 carrierText 全量重建）
+  if (_cnData !== data) {
+    _cnMap = {};
+    for (const b of (data && data.beats) || []) for (const s of b.shots || []) _cnMap[s.id] = s.shot_no;
+    for (const s of (data && data.orphan_shots) || []) _cnMap[s.id] = s.shot_no;
+    _cnData = data;
+  }
+  return _cnMap || {};
+}
 export function carrierText(carrier, target, data) {
   if (carrier === 'scene') return '本场';
   if (carrier === 'beat') {
     const b = ((data && data.beats) || []).find((x) => String(x.id) === String(target));
     return '节拍' + (b && b.beat_no != null ? ' ' + b.beat_no : '');
   }
-  const m = {};
-  if (data) {
-    for (const b of data.beats || []) for (const s of b.shots || []) m[s.id] = s.shot_no;
-    for (const s of data.orphan_shots || []) m[s.id] = s.shot_no;
-  }
+  const m = carrierNameMap(data);
   const [a, b2] = String(target).split('>');
   if (carrier === 'seam') return '镜 ' + (m[a] || a) + ' → ' + (m[b2] || b2);
   return '镜 ' + (m[target] || target);

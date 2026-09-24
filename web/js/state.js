@@ -24,3 +24,9 @@ export function groupsById(data) {
   for (const g of (data && data.prompt_groups) || []) m[g.id] = g;
   return m;
 }
+
+// F5-D5：场次显示名单点（导航 chip / ⌘K / 台本抽屉）
+export function sceneLabel(sc) {
+  if (!sc) return '';
+  return sc.scene_no + (sc.title ? ' ' + sc.title : '');
+}
