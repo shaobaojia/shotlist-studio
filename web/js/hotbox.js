@@ -66,8 +66,20 @@ function ensureDrawer() {
     onOutside,
     onClose: onDrawerClosed,
     floatPrompt: true,
+    save: () => saveCurrent(),                      // F4-L1①：切前静默保存回调（壳 tryLeave 调）
+    isEditing: () => S.mode === 'edit',             // F4-L1③：软刷新判定
+    render: () => renderDrawer('view'),             // F4-L1③：软刷新重绘（查看态）
   });
   initBlockCard(dr);
+  // F4-L1②：重绘钩子（scene.js 经 repaintDrawers 广播）——编辑态＝丢弃关闭（防陈旧上下文写库）；查看态＝重挂内容
+  dr.repaint = () => {
+    if (!dr.isOpen()) return;
+    if (S.mode === 'edit') { dr.close(); return; }
+    const s2 = (ctx.allShots() || []).find((x) => x.id === S.shotId);
+    if (!s2) { dr.close(); return; }
+    S.s = s2;
+    renderDrawer('view');
+  };
   S.toggleBtn = dr.addStandardButtons({                 // F3-W31：标准钮组单点
     onToggleMode: onToggleMode,
     toggleTitle: '进入编辑面（编辑态无保存钮：Ctrl+Enter／点外面即存）',
@@ -117,10 +129,7 @@ export async function openPromptDrawer(shotId, opts) {
     if (opts.toggle && !d.isPinned()) commitClose();       // 再点同一格＝收起保存（钉住时不动）
     return;
   }
-  if (d.isOpen() && S.mode === 'edit' && S.ta) {
-    const r = await saveCurrent();                          // 切换前静默保存
-    if (!r.ok) return;                                      // 保存失败：留在原镜重试
-  }
+  if (!(await d.tryLeave())) return;                        // F4-L1①：切换前静默保存（失败留在原镜重试）
   S.shotId = shotId;
   S.s = s;
   const mode = d.isOpen() ? S.mode : (opts.mode || 'edit');
@@ -130,15 +139,7 @@ export async function openPromptDrawer(shotId, opts) {
 
 // （F4-W14：focusShotComposer 死导出已退役——全库 0 调用；回位走 openPromptDrawer）
 
-// 重绘前释放：编辑态＝丢弃关闭（防陈旧上下文写库）；查看态＝重挂内容（钉住/记忆保持）
-export function releaseComposer() {
-  if (!dr || !dr.isOpen()) return;
-  if (S.mode === 'edit') { dr.close(); return; }
-  const s2 = (ctx.allShots() || []).find((x) => x.id === S.shotId);
-  if (!s2) { dr.close(); return; }
-  S.s = s2;
-  renderDrawer('view');
-}
+// （F4-L1②：原 releaseComposer 已迁入壳钩子——见 ensureDrawer 内 `dr.repaint`；scene.js 经 repaintDrawers 广播）
 
 function resetSession() {                        // F4-W9③：会话态一处归零（原四处散落，selStatEl 漏清）
   S.shotId = null;
@@ -569,10 +570,7 @@ async function saveText(s, text, original) {
 async function commitClose() {
   if (!dr || !dr.isOpen()) return;
   const at = S.shotId;
-  if (S.mode === 'edit' && S.ta) {
-    const r = await saveCurrent();
-    if (!r.ok) return;                          // 保存失败：留在编辑面（内容不丢）
-  }
+  if (!(await dr.tryLeave())) return;           // F4-L1①：保存失败：留在编辑面（内容不丢）
   if (S.shotId !== at) return;                  // 关闭期间已切到别的镜：不补关
   dr.close();
 }
@@ -693,7 +691,7 @@ function refreshAllPreviews() {
 }
 
 function refreshDrawerSoft() {
-  if (dr && dr.isOpen() && S.mode === 'view') renderDrawer('view');
+  if (dr) dr.softRefresh();                     // F4-L1③：判定收壳（开着且非编辑态才重绘）
 }
 
 // 提示词写响应扇出单点（F4-W2）：组预览 → 抽屉查看态 → 覆盖高亮

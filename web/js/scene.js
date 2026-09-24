@@ -14,12 +14,13 @@ import { bindDrag } from './drag.js';
 import { filterActive, resetFilter, buildFilterTools, applyFilter } from './filter.js';
 import { openMenu } from './menu.js';
 import { toggleHistory, closeHistory, refreshHistoryIfOpen } from './history.js';
-import { initHotbox, releaseComposer } from './hotbox.js';
+import { initHotbox } from './hotbox.js';
 import { initAudit, onPainted as auditOnPainted } from './audit.js';
 import { bindAuditBtn, toggleAuditPanel, closeAuditPanel } from './auditpanel.js';
 import { initAiWrite, closeAiCards } from './aiwrite.js';
 import { openSceneDraft, closeDraftCards } from './draft.js';
-import { initScriptDrawer, openScriptDrawer, openScriptImport, scriptsOnRepaint } from './scriptdrawer.js';
+import { initScriptDrawer, openScriptDrawer, openScriptImport } from './scriptdrawer.js';
+import { repaintDrawers } from './drawer.js';
 import { buildRibbon, numOf } from './ribbon.js';
 
 const PREFS_KEY = 'shotlist_prefs_v1';
@@ -231,10 +232,9 @@ window.addEventListener('resize', () => { if (document.querySelector('.scene-fre
 function paintScene(view) {
   const data = currentData;
   if (!data) return;
-  releaseComposer();               // 重绘前释放编辑面（防悬空 activeBox / 陈旧上下文写库；订阅与点外监听一并清）
+  repaintDrawers(data.scene.id);   // 重绘前释放/跟场（F4-L1②单点：两抽屉各自 repaint；防悬空 activeBox / 陈旧上下文写库）
   closeAiCards();                  // 重绘前收起 AI 预览卡（M4b-2）
   closeDraftCards();               // 重绘前收起草稿卡（M4b-4）
-  scriptsOnRepaint(data.scene.id); // 剧本抽屉：同场不扰，切场未钉住即关 / 钉住跟场
   clearSel();
   view.textContent = '';
   view.classList.toggle('wrap-off', !prefs.wrap);

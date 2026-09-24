@@ -23,7 +23,12 @@ const IMP = { card: null, lastText: '' };
 // ── 抽屉（壳：右缘浮动 · 拖拽 / 缩放 / 贴附 / 钉住 / 记忆）──
 function ensureDrawer() {
   if (dr) return dr;
-  dr = createDrawer({ id: 'script', width: 460, onOutside: onOutside, onClose: onClosed, floatPrompt: true });
+  dr = createDrawer({
+    id: 'script', width: 460, onOutside: onOutside, onClose: onClosed, floatPrompt: true,
+    save: () => commitSave(),                     // F4-L1①：切前静默保存回调（壳 tryLeave 调）
+    isEditing: () => S.mode === 'edit',           // F4-L1③：软刷新判定
+    render: () => render('view'),                 // F4-L1③：软刷新重绘（查看态）
+  });
   toggleBtn = dr.addStandardButtons({                   // F3-W31：标准钮组单点
     onToggleMode: onToggleMode,
     toggleTitle: '切换 查看 ⇄ 编辑（编辑中点击＝保存回查看）',
@@ -36,6 +41,18 @@ function ensureDrawer() {
     if (S.mode === 'edit') { toView(); return; }
     if (!dr.isPinned()) commitClose();
   });
+  // F4-L1②：重绘钩子（scene.js 经 repaintDrawers 广播）——同场不打扰；切场未钉住即关、钉住跟场
+  dr.repaint = async (sceneId) => {
+    if (!dr.isOpen()) return;
+    if (S.sceneId === sceneId) return;
+    if (!dr.isPinned()) { dr.close(); return; }
+    if (!(await dr.tryLeave())) return;
+    const sc = ctx.getScene();
+    if (!sc) { dr.close(); return; }
+    S.sceneId = sc.id;
+    S.scene = sc;
+    render('view');
+  };
   return dr;
 }
 
@@ -45,10 +62,7 @@ export function openScriptDrawer() {
   const d = ensureDrawer();
   if (d.isOpen() && S.sceneId === sc.id) return;
   const go = async () => {
-    if (d.isOpen() && S.mode === 'edit' && S.ta) {
-      const r = await commitSave();
-      if (!r.ok) return;
-    }
+    if (!(await d.tryLeave())) return;             // F4-L1①：切换前静默保存（失败留在原处）
     S.sceneId = sc.id;
     S.scene = sc;
     d.open();
@@ -57,24 +71,7 @@ export function openScriptDrawer() {
   go();
 }
 
-// 重绘钩子（scene.js paintScene 调）：同场不打扰；切场未钉住即关、钉住跟场
-export function scriptsOnRepaint(sceneId) {
-  if (!dr || !dr.isOpen()) return;
-  if (S.sceneId === sceneId) return;
-  if (!dr.isPinned()) { dr.close(); return; }
-  const follow = async () => {
-    if (S.mode === 'edit' && S.ta) {
-      const r = await commitSave();
-      if (!r.ok) return;
-    }
-    const sc = ctx.getScene();
-    if (!sc) { dr.close(); return; }
-    S.sceneId = sc.id;
-    S.scene = sc;
-    render('view');
-  };
-  follow();
-}
+// （F4-L1②：原 scriptsOnRepaint 已迁入壳钩子——见 ensureDrawer 内 `dr.repaint`；scene.js 经 repaintDrawers 广播）
 
 // 外部改动后（导入台本等）重读当前场
 export function refreshScriptDrawer() {
@@ -86,7 +83,7 @@ export function refreshScriptDrawer() {
 }
 
 function renderSoft() {
-  if (dr && dr.isOpen() && S.mode === 'view') render('view');
+  if (dr) dr.softRefresh();                     // F4-L1③：判定收壳（开着且非编辑态才重绘）
 }
 
 // ── 渲染 ──
@@ -167,10 +164,7 @@ async function saveToView() {
 
 async function commitClose() {
   if (!dr || !dr.isOpen()) return;
-  if (S.mode === 'edit' && S.ta) {
-    const r = await commitSave();
-    if (!r.ok) return;
-  }
+  if (!(await dr.tryLeave())) return;             // F4-L1①：切前静默保存（失败留在原处）
   dr.close();
 }
 

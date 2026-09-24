@@ -29,6 +29,9 @@ function headTop() {
 // 活动抽屉栈：Esc 焦点在两抽屉之外时只让最后打开的抽屉接管（F4-W39）
 const ACTIVE = [];
 
+// 已建抽屉名册（F4-L1②）：repaintDrawers(sceneId) 广播的收件人（建壳即入册）
+const DRS = [];
+
 // Esc 优先级阶梯单点（F4-W39）：菜单自管 → 焦点在别家抽屉让给它 → 别处输入不介入 → 焦点在两家之外只顶层接管 → onEsc
 export function bindDrawerEsc(dr, onEsc) {
   document.addEventListener('keydown', (e) => {
@@ -330,6 +333,23 @@ export function createDrawer(opts) {
     frame.classList.toggle('bc-under-up', mode === 'up');
   }
 
+  // ── 会话协议（F4-L1）：消费者只交 save() / isEditing() / render()，过渡时机由壳统一 ──
+  // tryLeave()：切前静默保存——save() 非 {ok:false} 即放行；失败返回 false（调用方留在原处）
+  async function tryLeave() {
+    if (!st.open) return true;
+    if (opts.save) {
+      const r = await opts.save();
+      if (r && r.ok === false) return false;
+    }
+    return true;
+  }
+  // softRefresh()：软刷新——开着且非编辑态才重绘（编辑中不打扰输入；F4-L1③）
+  function softRefresh() {
+    if (!st.open) return;
+    if (opts.isEditing && opts.isEditing()) return;
+    if (opts.render) opts.render();
+  }
+
   const dr = {
     el: frame, bodyEl: body, headEl: head, titleEl: title, btnsEl: btns,
     open, close,
@@ -339,6 +359,20 @@ export function createDrawer(opts) {
     addButton, addPinButton, addDockButton, addCloseButton, addStandardButtons,
     getDock: () => st.dock,
     geom, onGeom, setUnder,                          // F3-L1 几何契约
+    tryLeave, softRefresh,                           // F4-L1 会话协议（切前保存 / 软刷新）
+    // repaint：重绘钩子插槽（F4-L1②）——消费者赋 `dr.repaint = fn(sceneId)`，scene.js 经 repaintDrawers 广播
   };
+  DRS.push(dr);                                      // 入册（重绘广播收件人）
   return dr;
+}
+
+// 重绘广播单点（F4-L1②，scene.js 调）：遍历已建抽屉各走自家 repaint（单家异常不阻塞别家）
+export function repaintDrawers(sceneId) {
+  for (const d of DRS) {
+    if (!d.repaint) continue;
+    try {
+      const p = d.repaint(sceneId);
+      if (p && p.catch) p.catch((e) => silent(e, 'drawer-repaint'));
+    } catch (e) { silent(e, 'drawer-repaint'); }
+  }
 }
