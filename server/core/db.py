@@ -1,5 +1,6 @@
 """数据层：SQLite 连接（schema v1）。连接器只做连接——只读 open_ro / 写入口 open_rw
 （写前每日快照下沉至写边界；S1-L4）。"""
+import contextlib
 import sqlite3
 from pathlib import Path
 
@@ -30,6 +31,26 @@ def open_rw(db_path=None):
     con.execute("PRAGMA foreign_keys=ON")
     con.row_factory = sqlite3.Row
     return con
+
+
+@contextlib.contextmanager
+def conn_ro(db_path=None):
+    """只读连接（with 版 · S1-L2）：出 with 自动 close。"""
+    con = open_ro(db_path)
+    try:
+        yield con
+    finally:
+        con.close()
+
+
+@contextlib.contextmanager
+def conn_rw(db_path=None):
+    """写连接（with 版 · S1-L2）：出 with 自动 close。"""
+    con = open_rw(db_path)
+    try:
+        yield con
+    finally:
+        con.close()
 
 
 def _dicts(rows):
