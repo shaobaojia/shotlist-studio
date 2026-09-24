@@ -2,7 +2,7 @@
 // + 批量操作（设值 / 清空 / 复制 TSV）。选区限定在单张表内；点击即编不受影响（拖出格才算框选）。
 // 设计对齐：设计稿 §4「Tab / 方向键走格；多选（Shift / 框选）→ 表底选区条批量改」。
 import { api } from './api.js';
-import { toast, isFloatTarget, isTypingTarget } from './ui.js';
+import { toast, isFloatTarget, isTypingTarget, stableRepaint } from './ui.js';
 import { recordUndo, notifyRowsChanged, editorHandleAt } from './edit.js';
 import { toTSV, copyText } from './clipboard.js';
 import { refreshShotCell, visibleRows } from './table.js';
@@ -211,7 +211,7 @@ let stabilizeQueued = false;
 function queueStabilize() {
   if (stabilizeQueued) return;
   stabilizeQueued = true;
-  requestAnimationFrame(() => {
+  stableRepaint(() => {                              // F2-L3：机制上提 ui.stableRepaint
     stabilizeQueued = false;
     if (sel) paint(false);
   });

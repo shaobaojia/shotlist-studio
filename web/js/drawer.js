@@ -1,7 +1,7 @@
 // 浮层抽屉基件（M5 批3「右缘抽屉体系」）
 // 形态基准 = 旧版提示词面板：浮动卡片 + 标题栏拖拽 + 八向缩放 + 贴附（右/下）+ 钉住 + 位置尺寸记忆。
 // 按钮行由使用方按序装配（panel-btn 统一样式：红底白字 11px 中文全词）。
-import { el, lsGet, lsSet, clamp, readVarPx, trackDrag, onResizeCoalesced, flashClass, isTypingTarget } from './ui.js';
+import { el, lsGet, lsSet, clamp, readVarPx, trackDrag, onResizeCoalesced, flashClass, isTypingTarget, isFloatTarget } from './ui.js';
 
 const MIN_W = 320, MIN_H = 200;
 // 屏内夹取与停靠常量单点（F3-W23：原先六处手抄同一组数）
@@ -226,9 +226,13 @@ export function createDrawer(opts) {
   }
 
   // ── 打开 / 关闭 ──
+  // 点外过滤链单点（F2-L3 收编）：浮卡/菜单豁免名单（floatPrompt 开则含提示词列）→ 钉住不触发 → 交 onOutside。
+  // 各抽屉只写「真点外要做什么」；原先 scriptdrawer/hotbox 两处手抄同一链（逐字同构）已退役。
   const onDoc = (e) => {
     if (!st.open) return;
     if (frame.contains(e.target)) return;
+    if (isFloatTarget(e.target, { prompt: !!opts.floatPrompt })) return;
+    if (st.pinned) return;
     if (opts.onOutside) opts.onOutside(e);
   };
 

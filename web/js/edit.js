@@ -1,9 +1,9 @@
 // 就地编辑引擎：点击即编 / 自动保存（无保存键）/ Esc 取消 / Ctrl+Z 撤销栈。
 // 写路径统一走 api.update（服务端白名单 + 痕迹）；乐观更新，失败回滚。
-// 摄影机复合控件（景别×2 + 焦段）也在这里：改动即存，含旧格式归一化（内嵌焦段/景深迁入独立字段）。
+// 摄影机复合控件（景别×2 + 焦段）也在这里：改动即存（F1-L4：旧格式已一次性迁净，写路径由服务端校验守门）。
 // 单选字段与复合控件走自绘浮动菜单（menu.js，非原生 select）：一次点击直达列表，拾取不关表单。
 import { api } from './api.js';
-import { toast, growTextarea, placeFlip, onOutsideClose } from './ui.js';
+import { toast, growTextarea, placeFlip, onOutsideClose, stableRepaint } from './ui.js';
 import { openMenu, closeMenu, menuOpen, optItems } from './menu.js';
 
 const undoStack = [];
@@ -215,12 +215,17 @@ function decorateEditor(host, ed, cfg, close, base) {
     });
     host.appendChild(strip);
     // 兜底翻转（F2-P5 单点）：表底行时条悬出 .table-wrap（overflow 纵裁不可点）→ 翻到格子上方
+    // 稳定帧复绘（F2-L3）：打开瞬间量到的 rect 可能是重排前值——首绘 + 下一帧补绘纠位
     const wrapEl = host.closest ? host.closest('.table-wrap') : null;
     if (wrapEl) {
-      const wr = wrapEl.getBoundingClientRect();
-      const res = placeFlip(host.getBoundingClientRect(), 0, strip.offsetHeight,
-        { gapBelow: 6, pad: 0, maxBottom: wr.bottom + 1 });
-      if (res.flipped) strip.classList.add('above');
+      const doFlip = () => {
+        const wr = wrapEl.getBoundingClientRect();
+        const res = placeFlip(host.getBoundingClientRect(), 0, strip.offsetHeight,
+          { gapBelow: 6, pad: 0, maxBottom: wr.bottom + 1 });
+        strip.classList.toggle('above', res.flipped);
+      };
+      doFlip();
+      stableRepaint(doFlip);
     }
   }
 }

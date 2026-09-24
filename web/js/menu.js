@@ -1,7 +1,7 @@
 // 浮动菜单组件（M2-3）：单选下拉 / 右键菜单共用。
 // 不依赖原生 select：一次点击即出列表；拾取后由回调处理（表单不因弹层交互被误关）。
 // 交互：↑↓ 移动高亮 / Enter 拾取 / Esc 关闭 / 点外关闭 / 滚动或 resize 关闭。
-import { placeFlip, onOutsideClose } from './ui.js';
+import { placeFlip, onOutsideClose, stableRepaint } from './ui.js';
 let cur = null;
 
 export function menuOpen() {
@@ -76,18 +76,23 @@ export function openMenu(anchor, items, onPick, opts) {
   if (curIdx !== -1) setHl(curIdx);
 
   // 定位（F2-P5 单点）：锚点下方，越界翻转 / 夹取在视口内
-  const mw = root.offsetWidth;
-  const mh = root.offsetHeight;
-  let pos;
-  if (anchor && anchor.nodeType === 1) {
-    pos = placeFlip(anchor.getBoundingClientRect(), mw, mh);
-  } else {
-    const px = (anchor && anchor.x) || 0;
-    const py = (anchor && anchor.y) || 0;
-    pos = placeFlip({ left: px, right: px, top: py, bottom: py }, mw, mh, { gapBelow: 0, gapAbove: 6 });
-  }
-  root.style.left = pos.x + 'px';
-  root.style.top = pos.y + 'px';
+  // 稳定帧复绘（F2-L3）：打开瞬间锚点 rect 可能是重排前值——首绘 + 下一帧补绘纠位
+  const doPos = () => {
+    const mw = root.offsetWidth;
+    const mh = root.offsetHeight;
+    let pos;
+    if (anchor && anchor.nodeType === 1) {
+      pos = placeFlip(anchor.getBoundingClientRect(), mw, mh);
+    } else {
+      const px = (anchor && anchor.x) || 0;
+      const py = (anchor && anchor.y) || 0;
+      pos = placeFlip({ left: px, right: px, top: py, bottom: py }, mw, mh, { gapBelow: 0, gapAbove: 6 });
+    }
+    root.style.left = pos.x + 'px';
+    root.style.top = pos.y + 'px';
+  };
+  doPos();
+  stableRepaint(doPos);
   root.style.visibility = '';
 
   const pick = (d) => {

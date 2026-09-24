@@ -2,8 +2,7 @@
 // 形态：右侧浮动卡 · 查看 ⇄ 编辑（一步撤销）· 钉住时切场跟随。
 // 导入：整本粘贴 → 按场号行首切分（「s010 …」/「10、…」）→ 逐场勾选覆盖（一步可撤）。
 import { api } from './api.js';
-import { el, toast, isFloatTarget } from './ui.js';
-import { menuEl } from './menu.js';
+import { el, toast } from './ui.js';
 import { recordCustomUndo } from './edit.js';
 import { copyText } from './clipboard.js';
 import { createDrawer, bindDrawerEsc } from './drawer.js';
@@ -24,7 +23,7 @@ const IMP = { card: null, lastText: '' };
 // ── 抽屉（壳：右缘浮动 · 拖拽 / 缩放 / 贴附 / 钉住 / 记忆）──
 function ensureDrawer() {
   if (dr) return dr;
-  dr = createDrawer({ id: 'script', width: 460, onOutside: onOutside, onClose: onClosed });
+  dr = createDrawer({ id: 'script', width: 460, onOutside: onOutside, onClose: onClosed, floatPrompt: true });
   toggleBtn = dr.addStandardButtons({                   // F3-W31：标准钮组单点
     onToggleMode: onToggleMode,
     toggleTitle: '切换 查看 ⇄ 编辑（编辑中点击＝保存回查看）',
@@ -190,12 +189,8 @@ function onCopy() {
   copyText(text, '已复制台本全文');   // F4-W44②：失败文案走单点默认
 }
 
-function onOutside(e) {
-  if (!dr || !dr.isOpen()) return;
-  const t = e.target;
-  if (menuEl() && menuEl().contains(t)) return;
-  if (isFloatTarget(t, { prompt: true })) return;   // 单点名单（F1-B5）
-  if (dr.isPinned()) return;
+function onOutside() {
+  // 点外收口（F2-L3）：过滤链已收编 drawer 基件（浮卡/菜单豁免 + 钉住）；这里只收
   commitClose();
 }
 

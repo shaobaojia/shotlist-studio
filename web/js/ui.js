@@ -263,6 +263,14 @@ export function onOutsideClose(el, onClose, opts) {
 }
 
 
+// 稳定帧复绘单点（F2-L3 上提；M5 批1·N2 实测）：交互同步窗口内量到的 rect 可能是
+// 重排前值（分组模式首绘偏 ~6.9px、不自愈）——「首绘 + 下一帧补绘」两步：
+// 调用方先同步首绘，再调本件排一次补绘；连发高频自行合并（key 范式同 selection.paintSoon）。
+export function stableRepaint(draw) {
+  return requestAnimationFrame(draw);
+}
+
+
 // ── M5f：滚轮护栏 —— 面板 / 块库 / 菜单范围内，光标下没有任何「可消费本方向滚轮」的
 //    滚动层时吞掉滚轮事件，防止滚动链穿透到分镜表（实测三种泄漏：非滚动区链滚 /
 //    滚动到边界继续滚 / 块库边缘链滚）。内层能滚的场合一律放行，浏览器自己滚它。

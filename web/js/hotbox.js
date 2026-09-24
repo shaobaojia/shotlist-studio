@@ -2,9 +2,9 @@
 // 交互口径：Ctrl+Enter 保存并下一镜 · Esc 编辑→查看（不保存）· 查看态 Esc→关闭 · 未钉住点抽屉外＝保存并关闭 · 钉住＝不关（切镜跟随）。
 // 写作逻辑不变：块库点插（插入即固化）+ 自由手写；{占位符} 在插入瞬间代入当前镜的值。
 import { api } from './api.js';
-import { el, toast, durText, isFloatTarget, isTypingTarget, flashIntoView } from './ui.js';
+import { el, toast, durText, isTypingTarget, flashIntoView } from './ui.js';
 import { groupsById } from './state.js';
-import { openMenu, menuEl } from './menu.js';
+import { openMenu } from './menu.js';
 import { recordCustomUndo, undo as globalUndo } from './edit.js';
 import { storeAsBlock, byPosition, PLACEHOLDERS } from './blocks.js';
 import { shotRow } from './table.js';
@@ -65,6 +65,7 @@ function ensureDrawer() {
     width: 500,
     onOutside,
     onClose: onDrawerClosed,
+    floatPrompt: true,
   });
   initBlockCard(dr);
   S.toggleBtn = dr.addStandardButtons({                 // F3-W31：标准钮组单点
@@ -596,12 +597,8 @@ function onCopy() {
   copyText(text, '已复制全文（已过滤 [镜XX] 注释）');   // F4-W44②：失败文案走单点默认
 }
 
-function onOutside(e) {
-  const t = e.target;
-  if (!dr || !dr.isOpen()) return;
-  if (menuEl() && menuEl().contains(t)) return;
-  if (isFloatTarget(t, { prompt: true })) return;   // 单点名单（F1-B5）：浮卡/抽屉/块库/AI 卡/详情预览/提示词列不算点外
-  if (dr.isPinned()) return;                    // 钉住：不关
+function onOutside() {
+  // 点外收口（F2-L3）：过滤链已收编 drawer 基件（浮卡/菜单豁免 + 钉住）；这里只收
   commitClose();                                // 保存（若编辑中）并关闭
 }
 
