@@ -80,21 +80,6 @@ def reply_text(reply):
     return reply or ""
 
 
-def extract_json(text):
-    """AI 回包 → dict（取首尾花括号切片解析）；不可解析抛 ValueError——P0·S2-§7（自 audit 上收）。"""
-    t = (text or "").strip()
-    i, j = t.find("{"), t.rfind("}")
-    if i < 0 or j <= i:
-        raise ValueError("回包无 JSON 对象（%.60s）" % (t or "空"))
-    try:
-        obj = json.loads(t[i:j + 1])
-    except Exception as e:
-        raise ValueError("回包 JSON 解析失败：%s" % e)
-    if not isinstance(obj, dict):
-        raise ValueError("回包 JSON 不是对象")
-    return obj
-
-
 def open_channel(chat_fn=None, connect_factory=None, temperature=TEMPERATURE):
     """任务通道（含连接）：开只读连接 → channel → 关连接；返回 (cfg, talk)——
     P0·S3-W15（rewrite/draft 三处逐字样板收口）。"""

@@ -9,7 +9,7 @@ import unittest
 
 import _boot  # noqa: F401 — 直跑引导（pytest 下由 conftest 等价注入）
 
-from core import draft      # noqa: E402
+from core import ai_out, draft      # noqa: E402
 from _fixture import conn_factory, make_base_db, wait_job as wait_for_job  # noqa: E402
 
 SCRIPT = "内景 旧公寓客厅 深夜。男人坐在沙发上反复解锁手机，屏幕上没有新消息。他起身走到窗前拉开一条缝，对面楼的灯一盏盏灭着。"
@@ -125,8 +125,8 @@ class TestParse(unittest.TestCase):
         self.assertEqual(out4, [])
 
     def test_fence_strip(self):
-        self.assertEqual(draft._strip_fence("```\n正文\n```"), "正文")
-        self.assertEqual(draft._strip_fence("正文"), "正文")
+        self.assertEqual(ai_out.strip_fence("```\n正文\n```"), "正文")
+        self.assertEqual(ai_out.strip_fence("正文"), "正文")
 
 
 class TestSceneFlow(Base):

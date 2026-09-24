@@ -12,7 +12,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from core import ai, db, digest, jobs, ops, recipes
+from core import ai, ai_out, db, digest, jobs, ops, recipes
 
 # 载体四值：与 schema.sql audit_issues.carrier CHECK、web/js/audit.js 的 carrierText 对账
 # （stdlib sqlite 无法共享字面量——改动时三处同改；W20）。
@@ -304,7 +304,7 @@ def _resolve_ref(ctx, carrier, ref):
 
 def _parse_findings(ctx, text):
     """解析回包。返回 (findings, dropped)：dropped＝被丢弃条目数（P0·S2-B1，调用方必须当回事）。"""
-    data = ai.extract_json(text)
+    data = ai_out.extract_json(text)
     raw = data.get("findings")
     if not isinstance(raw, list):
         raise ValueError("回包缺少 findings 列表")
@@ -369,7 +369,7 @@ def reconcile(con, scene_id, rule, findings):
     for (carrier, target), msgs in agg.items():
         key = (carrier, target)
         now.add(key)
-        message = "；".join(dict.fromkeys(msgs))[:500]
+        message = ai_out.clip("；".join(dict.fromkeys(msgs)), 500)
         ex = existing.get(key)
         if ex is None:
             ins.append((scene_id, carrier, target, rule["id"], message))

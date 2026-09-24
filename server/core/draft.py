@@ -8,18 +8,17 @@
 """
 import time
 
-from . import ai, db, digest, fields, jobs, ops
+from . import ai, ai_out, db, digest, fields, jobs, ops
 from .rewrite import load_recipe
 
 
 def _parse_reply(text):
-    """回包 → (dict, note)：不可解析回 ({}, 留痕)。留痕=原文长度+首 200 字（P0·S3-P5③：
-    解析失败现场可复盘——此前原始回包一字不留）。"""
+    """回包 → (dict, note)：不可解析回 ({}, 留痕)。留痕单点 ai_out.fail_note（P0·S3-P5③）。"""
     t = text or ""
     try:
-        return ai.extract_json(t), None
+        return ai_out.extract_json(t), None
     except ValueError as e:
-        return {}, "回包不可解析（%s；原文 %d 字：%.200s）" % (e, len(t), t)
+        return {}, ai_out.fail_note(t, e)
 
 DRAFT_BEATS_RECIPE = "draft_beats.md"
 DRAFT_SHOTS_RECIPE = "draft_shots.md"
@@ -36,20 +35,6 @@ DRAFT_TEXT_MAX = fields.DRAFT_TEXT_MAX
 
 
 # ── 解析（宁缺毋滥；种类 / 机位归一化） ──────────────────────────
-
-def _norm_option(v, options):
-    """裸值归一（P0·S3-P3③）：命中选项全称（先精确、再「选项含裸值」容错——声明序首个）；
-    无命中 → None（调用侧决定保底——不再对 options 改标点/字序静默失配）。"""
-    t = (v or "").strip()
-    if not t:
-        return None
-    if t in options:
-        return t
-    for o in options:
-        if t in o:
-            return o
-    return None
-
 
 def parse_beats(text):
     """回包 → (节拍列表, 丢弃数, 留痕note)——P0·S3-B2/W16：容器级闸门 + 丢弃有数 + 解析留痕。"""
@@ -107,7 +92,7 @@ def parse_shots(text, nbeats):
             continue
         pos = str(s.get("camera_pos") or "").strip()
         if pos and pos not in CAM_POS:
-            pos = _norm_option(pos, CAM_POS) or pos         # P3③：按 options 归一（精确+容错）
+            pos = ai_out.norm_option(pos, CAM_POS) or pos    # P3③：按 options 归一（精确+容错）
         out.append({"beat": bi,
                     "camera_move": str(s.get("camera_move") or "").strip()[:MOVE_MAX],
                     "camera_pos": pos[:POS_MAX],
@@ -122,18 +107,6 @@ def _strip_dur(v):
     while v and (v[-1] in "sS" or v.endswith("秒")):
         v = v[:-1]
     return v[:DUR_MAX]
-
-
-def _strip_fence(t):
-    t = (t or "").strip()
-    if t.startswith("```"):
-        lines = t.split("\n")
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        t = "\n".join(lines).strip()
-    return t
 
 
 _MEMBER_SPEC = (("shot_size", 80), ("focal", 80), ("camera_move", 80), ("camera_pos", 80),
@@ -262,7 +235,7 @@ class DraftJobs(jobs.JobBoard):
                 t = " ".join(str(t).split())
                 if t:
                     lines.append("- " + t[:LINE_MAX])
-            text = _strip_fence(ai_chat(cfg, [
+            text = ai_out.strip_fence(ai_chat(cfg, [
                 {"role": "system", "content": load_recipe(DRAFT_PROMPT_RECIPE)},
                 {"role": "user", "content": "\n".join(lines)}]))
             if not text:

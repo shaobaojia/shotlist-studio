@@ -12,13 +12,12 @@ import json
 import threading
 import time
 
-from core import ai, db, digest, fields, jobs, ops, recipes
+from core import ai, ai_out, db, digest, fields, jobs, ops, recipes
 
 ACTIONS = {"rewrite": "rewrite.md", "concretize": "concretize.md",
            "strengthen": "strengthen.md", "expand": "expand.md"}
 CMDBAR_RECIPE = "cmdbar.md"
 MAX_TARGETS = fields.AI_MAX_TARGETS
-ITEM_TEXT_MAX = 2000     # 单条改写结果上限（P6①）
 INSTRUCTION_MAX = fields.INSTRUCTION_MAX
 CONTEXT_MAX = 600
 AI_FIELDS = fields.AI_FIELDS              # 单源：core/fields.py（批4/P8）
@@ -110,27 +109,6 @@ def build_user(sc, beats, shots, items):
     return "\n".join(lines)
 
 
-def parse_items(text, want):
-    """模型输出 → {i: after}；want = 允许的序号集合。严格 JSON；宁缺毋滥。
-    §7：解析走 ai.extract_json；失败回 {}（本域「宁缺毋滥」语义）。"""
-    try:
-        data = ai.extract_json(text)
-    except ValueError:
-        return {}
-    out = {}
-    for x in data.get("items") or []:
-        if not isinstance(x, dict):
-            continue
-        try:
-            i = int(x.get("i"))
-        except (TypeError, ValueError):
-            continue
-        after = str(x.get("after") or "").strip()
-        if i in want and after:
-            out[i] = after[:ITEM_TEXT_MAX]
-    return out
-
-
 # ════════ 预览任务（内存级；轮询出稿） ════════
 
 class PreviewJobs(jobs.JobBoard):
@@ -208,7 +186,7 @@ class PreviewJobs(jobs.JobBoard):
             text = ai_chat(cfg, [{"role": "system", "content": recipe},
                                  {"role": "user", "content": user}])
             ms = int((time.time() - t0) * 1000)
-            got = parse_items(text, {it["i"] for it in send})
+            got = ai_out.parse_items(text, {it["i"] for it in send})
             with self._lock:
                 job = self._jobs.get(job_id)
                 if job:
