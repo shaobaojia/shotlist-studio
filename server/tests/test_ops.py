@@ -67,7 +67,7 @@ class TestUpdateField(unittest.TestCase):
         self.assertEqual(con.execute("SELECT director_note FROM shots WHERE id=1").fetchone()["director_note"], "乙")
         self.assertTrue(ops._guarded_set(con, "shots", "director_note", 1, "乙", "丙"))   # 现值相符 → 照写
         h0 = len(ops.history_of(con, scene_id=1))
-        with mock.patch.object(ops, "_guarded_set", return_value=False):
+        with mock.patch.object(ops.write, "_guarded_set", return_value=False):  # 拆包伴随：patch 打定义模块（S1-L1a）
             with self.assertRaises(ValueError):
                 ops.update_field(con, "shots", 1, "director_note", "丁")
         self.assertEqual(len(ops.history_of(con, scene_id=1)), h0)
