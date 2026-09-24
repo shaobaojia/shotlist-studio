@@ -42,21 +42,16 @@ export function renderFilm(view) {
   for (const sc of state.scenes) {
     const tr = el('tr', 'link');
     if (!sc.shot_count) tr.classList.add('dim');
-    const vals = [
-      sc.scene_no,
-      sc.title,
-      sc.value,
-      [sc.pole_start, sc.pole_end].filter(Boolean).join(' → '),
-      sc.turn,
-      sc.pov,
-      (sc.shot_count || 0) + ' 镜 / ' + (sc.beat_count || 0) + ' 节拍',
-    ];
-    vals.forEach(v => {
+    // 按键取值（F1-W18：键即契约；弧线/规模为派生列；COLS 完全派生随 L3）
+    for (const [key] of COLS) {
       const td = el('td');
+      const v = key === 'arc' ? [sc.pole_start, sc.pole_end].filter(Boolean).join(' → ')
+        : key === 'size' ? ((sc.shot_count || 0) + ' 镜 / ' + (sc.beat_count || 0) + ' 节拍')
+        : sc[key];
       td.textContent = fmt(v);
       td.title = td.textContent;
       tr.appendChild(td);
-    });
+    }
     tr.addEventListener('click', () => { location.hash = hashOf(sc.scene_no); });
     tb.appendChild(tr);
   }

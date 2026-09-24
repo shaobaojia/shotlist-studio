@@ -299,11 +299,12 @@ function allShots(data) {
 }
 
 // 活体件同步（M5j）：场景头「规模/总时长」＋挂件带——字段落定后就地刷新（不整页重绘）
+// 活体依赖清单（F1-W9）：消费者关心哪些字段就写在这里（与 syncLive 同处，新增/变更一并维护）。
+// ⚠️ 广播形态为 M5j 拍板事项（DO_NOT_FLAG B3）——本清单只议「依赖归属」，不动广播本身。
+const LIVE_FIELDS = { shots: ['duration', 'shot_size'], beats: ['mood_temp', 'name'] };
 window.addEventListener('shotlist:rows-changed', (ev) => {
   const d = (ev && ev.detail) || {};
-  const hit = (d.table === 'shots' && (d.field === 'duration' || d.field === 'shot_size'))
-           || (d.table === 'beats' && (d.field === 'mood_temp' || d.field === 'name'));
-  if (hit) syncLive();
+  if ((LIVE_FIELDS[d.table] || []).indexOf(d.field) !== -1) syncLive();
 });
 
 // 活体同步（F1-W8）：rAF 合并同帧多次事件；镜头数组单次取用（W22 缓存）
@@ -483,10 +484,10 @@ function sceneHead(sc, data) {
   return head;
 }
 
-function viewTools() {
-  const bar = el('div', 'view-tools');
+// ── viewTools 拆分件（F1-W4）：形态 / 排序提示 / 场务抽屉 ──
 
-  // 视图形态（常驻）
+// 视图形态切换（常驻）
+function buildViewModeSeg() {
   const effFlat = !!sortState || prefs.viewMode === 'flat';
   const seg = el('span', 'seg');
   seg.title = '视图：按节拍分组 / 平铺为一张表（本地记住）';
@@ -501,24 +502,28 @@ function viewTools() {
     });
     seg.appendChild(b);
   });
-  bar.appendChild(seg);
+  return seg;
+}
 
-  // 查找与定位（常驻：筛选 → 镜号跳转 → 未写提示词 → 计数 → 清除）
-  buildFilterTools(bar, fctx);
+// 排序提示条（有排序才出现；无 → null）
+function buildSortInfo() {
+  if (!sortState) return null;
+  const f = fieldOf(sortState.key);
+  const info = el('span', 'sort-info',
+    '视图排序：' + (f ? f.label : sortState.key) + (sortState.dir === 1 ? ' ↑' : ' ↓') + '（仅视图）');
+  const btn = el('button', 'tool-btn', '清除排序');
+  btn.addEventListener('click', () => {
+    sortState = null;
+    fctx.repaint();
+  });
+  const frag = document.createDocumentFragment();
+  frag.appendChild(info);
+  frag.appendChild(btn);
+  return frag;
+}
 
-  if (sortState) {
-    const f = fieldOf(sortState.key);
-    bar.appendChild(el('span', 'sort-info',
-      '视图排序：' + (f ? f.label : sortState.key) + (sortState.dir === 1 ? ' ↑' : ' ↓') + '（仅视图）'));
-    const btn = el('button', 'tool-btn', '清除排序');
-    btn.addEventListener('click', () => {
-      sortState = null;
-      fctx.repaint();
-    });
-    bar.appendChild(btn);
-  }
-
-  // 场务（低频·吸右抽屉）：整理镜号 / 锁定本场 / 自动换行 / 列设置 / 痕迹
+// 场务抽屉（项表 + 处理器表；F1-W4）
+function buildSceneDrawer(bar) {
   const setWrap = (v) => {
     prefs.wrap = v;
     savePrefs();
@@ -569,18 +574,11 @@ function viewTools() {
       fctx.repaint();
     });
   };
-  scriptTools(bar);
-  const ab = el('button', 'tool-btn audit-btn', '审计');
-  ab.title = '审计问题清单（灯＝待处理；每次按设置跑）';
-  ab.addEventListener('click', toggleAuditPanel);
-  bindAuditBtn(ab);
-  bar.appendChild(ab);
-
   const drawer = el('button', 'tool-btn vt-drawer', '场务 ⋯');
   drawer.title = '场务：整理镜号 / 锁定本场 / 自动换行 / 列设置 / 导入台本 / 导出 / 痕迹';
   drawer.addEventListener('click', () => {
     const locked = !!currentData.scene.locked;
-    openMenu(drawer, [
+    const items = [
       { key: 'renum', label: '整理镜号' },
       { key: 'lock', label: locked ? '解锁本场（当前已锁定）' : '锁定本场' },
       { sep: true },
@@ -592,18 +590,46 @@ function viewTools() {
       { key: 'expPage', label: '导出本场 · 静态页' },
       { key: 'expPrint', label: '导出本场 · A4 打印版' },
       { key: 'hist', label: '痕迹' },
-    ], (k) => {
-      if (k === 'renum') doRenumber();
-      else if (k === 'lock') doLockToggle();
-      else if (k === 'wrap') setWrap(!prefs.wrap);
-      else if (k === 'cols') openColsMenu(drawer);
-      else if (k === 'scriptImp') openScriptImport();
-      else if (k === 'expPage') openExport('page');
-      else if (k === 'expPrint') openExport('print');
-      else if (k === 'hist') toggleHistory(currentData.scene);
-    });
+    ];
+    const onPick = {
+      renum: () => doRenumber(),
+      lock: () => doLockToggle(),
+      wrap: () => setWrap(!prefs.wrap),
+      cols: () => openColsMenu(drawer),
+      scriptImp: () => openScriptImport(),
+      expPage: () => openExport('page'),
+      expPrint: () => openExport('print'),
+      hist: () => toggleHistory(currentData.scene),
+    };
+    openMenu(drawer, items, (k) => { const fn = onPick[k]; if (fn) fn(); });
   });
   bar.appendChild(drawer);
+}
+
+function viewTools() {
+  const bar = el('div', 'view-tools');
+
+  // 视图形态（常驻）
+  bar.appendChild(buildViewModeSeg());
+
+  // 查找与定位（常驻：筛选 → 镜号跳转 → 未写提示词 → 计数 → 清除）
+  buildFilterTools(bar, fctx);
+
+  // 排序提示（F1-W4：有排序才出现）
+  const si = buildSortInfo();
+  if (si) bar.appendChild(si);
+
+  // 台本（常驻）
+  scriptTools(bar);
+
+  const ab = el('button', 'tool-btn audit-btn', '审计');
+  ab.title = '审计问题清单（灯＝待处理；每次按设置跑）';
+  ab.addEventListener('click', toggleAuditPanel);
+  bindAuditBtn(ab);
+  bar.appendChild(ab);
+
+  // 场务（低频·吸右抽屉）
+  buildSceneDrawer(bar);
 
   return bar;
 }
