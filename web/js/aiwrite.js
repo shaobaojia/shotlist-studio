@@ -8,7 +8,7 @@ import { commitField } from './edit.js';
 import { refreshShotCell } from './table.js';
 import { state, fieldOf, fieldLabel } from './state.js';
 import { eachSelCell, batchWrite } from './selection.js';
-import { pollJob, cardLife, taskShell, spinHead, cancelBtn, renderFail, POLL, failText, aiApplyItems, joinedToast } from './aicard.js';
+import { cardLife, taskShell, spinHead, cancelBtn, renderFail, POLL, aiApplyItems, runTaskCard } from './aicard.js';
 import { floatEnter, floatLeave, floatClose } from './float.js';
 
 // 动作表单点（F4-W22）：菜单 label 与中文名同源（原 ACTIONS / ACTION_CN 两张同键表）
@@ -241,23 +241,18 @@ function startSingleCard(action, target, o) {
   const start = async () => {
     if (life.isClosed()) return;
     setLoading();
-    const sid = ctx.sceneId ? ctx.sceneId() : null;
-    if (!sid) { setError('找不到当前场次'); return; }
-    try {
-      const res = await api.aiPreview({ scene_id: sid, action: action, targets: [target] });
-      jobId = res.job.id;
-      if (res.job.joined) joinedToast('ai');   // F4-W20：文案单点
-      const r = await pollJob(() => api.aiJob(jobId).then((x) => x.job), {
-        interval: POLL.fast, alive: life.alive, tolerant: true,   // F4-W26：节奏单点
-        onRetry: (n) => { if (!life.isClosed()) head.textContent = '✦ ' + ACTION_CN[action] + ' · 网络重试 ' + n + ' 次…'; },
-      });
-      if (r.st === 'abort') return;
-      if (life.isClosed()) return;
-      if (r.st === 'done') { setDone(r.job); return; }
-      setError(failText(r));   // F4-P8：终态文案单点
-    } catch (err) {
-      if (!life.isClosed()) setError(err.message);
-    }
+    await runTaskCard({                              // F4-L2：编排单点（原逐段手写退役）
+      life: life,
+      sceneId: ctx.sceneId ? ctx.sceneId() : null,
+      interval: POLL.fast,
+      joined: 'ai',
+      start: (sid) => api.aiPreview({ scene_id: sid, action: action, targets: [target] }),
+      poll: (jid) => api.aiJob(jid).then((x) => x.job),
+      onRetry: (n) => { head.textContent = '✦ ' + ACTION_CN[action] + ' · 网络重试 ' + n + ' 次…'; },
+      onLaunched: (jid) => { jobId = jid; },
+      onDone: (job) => setDone(job),
+      onFail: (msg) => setError(msg),
+    });
   };
 
   start();
@@ -401,33 +396,26 @@ function startBatchCard(opts) {
     updateFoot();
   };
 
-  const setLoadingErr = (msg) => {   // F4-W19 小步：就地打洞的函数声明提出 start（全编排收口留 L2）
-    renderFail(htitle, list, foot, titleBase, msg, { close: life.close });
-  };
-
   const start = async () => {
     if (life.isClosed()) return;
     setLoading();
-    const sid = ctx.sceneId ? ctx.sceneId() : null;
-    if (!sid) { setLoadingErr('找不到当前场次'); return; }
-    try {
-      const payload = { scene_id: sid, targets: opts.targets };
-      if (isCmd) payload.instruction = opts.instruction;
-      else payload.action = opts.action;
-      const res = await api.aiPreview(payload);
-      jobId = res.job.id;
-      if (res.job.joined) joinedToast('ai');   // F4-W20：文案单点
-      const r = await pollJob(() => api.aiJob(jobId).then((x) => x.job), {
-        interval: POLL.fast, alive: life.alive, tolerant: true,   // F4-W26：节奏单点
-        onRetry: (n) => { if (!life.isClosed()) htitle.textContent = '✦ ' + titleBase + ' · 网络重试 ' + n + ' 次…'; },
-      });
-      if (r.st === 'abort') return;
-      if (life.isClosed()) return;
-      if (r.st === 'done') { setDone(r.job); return; }
-      setLoadingErr(failText(r));   // F4-P8：终态文案单点
-    } catch (err) {
-      if (!life.isClosed()) setLoadingErr(err.message);
-    }
+    await runTaskCard({                              // F4-L2：编排单点（setLoadingErr 打洞句随编排归位）
+      life: life,
+      sceneId: ctx.sceneId ? ctx.sceneId() : null,
+      interval: POLL.fast,
+      joined: 'ai',
+      start: (sid) => {
+        const payload = { scene_id: sid, targets: opts.targets };
+        if (isCmd) payload.instruction = opts.instruction;
+        else payload.action = opts.action;
+        return api.aiPreview(payload);
+      },
+      poll: (jid) => api.aiJob(jid).then((x) => x.job),
+      onRetry: (n) => { htitle.textContent = '✦ ' + titleBase + ' · 网络重试 ' + n + ' 次…'; },
+      onLaunched: (jid) => { jobId = jid; },
+      onDone: (job) => setDone(job),
+      onFail: (msg) => renderFail(htitle, list, foot, titleBase, msg, { close: life.close }),
+    });
   };
 
   start();

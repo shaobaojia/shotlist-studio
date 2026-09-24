@@ -5,10 +5,11 @@ import { api } from './api.js';
 import { el, toast, durText } from './ui.js';
 import { limits } from './state.js';
 import { recordCustomUndo } from './edit.js';
-import { pollJob, POLL, failText, joinedToast, cardLife } from './aicard.js';
+import { runTaskCard, POLL, cardLife } from './aicard.js';
 import { panelShell, floatEnter, floatLeave, floatClose } from './float.js';
 
 let card = null;      // 场次草稿卡
+let sceneLife = null; // 场次草稿卡轮次令牌（F4-L2：收起/换轮即停——取代 hidden+D.jobId 存活判据）
 let pd = null;        // 组级初稿小卡
 
 // 场次草稿卡会话态（F4-W37：原 _sceneId/_onApplied/_prescript/_jobId/_lastScript/_stage 六键挂 DOM expando）
@@ -19,8 +20,10 @@ export function closeDraftCards() {
   floatClose('draft');
 }
 
-// 场次草稿卡：关闭 = 收起（下一次打开回到表单；轮询经 alive 自行退场）
+// 场次草稿卡：关闭 = 收起（下一次打开回到表单；本轮轮询经 sceneLife 退场，F4-L2）
 function closeScene() {
+  if (sceneLife) sceneLife.close();
+  sceneLife = null;
   if (card) card.hidden = true;
   floatLeave('draft', closeScene);
 }
@@ -81,15 +84,31 @@ async function startRun(script) {
     return;
   }
   D.lastScript = script;
-  try {
-    const res = await api.draft(D.sceneId, script);
-    D.jobId = res.job.id;
-    if (res.job.joined) joinedToast('draft');   // F4-W20：文案单点
-    showRun();
-    pollScene();
-  } catch (err) {
-    toast('启动失败：' + err.message, 'err');
-  }
+  if (sceneLife) sceneLife.close();              // 旧轮作废（F4-L2：原靠 D.jobId 比对）
+  const my = sceneLife = cardLife();
+  await runTaskCard({                            // F4-L2：编排单点（原 startRun+pollScene 逐段手写退役）
+    life: my,
+    sceneId: D.sceneId,
+    interval: POLL.slow,
+    joined: 'draft',
+    startPrefix: '启动失败：',                    // 草稿族文案口径（无卡内失败框架，前缀自明）
+    start: (sid) => api.draft(sid, script),
+    poll: (jid) => api.draftJob(jid).then((x) => x.job),
+    onLaunched: (jid) => { D.jobId = jid; showRun(); },
+    onTick: (j) => {
+      D.stage.textContent = j.stage === 'shots'
+        ? ('② 出镜头行…（骨架 ' + (j.beats_n != null ? j.beats_n : (j.beats || []).length) + ' 拍已就绪）')
+        : '① 分析节拍骨架…';
+    },
+    onDone: (job) => {
+      if (job.error) { toast('生成失败：' + job.error, 'err'); showForm(); return; }
+      showPreview(job);
+    },
+    onFail: (msg, launched) => {                 // 启动失败留表单；终态失败回表单（原口径）
+      toast(msg, 'err');
+      if (launched) showForm();
+    },
+  });
 }
 
 function showRun() {
@@ -98,28 +117,6 @@ function showRun() {
   b.appendChild(el('div', 'form-sec-t', '两段生成中：① 节拍骨架 → ② 镜头行。约 20～60 秒，请稍候……'));
   D.stage = el('div', 'dz-stage', '① 分析节拍骨架…');
   b.appendChild(D.stage);
-}
-
-function pollScene() {
-  const jid = D.jobId;
-  pollJob(() => api.draftJob(jid).then((x) => x.job), {
-    interval: POLL.slow, tolerant: true,   // F4-W26：节奏单点
-    alive: () => !card.hidden && D.jobId === jid,
-    onTick: (j) => {
-      D.stage.textContent = j.stage === 'shots'
-        ? ('② 出镜头行…（骨架 ' + (j.beats_n != null ? j.beats_n : (j.beats || []).length) + ' 拍已就绪）')
-        : '① 分析节拍骨架…';
-    },
-  }).then((r) => {
-    if (r.st === 'abort') return;
-    if (r.st === 'done') {
-      if (r.job.error) { toast('生成失败：' + r.job.error, 'err'); showForm(); return; }
-      showPreview(r.job);
-      return;
-    }
-    toast(failText(r, POLL.slow), 'err');   // F4-P8：终态文案单点（原 err 态静默）
-    showForm();
-  });
 }
 
 function showPreview(j) {
@@ -235,22 +232,19 @@ export function openPromptDraft(opts) {
   const run = async () => {
     if (life) life.close();                        // 旧轮作废
     const my = life = cardLife();
-    try {
-      const res = await api.draftPrompt(opts.sceneId, opts.shotId);
-      if (!my.alive()) return;                     // 卡已被替换/关闭：本轮作废
-      const jid = res.job.id;
-      if (res.job.joined) joinedToast('pdraft');   // F4-W20：文案单点
-      const r = await pollJob(() => api.draftJob(jid).then((x) => x.job), {
-        interval: POLL.slow, tolerant: true,   // F4-W26：节奏单点
-        alive: () => my.alive(),
-      });
-      if (r.st === 'abort') return;
-      if (r.st !== 'done') { stage.textContent = failText(r, POLL.slow); return; }   // F4-P8：终态文案单点
-      if (r.job.error) { stage.textContent = '生成失败：' + r.job.error; return; }
-      renderText(r.job.text);
-    } catch (err) {
-      if (my.alive()) stage.textContent = '启动失败：' + err.message;
-    }
+    await runTaskCard({                            // F4-L2：编排单点
+      life: my,
+      interval: POLL.slow,
+      joined: 'pdraft',
+      startPrefix: '启动失败：',
+      start: () => api.draftPrompt(opts.sceneId, opts.shotId),
+      poll: (jid) => api.draftJob(jid).then((x) => x.job),
+      onDone: (job) => {
+        if (job.error) { stage.textContent = '生成失败：' + job.error; return; }
+        renderText(job.text);
+      },
+      onFail: (msg) => { stage.textContent = msg; },
+    });
   };
   run();
 }

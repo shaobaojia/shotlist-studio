@@ -118,6 +118,51 @@ export function failText(r, interval) {
   return r.err ? r.err.message : '生成失败';
 }
 
+// ── 任务卡编排单点（F4-L2）：guard → 启动 → joined toast → 轮询 → 终态分派 ──
+// 单格/批量/场次草稿/组级初稿 四卡一族共用；各卡只交「发什么请求 / 怎么画界面」两组回调。
+// spec：
+//   life        卡生命周期（关闭即静默退场；缺省不查）
+//   sceneId     场次守卫：提供时须为真值，否则 onFail('找不到当前场次') 且不发请求；真值经 start(sid) 相传
+//   start(sid)  async → 启动请求（返回 {job}）；抛错＝启动失败（startPrefix + message）
+//   startPrefix 启动失败文案前缀（缺省无——草稿族传「启动失败：」，无卡内失败框架需前缀自明）
+//   joined      joined toast 文案 kind（'ai'|'draft'|'pdraft'）
+//   interval    轮询节奏（POLL.fast/slow）
+//   alive()     自定义存活判据（缺省 life.alive）
+//   poll(jid)   取一轮 job（→ job | null）
+//   onRetry(n)  网络重试回调（可选；关闭后不再回调）
+//   onTick(job) 运行中每拍（可选）
+//   onLaunched(jid) 启动成功（可选；jobId 交调用方）
+//   onDone(job) 成功；onFail(msg, launched) 各失败（launched=已进入轮询——启动失败 false、终态失败 true）
+export async function runTaskCard(spec) {
+  const life = spec.life || null;
+  const closed = () => (life ? life.isClosed() : false);
+  const fail = (msg, launched) => { if (!closed()) spec.onFail(msg, launched); };
+  if (closed()) return;
+  if (spec.sceneId !== undefined && !spec.sceneId) { fail('找不到当前场次', false); return; }
+  let jid = null;
+  let launched = false;
+  try {
+    const res = await spec.start(spec.sceneId);
+    jid = res.job.id;
+    if (closed()) return;                       // 启动在途被关：静默退场（不再打扰）
+    if (res.job.joined) joinedToast(spec.joined || 'ai');
+    if (spec.onLaunched) spec.onLaunched(jid);
+    launched = true;
+    const r = await pollJob(() => spec.poll(jid), {
+      interval: spec.interval || POLL.fast,
+      alive: spec.alive || (life ? life.alive : null),
+      tolerant: true,                           // 网络抖动宽容＝四卡原口径
+      onRetry: spec.onRetry ? (n) => { if (!closed()) spec.onRetry(n); } : null,
+      onTick: spec.onTick || null,
+    });
+    if (r.st === 'abort' || closed()) return;
+    if (r.st === 'done') { spec.onDone(r.job); return; }
+    fail(failText(r, spec.interval), true);
+  } catch (err) {
+    fail((spec.startPrefix || '') + err.message, launched);
+  }
+}
+
 // joined 文案表（F4-W20）：服务端同一件事（job.joined），前端三语境三套文案 → 收敛一处
 const JOINED_TEXT = {
   ai: '本场已有生成任务在跑——已并入，出稿一起看',
