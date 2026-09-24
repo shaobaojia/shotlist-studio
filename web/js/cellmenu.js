@@ -3,7 +3,7 @@
 import { api } from './api.js';
 import { toast, isTypingTarget } from './ui.js';
 import { openMenu, menuOpen } from './menu.js';
-import { recordUndo } from './edit.js';
+import { recordUndo, commitField } from './edit.js';
 import { writeClipboard, pasteBlock, toTSV, tableFieldKeys } from './clipboard.js';
 import { refreshShotCell, refreshBeatAction } from './table.js';
 import { isAiField, aiMenu, aiMenuForBeat, targetsFromSel } from './aiwrite.js';
@@ -153,11 +153,11 @@ async function onCellMenuPick(k, td, tr, s, key, table, e) {
   } else if (k === 'clear') {
     const old = s[key] == null ? '' : s[key];
     if (String(old) === '') { toast('本来就是空的'); return; }
-    s[key] = '';
+    s[key] = '';                                   // 乐观
     refreshShotCell(s, key);
     try {
       await api.update('shots', s.id, key, '');
-      recordUndo({ type: 'field', table: 'shots', id: s.id, field: key, restore: old, label: '清空' });
+      commitField({ table: 'shots', id: s.id, field: key, label: '清空' }, old, '');   // 落定单点（P1②）：撤销 + 活体广播（B2）
       toast('已清空');
     } catch (err) {
       s[key] = old;

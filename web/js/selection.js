@@ -302,14 +302,15 @@ export async function cutSelection() {
 
 // 批量写（L7 泛化）：一个写口、一步撤销；默认 shots 域（ctx.getShot + refreshShotCell）。
 // ops: [{id, field, value, table?, …}]（额外键透传给 write）；opts.write 注入写口（默认 api.batch，返回
-// {results:[{id, field, changed, error, restore?}]}）；opts.table / resolve / refresh 换域；
-// opts.done(changedN, errs, ret) / opts.fail(err) 定制收尾（默认文案照旧）。
+// {results:[{id, field, changed, error, restore?}]}）；opts.domain {table, resolve, refresh, verb, noun, place}
+// 换域与文案（W1）；opts.done / opts.fail 定制收尾（默认文案照旧）。
 export async function batchWrite(ops, label, opts) {
   if (!ops.length) return 0;
   opts = opts || {};
-  const table = opts.table || 'shots';
-  const resolve = opts.resolve || ((o) => shotById(o.id));
-  const refresh = opts.refresh || ((s, o) => refreshShotCell(s, o.field));
+  const dom = opts.domain || {};
+  const table = dom.table || 'shots';
+  const resolve = dom.resolve || ((o) => shotById(o.id));
+  const refresh = dom.refresh || ((s, o) => refreshShotCell(s, o.field));
   const write = opts.write || ((items) => api.batch(items.map((o) => ({
     table: o.table || table, id: o.id, field: o.field, value: o.value }))));
   const vmap = {};
@@ -338,15 +339,15 @@ export async function batchWrite(ops, label, opts) {
     recordUndo({
       type: 'custom', label: label || '批量',
       undo: async () => {
-        await api.batch(back.map((o) => ({ table: o.table, id: o.id, field: o.field, value: o.value })));
+        const r2 = await api.batch(back.map((o) => ({ table: o.table, id: o.id, field: o.field, value: o.value })));
+        const e2 = ((r2 || {}).results || []).filter((x) => x.error);
+        if (e2.length) throw new Error(e2.length + ' 项被拒绝');   // W1：撤销失败不再被吞
         for (const o of back) {
           const s = resolve(o);
           if (s) { s[o.field] = o.value; refresh(s, o); }
         }
       },
     });
-  }
-  if (back.length) {
     const fs = {};
     for (const o of back) fs[o.field] = 1;
     for (const f in fs) notifyRowsChanged(table, f, null);
@@ -354,7 +355,7 @@ export async function batchWrite(ops, label, opts) {
   if (opts.done) {
     opts.done(back.length, errs, ret);
   } else {
-    if (back.length) toast('已改 ' + back.length + ' 处（Ctrl+Z 可撤）');
+    if (back.length) toast('已' + (dom.verb || '改') + (dom.place != null ? dom.place + ' ' : ' ') + back.length + ' ' + (dom.noun || '处') + '（Ctrl+Z 可撤）');
     else toast('没有变化');
     if (errs.length) toast(errs.length + ' 项被拒绝', 'err');
   }
@@ -466,13 +467,11 @@ export function applyBeatFieldValue(field, value, label) {
   }
   if (!ops.length) { toast('选中的节拍本来就是这个值'); return; }
   batchWrite(ops, (label || '批量设值') + ' · 节拍', {
-    table: 'beats',
-    resolve: (o) => (ctx && ctx.getBeat ? ctx.getBeat(o.id) : null),
-    refresh: () => { if (ctx && ctx.refreshScene) ctx.refreshScene(); },
-    done: (n2, errs) => {
-      if (n2) toast('已改 ' + n2 + ' 个节拍（Ctrl+Z 可撤）');
-      else toast('没有变化');
-      if (errs.length) toast(errs.length + ' 项被拒绝', 'err');
+    domain: {
+      table: 'beats',
+      resolve: (o) => (ctx && ctx.getBeat ? ctx.getBeat(o.id) : null),
+      refresh: () => { if (ctx && ctx.refreshScene) ctx.refreshScene(); },
+      noun: '个节拍',
     },
   });
 }
@@ -485,13 +484,11 @@ export function applySceneFieldValue(field, value, label) {
   const nv = value == null ? '' : String(value);
   if (cur === nv) { toast('本场本来就是这个值'); return; }
   batchWrite([{ id: sc.id, field: field, value: nv }], (label || '批量设值') + ' · 场景', {
-    table: 'scenes',
-    resolve: () => (ctx && ctx.getScene ? ctx.getScene() : null),
-    refresh: () => { if (ctx && ctx.refreshScene) ctx.refreshScene(); },
-    done: (n2, errs) => {
-      if (n2) toast('已改本场 1 处（Ctrl+Z 可撤）');
-      else toast('没有变化');
-      if (errs.length) toast(errs.length + ' 项被拒绝', 'err');
+    domain: {
+      table: 'scenes',
+      resolve: () => (ctx && ctx.getScene ? ctx.getScene() : null),
+      refresh: () => { if (ctx && ctx.refreshScene) ctx.refreshScene(); },
+      place: '本场', noun: '处',
     },
   });
 }

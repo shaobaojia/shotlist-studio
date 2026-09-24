@@ -2,8 +2,9 @@
 // + TSV 解析/序列化 + Excel 式块粘贴（1×1 写单格；N×M 从锚格向右下铺）。
 import { api } from './api.js';
 import { toast } from './ui.js';
-import { recordUndo } from './edit.js';
 import { isRowVisible } from './filter.js';
+import { refreshShotCell } from './table.js';
+import { batchWrite } from './selection.js';   // P1③：运行时调用；与 selection→clipboard 的复制方向互引，无顶层求值，ESM 安全
 
 export function writeClipboard(text) {
   return new Promise((resolve) => {
@@ -84,7 +85,9 @@ export function tableFieldKeys(table) {
   return keys;
 }
 
-// Excel 式块粘贴。ctx: { getShot(id), refreshCell(id, key) }
+// Excel 式块粘贴（F2-P1③）：写路径收编 selection.batchWrite（一步撤销 + 本地落定 + 活体广播 + 上限口径单点）。
+// 「失败即停」经 opts.write 注入顺序写口保留。ctx: { getShot(id) }
+// 循环引用说明：selection → clipboard（复制）为既有方向；本函数反向用 batchWrite，均为运行时调用、无顶层求值，ESM 安全。
 export async function pasteBlock(anchor, text, ctx) {
   const block = parseTSV(text);
   if (!block.length) { toast('剪贴板没有内容'); return; }
@@ -102,44 +105,31 @@ export async function pasteBlock(anchor, text, ctx) {
     for (let c = 0; c < block[r].length; c++) {
       const ki = col0 + c;
       if (ki >= keys.length) break;
-      jobs.push({ id: Number(trs[row0 + r].dataset.id), key: keys[ki], value: block[r][c] });
+      jobs.push({ id: Number(trs[row0 + r].dataset.id), field: keys[ki], value: block[r][c] });
     }
   }
   if (!jobs.length) { toast('没有可写入的格子'); return; }
   if (jobs.length > 400) { toast('一次最多粘贴 400 格（本次 ' + jobs.length + '）'); return; }
-  const olds = jobs.map((j) => {
-    const s = ctx.getShot(j.id);
-    return { id: j.id, key: j.key, value: j.value, old: s ? (s[j.key] == null ? '' : String(s[j.key])) : '' };
-  });
-  let done = 0;
-  let failed = null;
-  for (const j of olds) {
-    try {
-      await api.update('shots', j.id, j.key, j.value);
-      done++;
-    } catch (err) {
-      failed = err;
-      break;
-    }
-  }
-  for (const j of olds.slice(0, done)) {
-    const s = ctx.getShot(j.id);
-    if (s) s[j.key] = j.value;
-    ctx.refreshCell(j.id, j.key);
-  }
-  if (done) {
-    recordUndo({
-      type: 'custom', label: '粘贴 ' + done + ' 格',
-      undo: async () => {
-        for (const j of olds.slice(0, done)) {
-          await api.update('shots', j.id, j.key, j.old);
-          const s = ctx.getShot(j.id);
-          if (s) s[j.key] = j.old;
-          ctx.refreshCell(j.id, j.key);
+  const smap = new Map();                          // 一次建映射（P1⑤）：避免逐格线性查找
+  for (const j of jobs) if (!smap.has(j.id)) smap.set(j.id, ctx.getShot(j.id));
+  await batchWrite(jobs, '粘贴 ' + jobs.length + ' 格', {
+    write: async (items) => {                      // 保留原「失败即停」语义
+      const results = [];
+      for (const o of items) {
+        try {
+          await api.update('shots', o.id, o.field, o.value);
+          results.push({ id: o.id, field: o.field, changed: true });
+        } catch (err) {
+          results.push({ id: o.id, field: o.field, error: err.message });
+          break;
         }
-      },
-    });
-    toast('已粘贴 ' + done + ' 格');
-  }
-  if (failed) toast('粘贴出错：' + failed.message, 'err');
+      }
+      return { results: results };
+    },
+    domain: {
+      resolve: (o) => smap.get(o.id) || null,
+      refresh: (s, o) => refreshShotCell(s, o.field, table),   // 表作用域（P1⑤）
+      verb: '粘贴', noun: '格',
+    },
+  });
 }

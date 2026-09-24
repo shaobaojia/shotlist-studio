@@ -231,8 +231,8 @@ function renderShotField(td, s, f) {
   td.appendChild(cellContent(f, s));
 }
 
-function refreshDetailValue(s, key) {
-  document.querySelectorAll('tr.detail[data-for="' + s.id + '"] .kv-value[data-field="' + key + '"]')
+function refreshDetailValue(s, key, root) {
+  (root || document).querySelectorAll('tr.detail[data-for="' + s.id + '"] .kv-value[data-field="' + key + '"]')
     .forEach((v) => { v.textContent = fmt(s[key]); });
 }
 
@@ -517,12 +517,12 @@ export function visibleRows(table) {
   return Array.from(table.querySelectorAll('tbody tr.shot')).filter(isRowVisible);
 }
 
-// 单格重画 + 详情区同步（批量/清空/粘贴共用）
-export function refreshShotCell(s, key) {
+// 单格重画 + 详情区同步（批量/清空/粘贴共用）；root 可限定作用域（P1⑤：粘贴走本表）
+export function refreshShotCell(s, key, root) {
   if (!s) return;
   const f = fieldOf(key);
   if (!f) return;
-  document.querySelectorAll('tr.shot[data-id="' + s.id + '"] td[data-field="' + key + '"]')
+  (root || document).querySelectorAll('tr.shot[data-id="' + s.id + '"] td[data-field="' + key + '"]')
     .forEach((td) => { renderShotField(td, s, f); });
-  refreshDetailValue(s, key);
+  refreshDetailValue(s, key, root);
 }

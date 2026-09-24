@@ -54,13 +54,16 @@ export async function undo() {
 
 // 字段落定（L7 单点出口）：写成功后调用——本地模型更新 → 编辑面开着就地显示 + 基线同步（否则渲染格）→ 撤销入栈。
 // cfg: { table, id, field, label, onLocal?, renderCell?, ed? }（写口由调用方负责：api.update / api.aiApply 等）。
-export function commitField(cfg, oldV, newV) {
-  if (cfg.onLocal) cfg.onLocal(newV);
-  if (cfg.ed && cfg.ed.isConnected) {
-    cfg.ed.value = newV;
-    if (cfg.ed._syncBaseline) cfg.ed._syncBaseline(newV);
-  } else if (cfg.renderCell) {
-    cfg.renderCell();
+// opts.apply=false（F2-P1）：调用方已在写前乐观落定（如 save()），只补撤销 + 广播，避免同 tick 二次重绘。
+export function commitField(cfg, oldV, newV, opts) {
+  if (!opts || opts.apply !== false) {
+    if (cfg.onLocal) cfg.onLocal(newV);
+    if (cfg.ed && cfg.ed.isConnected) {
+      cfg.ed.value = newV;
+      if (cfg.ed._syncBaseline) cfg.ed._syncBaseline(newV);
+    } else if (cfg.renderCell) {
+      cfg.renderCell();
+    }
   }
   recordUndo({ type: 'field', table: cfg.table, id: cfg.id, field: cfg.field,
                restore: oldV, label: cfg.label });
@@ -69,9 +72,7 @@ export function commitField(cfg, oldV, newV) {
 
 // 行级落定广播（M5j 活体件）：场景头「规模/总时长」与挂件带等据此就地刷新（不整页重绘）。
 export function notifyRowsChanged(table, field, id) {
-  try {
-    window.dispatchEvent(new CustomEvent('shotlist:rows-changed', { detail: { table: table, field: field, id: id } }));
-  } catch (e) { /* ignore */ }
+  window.dispatchEvent(new CustomEvent('shotlist:rows-changed', { detail: { table: table, field: field, id: id } }));
 }
 
 // cfg: { table, id, field, label, getValue(), onLocal(v), renderCell(),
@@ -170,8 +171,9 @@ function openEditor(host, cfg) {
     closed = true;
     const nv = ed.value;
     host.classList.remove('editing');
-    cfg.renderCell();
+    // F2-W10：提交路径由 save() 乐观落定重画（先按旧值绘一遍是纯浪费）；取消 / 无变化才就地重画
     if (commit && nv !== base) save(cfg, base, nv);
+    else cfg.renderCell();
   };
   ed.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -192,6 +194,8 @@ function openEditor(host, cfg) {
   ed.addEventListener('blur', () => close(true));
 }
 
+// 保存（F2-P1 收编）：乐观落定 → 写口 → 落定单点；失败整体回滚 + 报错。
+// 自定义 save（如焦段归一）自管撤销与广播；缺省写口走 cfg.write（F2-W6 契约点）或 api.update。
 async function save(cfg, oldV, newV) {
   cfg.onLocal(newV);
   cfg.renderCell();
@@ -200,21 +204,25 @@ async function save(cfg, oldV, newV) {
       await cfg.save(oldV, newV);
       notifyRowsChanged(cfg.table, cfg.field, cfg.id);
     } catch (err) {
-      cfg.onLocal(oldV);
-      cfg.renderCell();
+      rollback(cfg, oldV);
       toast('保存失败：' + err.message, 'err');
     }
     return;
   }
+  const write = cfg.write || ((field, v) => api.update(cfg.table, cfg.id, field, v));
   try {
-    await api.update(cfg.table, cfg.id, cfg.field, newV);
-    recordUndo({ type: 'field', table: cfg.table, id: cfg.id, field: cfg.field, restore: oldV, label: cfg.label });
-    notifyRowsChanged(cfg.table, cfg.field, cfg.id);
+    await write(cfg.field, newV);
+    commitField(cfg, oldV, newV, { apply: false });   // 撤销 + 广播单点（乐观落定已走完，不重复重绘）
   } catch (err) {
-    cfg.onLocal(oldV);
-    cfg.renderCell();
+    rollback(cfg, oldV);
     toast('保存失败：' + err.message, 'err');
   }
+}
+
+// 失败回滚（F2-P1）：模型与渲染回旧值（原三处逐字重复段）
+function rollback(cfg, oldV) {
+  cfg.onLocal(oldV);
+  cfg.renderCell();
 }
 
 // 打开时：贴合格子现有高度（不触发强制回流、不推挤下方行）；下一帧校正防裁切
