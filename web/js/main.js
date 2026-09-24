@@ -1,7 +1,7 @@
 // 入口：导航（场次标签：切换 / 拖动排序 / 右键副本·删除 / 末尾＋加场）、路由、全局快捷键。
 import { api } from './api.js';
 import { state } from './state.js';
-import { el, toast } from './ui.js';
+import { el, toast, once, installWheelGuards } from './ui.js';
 import { parseHash, sceneNo, hashOf } from './route.js';
 import { renderFilm } from './film.js';
 import { renderScene, refreshCurrentView } from './scene.js';
@@ -11,7 +11,6 @@ import { bindSettingsBtn } from './settings.js';
 import { bindCmdK } from './cmdk.js';
 import { closeAuditPanel } from './auditpanel.js';
 
-let navBound = false;
 let dragChip = null;
 
 function buildNav() {
@@ -36,8 +35,7 @@ function buildNav() {
 }
 
 function bindNavOnce(nav) {
-  if (navBound) return;
-  navBound = true;
+  if (!once('scene-nav')) return;
 
   nav.addEventListener('contextmenu', (e) => {
     const chip = e.target.closest ? e.target.closest('.chip') : null;
@@ -242,6 +240,7 @@ async function boot() {
     syncTopbarVar();
     bindSettingsBtn(document.getElementById('settings-btn'));
     bindCmdK();
+    installWheelGuards();   // 滚轮护栏：起手即装（F1-B4：曾只在提示词抽屉首开时装）
     if (window.ResizeObserver) { try { new ResizeObserver(syncTopbarVar).observe(document.getElementById('topbar')); } catch (e) { /* ignore */ } }
     window.addEventListener('hashchange', route);
     window.addEventListener('shotlist:film-changed', () => { reloadFilm(); });

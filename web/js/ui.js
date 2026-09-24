@@ -10,6 +10,15 @@ export function fmt(v) {
   return String(v);
 }
 
+// 一次性装配（F1-W21 单点）：同一 key 只执行一次（监听绑定/初始化）
+const ONCE = {};
+export function once(key, fn) {
+  if (ONCE[key]) return false;
+  ONCE[key] = true;
+  fn();
+  return true;
+}
+
 let _toastTimer = null;
 
 export function toast(msg, kind) {
@@ -78,18 +87,20 @@ function wheelCanConsume(el0, dy) {
   if (max <= 0) return false;
   return dy < 0 ? el0.scrollTop > 0 : el0.scrollTop < max - 1;
 }
+// 装点＝boot()（F1-B4：原先只在提示词抽屉首开时安装，此前窗口没有护栏）；
+// 名单＝全部浮层滚动根（scene-freeze 已不挂 .float-card，天然不匹配）
 export function installWheelGuards() {
-  if (installWheelGuards.__on) return;
-  installWheelGuards.__on = true;
-  document.addEventListener('wheel', (ev) => {
-    const t = ev.target;
-    if (!(t instanceof Element) || !ev.deltaY) return;
-    if (!t.closest('.drawer, .bcard, .menu')) return;
-    let n = t;
-    while (n && n !== document.documentElement) {
-      if (wheelCanConsume(n, ev.deltaY)) return;     // 有可消费的内层 → 放行
-      n = n.parentElement;
-    }
-    ev.preventDefault();                             // 无处可滚 → 吞掉，防穿到分镜表
-  }, { passive: false, capture: true });
+  once('wheel-guards', () => {
+    document.addEventListener('wheel', (ev) => {
+      const t = ev.target;
+      if (!(t instanceof Element) || !ev.deltaY) return;
+      if (!t.closest('.drawer, .bcard, .menu, .float-card, #hist-panel')) return;
+      let n = t;
+      while (n && n !== document.documentElement) {
+        if (wheelCanConsume(n, ev.deltaY)) return;     // 有可消费的内层 → 放行
+        n = n.parentElement;
+      }
+      ev.preventDefault();                             // 无处可滚 → 吞掉，防穿到分镜表
+    }, { passive: false, capture: true });
+  });
 }

@@ -3,7 +3,7 @@
 import { api } from './api.js';
 import { state, fieldOf } from './state.js';
 import { hashOf, isCurrentScene } from './route.js';
-import { el, fmt, toast } from './ui.js';
+import { el, fmt, toast, once } from './ui.js';
 import { JIWEI_LEGEND } from './cells.js';
 import { buildTable, beatSection } from './table.js';
 import { bindCellMenu } from './cellmenu.js';
@@ -130,8 +130,7 @@ export async function refreshCurrentView() {
 
 // ── 拖动接线（事件委托，绑定一次） ──
 function bindDragOnce(view) {
-  if (view.dataset.dragBound === '1') return;
-  view.dataset.dragBound = '1';
+  if (!once('view-drag')) return;
   bindDrag(view, {
     data: () => currentData,
     enabled: () => !sortState && !filterActive() && prefs.viewMode !== 'flat',
@@ -228,7 +227,7 @@ function paintScene(view) {
   view.classList.toggle('wrap-off', !prefs.wrap);
   document.documentElement.style.setProperty('--dock-h', '0px');
 
-  const freeze = el('div', 'scene-freeze float-card');
+  const freeze = el('div', 'scene-freeze');   // 在流吸顶场头≠浮层：不挂 .float-card（F1-B5）
   freeze.appendChild(sceneHead(data.scene, data));
   view.appendChild(freeze);
   const shots = allShots(data);
