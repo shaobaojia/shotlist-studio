@@ -4,11 +4,11 @@ import { api } from './api.js';
 import { toast, isTypingTarget } from './ui.js';
 import { openMenu, menuOpen } from './menu.js';
 import { recordUndo, commitField } from './edit.js';
-import { writeClipboard, pasteBlock, toTSV, tableFieldKeys } from './clipboard.js';
-import { refreshShotCell, refreshBeatAction } from './table.js';
+import { copyText, pasteBlock, toTSV } from './clipboard.js';
+import { refreshShotCell, refreshBeatAction, writableFieldKeys } from './table.js';
 import { isAiField, aiMenu, aiMenuForBeat, targetsFromSel } from './aiwrite.js';
 import { joinPrevGroup, canJoinPrev } from './hotbox.js';
-import { current as selCurrent, inCell, copySelectionTSV, clearSelectionCells, tlCell, rectOf, selectCell } from './selection.js';
+import { current as selCurrent, inCell, copySelection, clearSelectionCells, tlCell, rectOf, selectCell } from './selection.js';
 
 let shotsOf = null;
 let beatsOf = null;
@@ -110,7 +110,7 @@ function openSelMenu(td, tr, e) {
   ];
   openMenu({ x: e.clientX, y: e.clientY }, items, (k) => {
     if (k === 'ai') { aiMenu({ x: e.clientX, y: e.clientY }, aiT); return; }
-    if (k === 'copySel') { copySelectionTSV(); return; }
+    if (k === 'copySel') { copySelection(); return; }
     if (k === 'clearSel') { clearSelectionCells(); return; }
     if (k === 'deleteRows') { deleteSelectedRows(); return; }
     if (k === 'insertAbove' || k === 'insertBelow') {
@@ -131,12 +131,10 @@ async function onCellMenuPick(k, td, tr, s, key, table, e) {
     return;
   }
   if (k === 'copyCell') {
-    const ok = await writeClipboard(s[key] == null ? '' : String(s[key]));
-    toast(ok ? '已复制本格' : '复制失败：浏览器限制', ok ? '' : 'err');
+    await copyText(s[key] == null ? '' : String(s[key]), '已复制本格');
   } else if (k === 'copyRow') {
-    const keys = tableFieldKeys(table);
-    const ok = await writeClipboard(toTSV([keys.map((x) => (s[x] == null ? '' : String(s[x])))]));
-    toast(ok ? '已复制整行' : '复制失败：浏览器限制', ok ? '' : 'err');
+    const keys = writableFieldKeys(table);
+    await copyText(toTSV([keys.map((x) => (s[x] == null ? '' : String(s[x])))]), '已复制整行');
   } else if (k === 'duplicate') {
     await duplicateRow(s);
   } else if (k === 'insertAbove') {

@@ -2,7 +2,7 @@
 import { state, fieldOf } from './state.js';
 import { el } from './ui.js';
 import { openMenu } from './menu.js';
-import { onChange, current, clearSel, rectOf, copySelectionTSV, clearSelectionCells, applyFieldValue, applyBeatFieldValue, applySceneFieldValue, selBeatIds } from './selection.js';
+import { onChange, current, clearSel, rectOf, copySelection, clearSelectionCells, applyFieldValue, applyBeatFieldValue, applySceneFieldValue, selBeatIds } from './selection.js';
 import { deleteSelectedRows } from './cellmenu.js';
 import { mergeShotsByIds, detachShotsByIds } from './hotbox.js';
 import { runCmdbarFromSel } from './aiwrite.js';
@@ -162,7 +162,7 @@ function build() {
 
   const cp = el('button', 'tool-btn', '复制');
   cp.title = '复制选区（TSV，可直接贴进 Excel）';
-  cp.addEventListener('click', () => copySelectionTSV());
+  cp.addEventListener('click', () => copySelection());
   bar.appendChild(cp);
   delBtn = el('button', 'tool-btn', '删除行');
   delBtn.title = '删除选中行（可撤销 · Ctrl+Z）';

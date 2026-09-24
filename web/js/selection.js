@@ -4,7 +4,7 @@
 import { api } from './api.js';
 import { toast, isFloatTarget, isTypingTarget } from './ui.js';
 import { recordUndo, notifyRowsChanged, editorHandleAt } from './edit.js';
-import { writeClipboard, toTSV } from './clipboard.js';
+import { toTSV, copyText } from './clipboard.js';
 import { refreshShotCell, visibleRows } from './table.js';
 import { menuOpen } from './menu.js';
 
@@ -370,13 +370,8 @@ export function copySelection() {
     }
     vals.push(row);
   });
-  return writeClipboard(toTSV(vals)).then((ok) => {
-    toast(ok ? ('已复制 ' + vals.length + ' 行 × ' + (rc.c2 - rc.c1 + 1) + ' 列') : '复制失败：浏览器限制', ok ? '' : 'err');
-    return ok;
-  });
+  return copyText(toTSV(vals), '已复制 ' + vals.length + ' 行 × ' + (rc.c2 - rc.c1 + 1) + ' 列');
 }
-
-export function copySelectionTSV() { copySelection(); }
 
 // 剪切（M5 批2）：复制成功才清格（防丢数据）；清空走既有批量写（一步撤销）
 export async function cutSelection() {
@@ -384,6 +379,14 @@ export async function cutSelection() {
   const ok = await copySelection();
   if (!ok) return;
   clearSelectionCells();
+}
+
+// 批量上限单点（F2-P4④）：与服务端 handlers.py batch 上限一致（「一次最多 400 项」）
+const MAX_BATCH = 400;
+export function overCap(n, unit) {
+  if (n <= MAX_BATCH) return false;
+  toast('一次最多 ' + MAX_BATCH + ' ' + unit + '（本次 ' + n + '）', 'err');
+  return true;
 }
 
 // 批量写（L7 泛化）：一个写口、一步撤销；默认 shots 域（ctx.getShot + refreshShotCell）。
@@ -456,7 +459,7 @@ export function clearSelectionCells() {
     if (cur !== '') ops.push({ id: s.id, field: k, value: '' });
   });
   if (!ops.length) { toast('选中的格子本来就是空的'); return; }
-  if (ops.length > 400) { toast('一次最多 400 格（本次 ' + ops.length + '）', 'err'); return; }
+  if (overCap(ops.length, '格')) return;
   batchWrite(ops, '清空选区');
 }
 
@@ -494,7 +497,7 @@ function fillDown() {
     }
   }, from, rc.r2);
   if (!ops.length) { toast('没有需要填充的变化'); return; }
-  if (ops.length > 400) { toast('一次最多 400 格（本次 ' + ops.length + '）', 'err'); return; }
+  if (overCap(ops.length, '格')) return;
   batchWrite(ops, '向下填充');
 }
 
@@ -507,7 +510,7 @@ export function applyFieldValue(field, value, label) {
     if (cur !== nv) ops.push({ id: s.id, field: field, value: nv });
   });
   if (!ops.length) { toast('选中的镜头本来就是这个值'); return; }
-  if (ops.length > 400) { toast('一次最多 400 行', 'err'); return; }
+  if (overCap(ops.length, '行')) return;
   batchWrite(ops, label || '批量设值');
 }
 

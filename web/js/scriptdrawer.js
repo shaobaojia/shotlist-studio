@@ -5,7 +5,7 @@ import { api } from './api.js';
 import { el, toast, growTextarea, isFloatTarget, isTypingTarget } from './ui.js';
 import { menuEl } from './menu.js';
 import { recordUndo } from './edit.js';
-import { writeClipboard } from './clipboard.js';
+import { copyText } from './clipboard.js';
 import { createDrawer } from './drawer.js';
 import { panelShell, floatEnter, floatLeave } from './float.js';
 
@@ -185,7 +185,7 @@ function onCopy() {
   if (!S.scene) return;
   const text = S.scene.script == null ? '' : String(S.scene.script);
   if (!text.trim()) { toast('本场还没有台本可复制'); return; }
-  writeClipboard(text).then((ok) => toast(ok ? '已复制台本全文' : '复制失败：浏览器限制，请手动选择'));
+  copyText(text, '已复制台本全文', '复制失败：浏览器限制，请手动选择');
 }
 
 function onOutside(e) {

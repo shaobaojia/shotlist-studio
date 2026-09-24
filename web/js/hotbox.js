@@ -8,7 +8,7 @@ import { openMenu, menuEl } from './menu.js';
 import { recordUndo, undo as globalUndo } from './edit.js';
 import { storeAsBlock, byPosition } from './blocks.js';
 import { initBlockCard, cardLayout, cardSetActive, cardSetInsert } from './blockcard.js';
-import { writeClipboard } from './clipboard.js';
+import { writeClipboard, copyText } from './clipboard.js';
 import { aiTextMenu } from './aiwrite.js';
 import { openPromptDraft } from './draft.js';
 import { createDrawer } from './drawer.js';
@@ -493,9 +493,7 @@ function wireEditorEvents(box, s) {
       } else if (k === 'all') {
         copyPrevInto(ta, s);
       } else if (k === 'copy') {
-        writeClipboard(selText()).then((ok) => {
-          toast(ok ? '已复制选中文字' : '复制失败：浏览器限制，请用 Ctrl+C');
-        });
+        copyText(selText(), '已复制选中文字', '复制失败：浏览器限制，请用 Ctrl+C');
       } else if (k === 'cut') {
         const s0 = ta.selectionStart;
         const s1 = ta.selectionEnd;
@@ -594,9 +592,7 @@ function onCopy() {
   const g = groupOf(s, ctx.groupsMap());
   const text = (g && g.text) ? String(g.text).replace(/\[[^\]]*\]/g, '') : '';
   if (!text.trim()) { toast('还没有提示词可复制'); return; }
-  writeClipboard(text).then((ok) => {
-    toast(ok ? '已复制全文（已过滤 [镜XX] 注释）' : '复制失败：浏览器限制，请手动选择');
-  });
+  copyText(text, '已复制全文（已过滤 [镜XX] 注释）', '复制失败：浏览器限制，请手动选择');
 }
 
 function onOutside(e) {

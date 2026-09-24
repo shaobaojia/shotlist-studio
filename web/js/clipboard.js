@@ -2,9 +2,8 @@
 // + TSV 解析/序列化 + Excel 式块粘贴（1×1 写单格；N×M 从锚格向右下铺）。
 import { api } from './api.js';
 import { toast } from './ui.js';
-import { isRowVisible } from './filter.js';
-import { refreshShotCell } from './table.js';
-import { batchWrite } from './selection.js';   // P1③：运行时调用；与 selection→clipboard 的复制方向互引，无顶层求值，ESM 安全
+import { refreshShotCell, visibleRows, writableFieldKeys } from './table.js';
+import { batchWrite, overCap } from './selection.js';   // P1③：运行时调用；与 selection→clipboard 的复制方向互引，无顶层求值，ESM 安全
 
 export function writeClipboard(text) {
   return new Promise((resolve) => {
@@ -34,7 +33,7 @@ function fallbackCopy(text) {
 }
 
 // TSV 解析：支持 "..." 引号包裹（内可含 \t \n，"" 转义）
-export function parseTSV(text) {
+function parseTSV(text) {
   let s = String(text == null ? '' : text).replace(/\r\n?/g, '\n');
   if (s.endsWith('\n')) s = s.slice(0, -1);
   if (!s) return [];
@@ -70,19 +69,11 @@ export function toTSV(rows) {
   return rows.map((r) => r.map(esc).join('\t')).join('\n');
 }
 
-// 当前表（当前表头顺序）的可写字段 key 清单（WYSIWYG）
-export function tableFieldKeys(table) {
-  const tr = table.querySelector('tbody tr.shot');
-  if (!tr) return [];
-  const keys = [];
-  tr.querySelectorAll('td').forEach((td) => {
-    const m = /(?:^|\s)cell-([A-Za-z0-9_]+)(?:\s|$)/.exec(td.className || '');
-    if (!m) return;
-    const k = m[1];
-    if (k === 'toggle' || k === 'beatref' || k === 'prompt') return;
-    keys.push(k);
-  });
-  return keys;
+// 复制单点（F2-P4③）：写剪贴板 + 统一失败文案与分级；返回成功与否
+export async function copyText(text, okMsg, failMsg) {
+  const ok = await writeClipboard(text);
+  toast(ok ? (okMsg || '已复制') : (failMsg || '复制失败：浏览器限制'), ok ? '' : 'err');
+  return ok;
 }
 
 // Excel 式块粘贴（F2-P1③）：写路径收编 selection.batchWrite（一步撤销 + 本地落定 + 活体广播 + 上限口径单点）。
@@ -93,10 +84,10 @@ export async function pasteBlock(anchor, text, ctx) {
   if (!block.length) { toast('剪贴板没有内容'); return; }
   const table = anchor.td.closest('table');
   if (!table) return;
-  const keys = tableFieldKeys(table);
+  const keys = writableFieldKeys(table);
   const col0 = keys.indexOf(anchor.field);
   if (col0 === -1) { toast('这个格子不支持粘贴'); return; }
-  const trs = Array.from(table.querySelectorAll('tbody tr.shot')).filter(isRowVisible);
+  const trs = visibleRows(table);
   const row0 = trs.indexOf(anchor.tr);
   if (row0 === -1) { toast('找不到粘贴起点'); return; }
   const jobs = [];
@@ -109,7 +100,7 @@ export async function pasteBlock(anchor, text, ctx) {
     }
   }
   if (!jobs.length) { toast('没有可写入的格子'); return; }
-  if (jobs.length > 400) { toast('一次最多粘贴 400 格（本次 ' + jobs.length + '）'); return; }
+  if (overCap(jobs.length, '格')) return;
   const smap = new Map();                          // 一次建映射（P1⑤）：避免逐格线性查找
   for (const j of jobs) if (!smap.has(j.id)) smap.set(j.id, ctx.getShot(j.id));
   await batchWrite(jobs, '粘贴 ' + jobs.length + ' 格', {

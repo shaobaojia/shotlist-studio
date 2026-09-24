@@ -7,7 +7,7 @@ import { openMenu } from './menu.js';
 import {
   blocksData, blockOp, moveMenu, togglePin, deleteBlockWithUndo,
 } from './blocks.js';
-import { writeClipboard } from './clipboard.js';
+import { copyText } from './clipboard.js';
 
 // ── 行内提交协议（与旧管理器同款）：Enter（单行）/ Ctrl+Enter（多行）提交 · Esc 取消 · 点外提交；
 //    提交失败调 unlock() 保留输入可重试 ──
@@ -169,7 +169,7 @@ export function attachRowMenu(ctx, rowEl, b) {
     ], (k) => {
       if (k === 'ins') ctx.insert(String(b.text == null ? '' : b.text), b);
       else if (k === 'copy') {
-        writeClipboard(String(b.text == null ? '' : b.text)).then((ok) => toast(ok ? '已复制块文本' : '复制失败：浏览器限制'));
+        copyText(String(b.text == null ? '' : b.text), '已复制块文本');
       }
       else if (k === 'pin') togglePin(b);
       else if (k === 'move') moveMenu(pt, b);

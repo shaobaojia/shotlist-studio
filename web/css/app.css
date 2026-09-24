@@ -141,7 +141,7 @@ table.shots td.cell-beatref { color: var(--dim); font-size: 12px; }
 .lens-tech { font-size: 11px; color: var(--dim); }
 .audio-music { color: var(--dlg); font-size: 12px; }
 .audio-sfx { color: #6b7d8f; font-size: 11px; }
-table.shots td.prompt-cell { color: var(--dim); font-family: var(--mono); font-size: 11.5px; }
+table.shots td.cell-prompt { color: var(--dim); font-family: var(--mono); font-size: 11.5px; }   /* F2-W22：类名归一到 cell-* 派生 */
 
 /* 展开详情 = 行下的一张小平张 */
 tr.detail td { background: #fffef9; border: 1px solid var(--rule); border-radius: 8px; padding: 12px 14px 14px; white-space: normal; }

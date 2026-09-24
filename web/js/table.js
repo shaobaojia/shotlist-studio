@@ -197,7 +197,6 @@ function shotCell(s, f, groups, data, hook) {
   }
   if (f.type === 'prompt') {
     const g = s.prompt_group_id != null ? groups[s.prompt_group_id] : null;
-    td.classList.add('prompt-cell');
     paintPromptCell(td, g, data);
     td.addEventListener('click', (e) => { e.stopPropagation(); openPromptDrawer(s.id, { toggle: true }); });   // W13
     return td;
@@ -515,6 +514,14 @@ function walkCell(td, dir) {
 
 export function visibleRows(table) {
   return Array.from(table.querySelectorAll('tbody tr.shot')).filter(isRowVisible);
+}
+
+// 本表可写字段键清单（F2-P4①）：结构事实＝「有 data-field 即可写」
+// （伪列 toggle/beatref/prompt 均无此属性，天然排除——不再手抄排除表）
+export function writableFieldKeys(table) {
+  const tr = table.querySelector('tbody tr.shot');
+  if (!tr) return [];
+  return Array.from(tr.querySelectorAll('td[data-field]')).map((td) => td.dataset.field);
 }
 
 // 单格重画 + 详情区同步（批量/清空/粘贴共用）；root 可限定作用域（P1⑤：粘贴走本表）
