@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """电玩城全量迁入：飞书导出 + 价值弧线 + s010 分析稿 → data/studio.db（schema v1）。
 
-用法：python3 scripts/migrate_feishu.py [--reset] [--export DIR] [--db PATH]
+用法：python3 scripts/archive/migrate_feishu.py [--reset] [--export DIR] [--db PATH]
+（归档工具：一次性迁移，人工运行；已从一条命令管线除名——见 scripts/archive/README.md）
 说明：
   - 输入默认取 data/archive/feishu-<最新>/ 的 storyboard.json / analysis.json
   - 场景价值字段来自 价值弧线_s010-s080.md；s010 节拍明细来自 s010_第一场_分析.md
@@ -12,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from collections import Counter
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]  # scripts/archive/ 深一层（归档后修正）
 DEFAULT_ARC = "/volume1/主目录/Hermes/read/Vault/分镜/电玩城的大小孩/价值弧线_s010-s080.md"
 DEFAULT_S010 = "/volume1/主目录/Hermes/read/Vault/分镜/电玩城的大小孩/s010_第一场_分析.md"
 FILM_TITLE = "电玩城的大小孩"

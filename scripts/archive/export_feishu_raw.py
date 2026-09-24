@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """飞书两表全量导出留档（纯保险）。
 
-用法：python3 scripts/export_feishu_raw.py [--config PATH] [--out DIR]
+用法：python3 scripts/archive/export_feishu_raw.py [--config PATH] [--out DIR]
+（归档工具：保险性原始数据导出，人工运行；已从一条命令管线除名）
 
 - 凭证读库外配置（默认老库目录 feishu_config.json），不打印、不入库
 - 分页拉取 分镜表 / 分析表 全部记录 + 字段定义，原样 JSON 落盘
@@ -10,7 +11,7 @@ import argparse, json, sys, urllib.request
 from datetime import datetime, date
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]  # scripts/archive/ 深一层（归档后修正）
 sys.path.insert(0, str(ROOT / "server"))
 
 from core import fsutil  # noqa: E402
@@ -82,7 +83,7 @@ def main():
     cfg = json.loads(Path(args.config).read_text(encoding="utf-8"))
     app = cfg["app_token"]
     tables = {"storyboard": cfg["table_id"], "analysis": cfg["analysis_table_id"]}
-    out = Path(args.out) if args.out else Path(__file__).resolve().parents[1] / "data" / "archive" / ("feishu-" + date.today().isoformat())
+    out = Path(args.out) if args.out else Path(__file__).resolve().parents[2] / "data" / "archive" / ("feishu-" + date.today().isoformat())
     out.mkdir(parents=True, exist_ok=True)
 
     token = get_token(cfg)

@@ -8,13 +8,13 @@ Python 3 stdlib 零依赖 + SQLite + 原生 HTML/JS（无构建链）。
 ## 一条命令管线
 
 ```
-bash scripts/studio.sh {run|stop|status|test|migrate|export|seed}
+bash scripts/studio.sh {run|stop|status|test|export|seed}
 ```
 
 - run / stop / status —— 服务（:8094；静态页与 API 同一服务；脱会话常驻、崩溃自动重拉）
 - test —— 全量无头回归（uv + pytest；首跑需联网一次装 pytest）
 - export —— 全库 JSON 导出 → `data/exports/`（数据安全留档；密钥自动脱敏；保留最近 20 份）
-- migrate —— 飞书迁移脚本（一次性；参数透传）
+- （已归档）migrate / feishu_raw —— 一次性工具移至 `scripts/archive/`（人工运行，不在管线内）
 - seed —— 种子载入（`seed {blocks|audit|recipes}`；写库前自动留每日快照）
 
 ## 文档
