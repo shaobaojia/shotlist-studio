@@ -181,7 +181,8 @@ export function flashIntoView(node, opts) {
 // 浮层豁免单点（批4/L1 + F1-B5）：结构浮层根名单；点外监听一律走这里，勿再手抄。
 // .scene-freeze（吸顶场头）是在流页面元素、不挂 .float-card：天然不算浮层（F1-B5）。
 // opts.prompt：附加「提示词预览 / 提示词列」（抽屉点外判定用）。
-const FLOAT_SEL = '.float-card, .menu, #draft-card, #hist-panel, #sel-bar, .ai-diff, [id^="ai-"], .cmdk-mask, .audit-card-tr, .audit-card';   // F3-W28 收敛；F5-P1：⌘K 模态层 + 审计行内卡（退浮层类，改走名单）入豁免
+const FLOAT_ROLL_ROOTS = '.menu, .float-card, #hist-panel, .cmdk-mask';   // F5-L2：具备内滚的浮层根（滚轮护栏名单＝本常量，与浮层名单同源防漂移）
+const FLOAT_SEL = FLOAT_ROLL_ROOTS + ', #draft-card, #sel-bar, .ai-diff, [id^="ai-"], .audit-card-tr, .audit-card';   // F3-W28 收敛；F5-P1：⌘K 模态层 + 审计行内卡（退浮层类，改走名单）入豁免
 const FLOAT_SEL_PROMPT = FLOAT_SEL + ', .prompt-box, .cell-prompt';
 export function isFloatTarget(t, opts) {
   if (!t || !t.closest) return false;
@@ -299,7 +300,7 @@ export function installWheelGuards() {
     document.addEventListener('wheel', (ev) => {
       const t = ev.target;
       if (!(t instanceof Element) || !ev.deltaY) return;
-      if (!t.closest('.menu, .float-card, #hist-panel, .cmdk-mask')) return;   // F5-P1：⌘K 入护栏名单
+      if (!t.closest(FLOAT_ROLL_ROOTS)) return;   // F5-L2：护栏名单＝浮层名单子集（同源）
       let n = t;
       while (n && n !== document.documentElement) {
         if (wheelCanConsume(n, ev.deltaY)) return;     // 有可消费的内层 → 放行
