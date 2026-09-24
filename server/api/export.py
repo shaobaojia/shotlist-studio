@@ -6,7 +6,7 @@
 import re
 from urllib.parse import quote
 
-from core import db
+from api import _guard as guard
 from core import export as core_export
 
 
@@ -21,16 +21,17 @@ def export_get(m, q):
     scene_no = (q.get("scene") or [""])[0].strip()
     fmt = (q.get("format") or ["page"])[0].strip()
     if fmt not in core_export.FORMATS:
-        return {"error": "format 只支持 %s" % " / ".join(sorted(core_export.FORMATS))}, 400
+        return guard.err("format 只支持 %s" % " / ".join(sorted(core_export.FORMATS)))
     if not scene_no:
-        return {"error": "缺 scene 参数"}, 400
-    con = db.open_ro()
-    try:
-        ex = core_export.build_scene_html(con, scene_no, fmt)
-    except core_export.SceneNotFound:
-        return {"error": "场景不存在：%s" % scene_no}, 404
-    finally:
-        con.close()
-    body = ex.html.encode("utf-8")
-    return {"__attachment__": {"body": body, "ctype": "text/html; charset=utf-8",
-                               "extra": {"Content-Disposition": _disp(ex.name_ascii, ex.name_utf8)}}}, 200
+        return guard.err("缺 scene 参数")
+
+    def run(con):
+        try:
+            ex = core_export.build_scene_html(con, scene_no, fmt)
+        except core_export.SceneNotFound:
+            return guard.err("场景不存在：%s" % scene_no, 404)
+        body = ex.html.encode("utf-8")
+        return {"__attachment__": {"body": body, "ctype": "text/html; charset=utf-8",
+                                   "extra": {"Content-Disposition": _disp(ex.name_ascii, ex.name_utf8)}}}, 200
+
+    return guard.read(run)

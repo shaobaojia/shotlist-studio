@@ -5,8 +5,9 @@
 域值校验（文本/名称非空与长度）仍在域层连接内执行（历史口径，见 W26）；域层错误统一
 ValueError → 400。分发骨架走 api._guard.run_actions（P0·S3-P7②）；body 由边界归一（app.py，S1-P4②）。
 """
-from api import _guard, params
-from core import db, fields, prompts
+from api import _guard as guard
+from api import params
+from core import fields, prompts
 
 
 def _req_int(body, key):
@@ -14,15 +15,14 @@ def _req_int(body, key):
     try:
         return params.req_int(body, key), None
     except ValueError as e:
-        return None, ({"error": str(e)}, 400)
+        return None, guard.err(str(e))
 
 
 def blocks(m, q):
-    con = db.open_ro()
-    try:
+    def run(con):
         return prompts.blocks_state(con), 200
-    finally:
-        con.close()
+
+    return guard.read(run)
 
 
 # ── 块库（P7②：分发表） ──
@@ -35,11 +35,11 @@ def _block_precheck(body, action):
             return None, err
         ctx["rid"] = rid
     if action == "pin" and not isinstance(body.get("pinned"), bool):
-        return None, ({"error": "参数不完整（pinned）"}, 400)
+        return None, guard.err("参数不完整（pinned）")
     if action == "update":
         data = {k: body[k] for k in fields.BLOCK_WRITE_KEYS if k in body}
         if not data:                                   # L10：投影空检查前移（坏请求不触写连接）
-            return None, ({"error": "参数不完整（无可写字段）"}, 400)
+            return None, guard.err("参数不完整（无可写字段）")
         ctx["data"] = data
     return ctx, None
 
@@ -64,7 +64,7 @@ BLOCK_SPEC = {
 
 def blocks_op(m, body, q):
     """块库写操作：create / update / delete / move / pin / cat_create / cat_update / cat_delete / cat_move。"""
-    return _guard.run_actions(BLOCK_SPEC, body, _block_precheck)
+    return guard.run_actions(BLOCK_SPEC, body, _block_precheck)
 
 
 # ── 提示词组（P7②：分发表） ──
@@ -95,4 +95,4 @@ PROMPT_SPEC = {
 
 def prompt_op(m, body, q):
     """提示词组写操作：set_text / merge / detach / split / restore。"""
-    return _guard.run_actions(PROMPT_SPEC, body, _prompt_precheck, action=m.group(1))
+    return guard.run_actions(PROMPT_SPEC, body, _prompt_precheck, action=m.group(1))
