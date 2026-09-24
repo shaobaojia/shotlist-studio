@@ -335,7 +335,7 @@ class TestAuditThinLayer(unittest.TestCase):
         ):
             res, code = api_audit.issue_op(None, {"action": "recheck", "id": iid}, {})
         self.assertEqual(code, 200)
-        self.assertTrue(res["joined"])
+        self.assertTrue(res["job"]["joined"])             # W14：joined 收进 job
         self.assertEqual(st.call_args[0][0], 1)                  # 同场
         self.assertEqual(st.call_args[1].get("only"), [rid])     # 只重查该规则
 

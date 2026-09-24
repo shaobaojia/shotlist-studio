@@ -64,10 +64,10 @@ function jobStats(job) {
   if (!job || !job.rules) return out;
   out.total = job.rules.length;
   for (const r of job.rules) {
-    if (r.state === 'done' || r.state === 'error' || r.state === 'skipped') out.done++;
-    if (r.state === 'running') out.running.push(r.title);
-    if (r.state === 'error') out.errors.push(r);
-    if (r.state === 'skipped') out.skipped.push(r.title);
+    if (r.state === audit.STATE_DONE || r.state === audit.STATE_ERROR || r.state === audit.STATE_SKIPPED) out.done++;
+    if (r.state === audit.STATE_RUNNING) out.running.push(r.title);
+    if (r.state === audit.STATE_ERROR) out.errors.push(r);
+    if (r.state === audit.STATE_SKIPPED) out.skipped.push(r.title);
   }
   return out;
 }
@@ -112,7 +112,8 @@ function render() {
   } else {
     const c = (st && st.counts) || audit.EMPTY_COUNTS;
     const sk = skipNote(s);
-    statsEl.textContent = '未处理 ' + c.open + ' · 已修 ' + c.fixed + ' · 豁免 ' + c.waived + (sk ? ' · ' + sk : '');
+    const orph = (st && st.orphan) ? ' · 孤儿 ' + st.orphan : '';   // P0·S2-W11：孤儿可观测（低调）
+    statsEl.textContent = '未处理 ' + c.open + ' · 已修 ' + c.fixed + ' · 豁免 ' + c.waived + orph + (sk ? ' · ' + sk : '');
     statsEl.classList.remove('busy');
     runBtn.disabled = false;
     runBtn.textContent = '跑审计';
@@ -139,7 +140,7 @@ function render() {
   listEl.appendChild(el('div', 'ap-hint', '点条目 → 跳到该处并展开问题卡（去改 · 重检 · 豁免）'));
   const bucket = { open: [], fixed: [], waived: [] };   // F5-P5③：一次分桶（原三趟 filter）
   for (const i of shown) { const b = bucket[i.status]; if (b) b.push(i); }
-  const groups = [['open', '未处理'], ['fixed', '已修'], ['waived', '豁免']];
+  const groups = [[audit.STATUS_OPEN, '未处理'], [audit.STATUS_FIXED, '已修'], [audit.STATUS_WAIVED, '豁免']];
   for (const pair of groups) {
     const items = bucket[pair[0]];
     if (!items.length) continue;
@@ -149,14 +150,14 @@ function render() {
 }
 
 function item(i, data) {
-  const d = el('div', 'ap-item' + (i.status !== 'open' ? ' done' : ''));
+  const d = el('div', 'ap-item' + (i.status !== audit.STATUS_OPEN ? ' done' : ''));
   d.dataset.issueId = i.id;
   d.appendChild(el('span', audit.issueKindCls(i.kind, 'ap-dot')));   // F5-W17：种类类名单点
   d.appendChild(el('span', 'ap-tag', audit.carrierText(i.carrier, i.target_id, data)));
   const t = el('div', 'ap-t');
   t.appendChild(el('b', 'ap-rule', i.rule_title));
   t.appendChild(document.createTextNode('　' + (i.message || '')));
-  if (i.status === 'waived' && i.waive_note) t.appendChild(el('span', 'ap-note', audit.waiveText(i)));   // F5-W17：文案单点
+  if (i.status === audit.STATUS_WAIVED && i.waive_note) t.appendChild(el('span', 'ap-note', audit.waiveText(i)));   // F5-W17：文案单点
   d.appendChild(t);
   d.appendChild(el('span', 'ap-time', fmtStamp(i.updated_at, 'md-hm')));
   d.title = '点击跳到该处并展开问题卡';

@@ -1,6 +1,7 @@
 """提示词与块库接口层（M3）：GET /api/blocks；POST /api/blocks（action 分发）；POST /api/prompt/<action>。
 
 纪律：参数守卫先于写连接（坏请求不触发写路径）；域层错误统一 ValueError → 400。"""
+from api import params
 from core import db, prompts
 
 BLOCK_ACTIONS = {"create", "update", "delete", "move", "pin",
@@ -10,11 +11,11 @@ PROMPT_ACTIONS = {"set_text", "merge", "detach", "split", "restore"}
 
 
 def _req_int(body, key):
-    """取整型参数；缺失/类型不对：返回 (None, 错误响应)。"""
-    v = body.get(key)
-    if not prompts.is_id(v):
-        return None, ({"error": "参数不完整（%s）" % key}, 400)
-    return v, None
+    """取整型参数；缺失/类型不对：返回 (None, 错误响应)。——P0·S2-P3（逻辑走 params.req_int 单点）"""
+    try:
+        return params.req_int(body, key), None
+    except ValueError as e:
+        return None, ({"error": str(e)}, 400)
 
 
 def blocks(m, q):

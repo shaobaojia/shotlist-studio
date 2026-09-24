@@ -79,11 +79,13 @@ def attach_group_members(groups, shots):
         g["member_ids"] = [s["id"] for s in mem]
 
 
-def scene_ctx(con, scene_id):
-    """整场装载（单点）：(场行 dict, beats, shots)，均位置序；场不存在 → None——P0·S1-W1。"""
+def scene_ctx(con, scene_id, cols=None):
+    """整场装载（单点）：(场行 dict, beats, shots)，均位置序；场不存在 → None——P0·S1-W1。
+    cols：shots 列投影（None = 全列）——P0·S2-W13。"""
     sc = con.execute("SELECT * FROM scenes WHERE id=?", (scene_id,)).fetchone()
     if not sc:
         return None
+    scols = ", ".join(cols) if cols else "*"
     return (dict(sc),
             _dicts(con.execute("SELECT * FROM beats WHERE scene_id=? ORDER BY position, id", (scene_id,))),
-            _dicts(con.execute("SELECT * FROM shots WHERE scene_id=? ORDER BY position, id", (scene_id,))))
+            _dicts(con.execute("SELECT %s FROM shots WHERE scene_id=? ORDER BY position, id" % scols, (scene_id,))))

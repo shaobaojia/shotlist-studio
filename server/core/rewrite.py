@@ -104,21 +104,13 @@ def build_user(sc, beats, shots, items):
     return "\n".join(lines)
 
 
-def _extract_json(text):
-    t = (text or "").strip()
-    i, j = t.find("{"), t.rfind("}")
-    if i < 0 or j <= i:
-        return {}
-    try:
-        obj = json.loads(t[i:j + 1])
-        return obj if isinstance(obj, dict) else {}
-    except Exception:
-        return {}
-
-
 def parse_items(text, want):
-    """模型输出 → {i: after}；want = 允许的序号集合。严格 JSON；宁缺毋滥。"""
-    data = _extract_json(text)
+    """模型输出 → {i: after}；want = 允许的序号集合。严格 JSON；宁缺毋滥。
+    §7：解析走 ai.extract_json；失败回 {}（本域「宁缺毋滥」语义）。"""
+    try:
+        data = ai.extract_json(text)
+    except ValueError:
+        return {}
     out = {}
     for x in data.get("items") or []:
         if not isinstance(x, dict):

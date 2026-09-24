@@ -13,7 +13,14 @@ from core import audit, digest, draft  # noqa: E402
 SCENE = {'id': 1, 'film_id': 1, 'position': 0, 'scene_no': 's010', 'title': '第一场', 'value': '控制', 'pole_start': '维持', 'pole_end': '失控', 'locked': 0}
 BEATS = [{'id': 11, 'scene_id': 1, 'position': 0, 'beat_no': '1', 'name': '被领导打压', 'kind': '⚪ 填充', 'outside_action': '领导来电话吼骂', 'reaction': '男人僵住', 'closed_loop': '是'}, {'id': 12, 'scene_id': 1, 'position': 1, 'beat_no': '2', 'name': '误发消息', 'kind': '🔴 戏点', 'outside_action': '消息误发', 'reaction': '男人瞳孔收缩', 'closed_loop': '是'}]
 SHOTS = [{'id': 101, 'scene_id': 1, 'beat_id': 11, 'position': 0, 'shot_no': '01', 'camera_move': '固定', 'camera_pos': '🔴 正打', 'spatial': '左前沙发', 'shot_fn': '叙事镜', 'shot_size': '中景', 'blocking': '男人看着手机\n手指滑动', 'dialogue': '', 'duration': '3.5', 'audio': '空调底噪'}, {'id': 102, 'scene_id': 1, 'beat_id': 12, 'position': 1, 'shot_no': '02', 'camera_move': '推', 'camera_pos': '🟡 反打', 'spatial': '', 'shot_fn': '反应镜', 'shot_size': '近景', 'blocking': '男人盯着屏幕', 'dialogue': '「喂？」', 'duration': '2', 'audio': '—'}]
-CTX = {"scene": SCENE, "beats": BEATS, "shots": SHOTS}
+def _by_beat(shots):
+    g = {}
+    for s in shots:
+        g.setdefault(s["beat_id"], []).append(s)
+    return g
+
+
+CTX = {"scene": SCENE, "beats": BEATS, "shots": SHOTS, "shots_by_beat": _by_beat(SHOTS)}
 
 
 class TestSceneLine(unittest.TestCase):

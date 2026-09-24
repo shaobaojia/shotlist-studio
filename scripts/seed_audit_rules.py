@@ -14,6 +14,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
 from core import audit, db  # noqa: E402
 
 
+def _print_rule(r, prefix="", extra=None):
+    """规则摘录打印单点（--list 与种子后共用）——P0·S2-W20。"""
+    line = prefix + "#%s [%s] %s key=%s" % (r["id"], r["kind"], r["title"], r.get("key"))
+    if extra:
+        line += extra(r)
+    print(line)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--reset", action="store_true")
@@ -23,8 +31,7 @@ def main():
         con = db.connect()
         try:
             for r in audit.rules_state(con):
-                print("#%s [%s] %s key=%s enabled=%s params=%s" % (
-                    r["id"], r["kind"], r["title"], r.get("key"), r["enabled"], r["params"]))
+                _print_rule(r, extra=lambda x: " enabled=%s params=%s" % (x["enabled"], x["params"]))
         finally:
             con.close()
         return
@@ -34,7 +41,7 @@ def main():
         rows = audit.rules_state(con)
         print("种子完成：新增 %d，现共 %d 条" % (added, len(rows)))
         for r in rows:
-            print("  #%s [%s] %s key=%s" % (r["id"], r["kind"], r["title"], r.get("key")))
+            _print_rule(r, prefix="  ")
     finally:
         con.close()
 

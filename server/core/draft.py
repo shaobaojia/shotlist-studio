@@ -10,7 +10,15 @@ import threading
 import time
 
 from . import ai, db, digest, fields, jobs, ops
-from .rewrite import _extract_json, load_recipe
+from .rewrite import load_recipe
+
+
+def _obj_or_empty(text):
+    """回包 → dict；不可解析回 {}（草稿域「宁缺毋滥」语义；解析走 ai.extract_json）——P0·S2-§7。"""
+    try:
+        return ai.extract_json(text)
+    except ValueError:
+        return {}
 
 DRAFT_BEATS_RECIPE = "draft_beats.md"
 DRAFT_SHOTS_RECIPE = "draft_shots.md"
@@ -24,7 +32,7 @@ CAM_POS = ("🔴 正打", "🟡 反打", "🟢 第三人称", "🔵 空间环境
 # ── 解析（宁缺毋滥；种类 / 机位归一化） ──────────────────────────
 
 def parse_beats(text):
-    obj = _extract_json(text)
+    obj = _obj_or_empty(text)
     out = []
     for b in (obj.get("beats") or [])[:MAX_BEATS]:
         if not isinstance(b, dict):
@@ -44,7 +52,7 @@ def parse_beats(text):
 
 
 def parse_shots(text, nbeats):
-    obj = _extract_json(text)
+    obj = _obj_or_empty(text)
     out = []
     for s in (obj.get("shots") or [])[:MAX_SHOTS]:
         if not isinstance(s, dict):

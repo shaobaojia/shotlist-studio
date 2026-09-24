@@ -19,6 +19,15 @@ let lastKey = '';      // 状态指纹：无变化不 notify（省徽标/清单�
 const EMPTY_COUNTS = { open: 0, fixed: 0, waived: 0 };   // F5-W15：空计数单点（本件与 auditpanel 共用）
 export { EMPTY_COUNTS };
 
+// 状态词汇（P0·S2-W8）：与后端 core/audit.py 常量逐字一致——跨层手抄收敛到本单点。
+export const STATUS_OPEN = 'open';
+export const STATUS_FIXED = 'fixed';
+export const STATUS_WAIVED = 'waived';
+export const STATE_RUNNING = 'running';
+export const STATE_DONE = 'done';
+export const STATE_ERROR = 'error';
+export const STATE_SKIPPED = 'skipped';
+
 export function initAudit(c) { ctx = c; }
 export function getState() { return cur; }
 export function getData() { return ctx && ctx.getData(); }
@@ -110,7 +119,7 @@ function decorate(data) {
   if (!cur || cur.sceneId !== data.scene.id) { openKey = null; return; }
   const by = {};
   for (const i of cur.issues) {
-    if (i.status !== 'open') continue;
+    if (i.status !== STATUS_OPEN) continue;
     const k = i.carrier + ':' + i.target_id;
     (by[k] = by[k] || []).push(i);
   }
@@ -209,19 +218,19 @@ function buildCard(carrier, target, list, data) {
 }
 
 function issueRow(i, data) {
-  const row = el('div', 'ac-item' + (i.status === 'fixed' ? ' done' : '') + (i.status === 'waived' ? ' waived' : ''));
+  const row = el('div', 'ac-item' + (i.status === STATUS_FIXED ? ' done' : '') + (i.status === STATUS_WAIVED ? ' waived' : ''));
   row.appendChild(el('span', issueKindCls(i.kind, 'rule-chip'), i.rule_title));
   const txt = el('div', 'ac-txt');
   txt.appendChild(document.createTextNode(i.message || ''));
-  if (i.status === 'waived') txt.appendChild(el('span', 'ac-note', '（' + waiveText(i) + '）'));
-  if (i.status === 'fixed') txt.appendChild(el('span', 'ac-note', '（已修 · 重跑若再现会重新点亮）'));
+  if (i.status === STATUS_WAIVED) txt.appendChild(el('span', 'ac-note', '（' + waiveText(i) + '）'));
+  if (i.status === STATUS_FIXED) txt.appendChild(el('span', 'ac-note', '（已修 · 重跑若再现会重新点亮）'));
   row.appendChild(txt);
   const acts = el('div', 'ac-acts');
-  if (i.status === 'open') {
+  if (i.status === STATUS_OPEN) {
     if (i.carrier === 'shot' || i.carrier === 'beat') acts.appendChild(qb('去改', () => goEdit(i, data)));
     acts.appendChild(qb('重检', () => recheckIssue(i)));
     acts.appendChild(qb('豁免', () => doWaive(i)));
-  } else if (i.status === 'waived') {
+  } else if (i.status === STATUS_WAIVED) {
     acts.appendChild(qb('取消豁免', () => doUnwaive(i)));
     acts.appendChild(qb(i.waive_note ? '改理由' : '加理由', () => editWaiveNote(i, row)));
   }
@@ -283,7 +292,7 @@ export async function runAudit() {
     const res = await api.auditRun(data.scene.id);
     seq++;                       // 本地权威写：作废在飞旧读
     if (cur && cur.sceneId === data.scene.id) cur.job = res.job;
-    else cur = { sceneId: data.scene.id, issues: [], counts: { open: 0, fixed: 0, waived: 0 }, job: res.job };
+    else cur = { sceneId: data.scene.id, issues: [], counts: EMPTY_COUNTS, job: res.job };
     notify();
     startPoll();
     toast(res.job && res.job.joined ? '审计正在进行——本轮先等它跑完（完成即出结果）' : '审计已开始（按设置跑）');
@@ -297,7 +306,7 @@ export async function recheckIssue(i) {
     if (cur && res.job) cur.job = res.job;
     notify();
     startPoll();
-    if (res.joined) {
+    if (res.job && res.job.joined) {
       toast('本场审计正在跑——重检未单独排上，请等本轮完成后再点一次', 'err');
     } else {
       toast('重检中：' + i.rule_title + ' …');

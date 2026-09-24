@@ -31,6 +31,32 @@ def scene_line_terse(sc):
     return SEP.join(parts)
 
 
+def beats_lines(beats, kind=False, fields=(), extra=None):
+    """节拍行（单点，P0·S2-W7）：「节拍 N 名」（kind=True 加 [kind]）；
+    fields=((列, 标签, 截宽),…) 追加「 ｜ 标签：值」段；extra(beat, seg) 兜底追加（rhythm 时长段）。"""
+    out = []
+    for b in beats:
+        seg = "节拍 %s" % b.get("beat_no")
+        if kind:
+            seg += " [%s]" % (b.get("kind") or "—")
+        if b.get("name"):
+            seg += " " + b["name"]
+        for col, label, w in fields:
+            v = (b.get(col) or "").strip()
+            if v:
+                seg += " ｜ %s：%s" % (label, v[:w])
+        if extra is not None:
+            seg = extra(b, seg)
+        out.append(seg)
+    return out
+
+
+def dur_num(v):
+    """时长原文 → float 或 None（纯数才认；唯一「时长→均值」口径）——P0·S2-W7（注记2）。"""
+    t = (v or "").strip()
+    return float(t) if t.replace(".", "", 1).isdigit() else None
+
+
 def shots_lines(rows, spec, style="draft"):
     """行集速览（单点）：每行「镜NN ｜ 标签值 ｜ …」；spec 控制字段、顺序、截宽与标签（LABELS）。"""
     colon = ": " if style == "audit" else ":"
