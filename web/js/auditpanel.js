@@ -79,6 +79,13 @@ function skipNote(s) {
 let _renT = 0;
 function renderSoon() { clearTimeout(_renT); _renT = setTimeout(render, 120); }   // F5-P5③：搜索防抖
 
+// F5-L4：清「本轮未复用」的 .ap-item（筛选隐藏/已消失——原全量重建天然清理）
+function sweepItems(used) {
+  for (const n of [...listEl.children]) {
+    if (n.classList.contains('ap-item') && !used.has(n)) n.remove();
+  }
+}
+
 function renderBtn() {
   if (!btn) return;
   const st = audit.getState();
@@ -123,8 +130,12 @@ function render() {
   errEl.hidden = !errs.length;
   if (errs.length) errEl.textContent = '⚠ ' + errs.map((r) => r.title + '：' + (r.error || '失败')).join('；');
 
-  listEl.textContent = '';
-  if (!st) { const d0 = el('div', 'ap-empty'); stageText(d0, 'loading'); listEl.appendChild(d0); return; }
+  // F5-L4：清单按 issueId 差量——同 id 条目复用（sig 变才重建单条），仅序/组重排
+  const pool = new Map();
+  for (const n of listEl.querySelectorAll('.ap-item[data-issue-id]')) pool.set(String(n.dataset.issueId), n);
+  for (const n of [...listEl.children]) if (!n.classList.contains('ap-item')) n.remove();
+  const used = new Set();
+  if (!st) { sweepItems(used); const d0 = el('div', 'ap-empty'); stageText(d0, 'loading'); listEl.appendChild(d0); return; }
   const issues = st.issues || [];
   const q = (inputEl.value || '').trim();
   const shown = issues.filter((i) => {
@@ -134,6 +145,7 @@ function render() {
     return hay.indexOf(q) !== -1;
   });
   if (!shown.length) {
+    sweepItems(used);
     listEl.appendChild(el('div', 'ap-empty', q ? '（没有匹配的问题）' : '暂无问题——点「跑审计」开跑'));
     return;
   }
@@ -145,13 +157,30 @@ function render() {
     const items = bucket[pair[0]];
     if (!items.length) continue;
     listEl.appendChild(el('div', 'ap-grp', pair[1] + ' · ' + items.length));
-    for (const i of items) listEl.appendChild(item(i, data));
+    for (const i of items) {                         // F5-L4：池复用在位（appendChild 只做移动）
+      const old = pool.get(String(i.id));
+      const node = old ? updItem(old, i, data) : item(i, data);
+      used.add(node);
+      listEl.appendChild(node);
+    }
   }
+  sweepItems(used);
 }
 
+function sigOf(i, data) {   // F5-L4：条目签名（任一可显示面变即重建该条）
+  return i.status + '|' + (i.updated_at || '') + '|' + (i.waive_note || '') + '|' + (i.message || '') + '|' + audit.carrierText(i.carrier, i.target_id, data);
+}
+function updItem(n, i, data) {
+  const sig = sigOf(i, data);
+  if (n.dataset.sig === sig) return n;               // 无变化：原节点（appendChild 仅移动）
+  const fresh = item(i, data);
+  n.replaceWith(fresh);
+  return fresh;
+}
 function item(i, data) {
   const d = el('div', 'ap-item' + (i.status !== audit.STATUS_OPEN ? ' done' : ''));
   d.dataset.issueId = i.id;
+  d.dataset.sig = sigOf(i, data);
   d.appendChild(el('span', audit.issueKindCls(i.kind, 'ap-dot')));   // F5-W17：种类类名单点
   d.appendChild(el('span', 'ap-tag', audit.carrierText(i.carrier, i.target_id, data)));
   const t = el('div', 'ap-t');

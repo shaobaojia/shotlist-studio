@@ -12,7 +12,8 @@ let cur = null;        // { sceneId, issues, counts, job }
 let fetchedAt = 0;
 let pollTimer = null;
 let openKey = null;    // 'carrier:target' 当前展开的问题卡
-let seq = 0;           // 读序号：在飞读取遇更新的读/本地写即作废（M5 乱序覆盖）
+let readSeq = 0;       // 读包序：更新的读即作废旧包（M5 乱序覆盖）
+let writeEpoch = 0;    // 写纪元：本地权威写递增 → 在飞读包落地即作废（F5-L4：seq 拆分）
 let inFlight = false;  // 轮询单飞（上一拍未回不叠发）
 let lastKey = '';      // 状态指纹：无变化不 notify（省徽标/清单重刷）
 
@@ -37,36 +38,60 @@ export function onPainted(data) {
   const changed = !cur || cur.sceneId !== data.scene.id;
   if (changed) { cur = null; openKey = null; lastKey = ''; stopPoll(); }   // 换场即停旧轮询
   decorate(data);
-  fetchState(data.scene.id, changed);   // 换场强制重拉（限流闸门不得吃掉换场那一次）
+  readState(data.scene.id, { bypassThrottle: changed, source: 'paint' });   // 换场强制重拉（节流闸门不得吃掉换场那一次）
 }
 
-function fetchState(sid, force) {
+// 状态读取单入口（F5-L4）：节流（bypassThrottle 跳过）+ 读包序 + 写纪元守卫 + 落地/notify/起轮询全在一处。
+// 调用：onPainted（换场 bypassThrottle）/ 轮询 tick（bypassThrottle+source:'poll'）。
+function readState(sid, opts) {
+  const o = opts || {};
   const now = Date.now();
-  if (!force && now - fetchedAt < 2500) return Promise.resolve();
+  if (!o.bypassThrottle && now - fetchedAt < 2500) return Promise.resolve(null);
   fetchedAt = now;
-  const my = ++seq;
+  const my = ++readSeq, we = writeEpoch;
   return api.audit(sid).then((res) => {
-    if (my !== seq) return;                       // 已有更新的读/本地写：本包作废
+    if (my !== readSeq || we !== writeEpoch) return null;   // 更新的读/本地写：本包作废
+    if (!cur || cur.sceneId !== sid) return null;
     const d = ctx && ctx.getData();
-    if (!d || d.scene.id !== sid) return;
+    if (!d || d.scene.id !== sid) return null;
+    _warnedTick = false;
     const st = applyRead(res, sid);
     decorate(d);
-    if (st.changed) notify();
+    if (st.changed) diffNotify(st.prev, cur.issues, { source: o.source || 'read' });
     if (cur.job && cur.job.running) startPoll();
-  }).catch((err) => { console.warn('[audit] 状态拉取失败', err); });   // F5-P6④：不再静默
+    return st;
+  }).catch((err) => {   // F5-P6④：不再静默（只记一次，防每 2s 刷屏）
+    if (!_warnedTick) { _warnedTick = true; console.warn('[audit] 状态拉取失败，将自动重试', err); }
+    return null;
+  });
 }
 
-function notify() { window.dispatchEvent(new CustomEvent('shotlist:audit-changed')); }
+function notify(delta) { window.dispatchEvent(new CustomEvent('shotlist:audit-changed', { detail: delta || null })); }
 
-// 读取落地（fetchState/tick 共用）：返回 { changed, wasRunning }
+// 增量载荷（F5-L4）：prev/next 全量 diff → added/changed/removed 的 issue id 集（消费方按需差量）
+function diffNotify(prevIssues, nextIssues, extra) {
+  const o = new Map((prevIssues || []).map((i) => [String(i.id), i]));
+  const added = [], changed = [], removed = [];
+  for (const it of (nextIssues || [])) {
+    const p = o.get(String(it.id));
+    if (!p) added.push(it.id);
+    else if (p.status !== it.status || (p.updated_at || '') !== (it.updated_at || '') || (p.waive_note || '') !== (it.waive_note || '')) changed.push(it.id);
+    o.delete(String(it.id));   // 存续（无论变否）都从旧集移除——否则结尾会被误收进 removed
+  }
+  for (const v of o.values()) removed.push(v.id);
+  notify(Object.assign({ added: added, changed: changed, removed: removed }, extra || {}));
+}
+
+// 读取落地（readState 单入口调）：返回 { changed, wasRunning, prev }
 function applyRead(res, sid) {
   const wasRunning = !!(cur && cur.job && cur.job.running);
+  const prev = cur ? cur.issues : [];           // F5-L4：差量基准（notify 载荷用）
   cur = { sceneId: sid, issues: res.issues || [], counts: res.counts || EMPTY_COUNTS,
           job: res.job || null };
   const key = stateKey();
   const changed = key !== lastKey;
   lastKey = key;
-  return { changed: changed, wasRunning: wasRunning };
+  return { changed: changed, wasRunning: wasRunning, prev: prev };
 }
 
 function stateKey() {
@@ -109,14 +134,16 @@ function resolveCarrier(carrier, target, data, rowIdx) {
            hidden: !isRowVisible(row) };
 }
 
+const lampByKey = new Map();   // F5-L4：key → { el, count, msg }（灯按 key 差量：等值复用，原每轮全删全建）
 function decorate(data) {
-  const marks = document.querySelectorAll('.audit-lamp, tr.shot.has-lamp');   // F5-P5①：一趟扫（原三趟）
-  for (const n of marks) {
-    if (n.classList.contains('audit-lamp')) n.remove();
-    else n.classList.remove('has-lamp');
-  }
+  for (const n of document.querySelectorAll('tr.shot.has-lamp')) n.classList.remove('has-lamp');
   clearCards();
-  if (!cur || cur.sceneId !== data.scene.id) { openKey = null; return; }
+  if (!cur || cur.sceneId !== data.scene.id) {
+    for (const v of lampByKey.values()) v.el.remove();
+    lampByKey.clear();
+    openKey = null;
+    return;
+  }
   const by = {};
   for (const i of cur.issues) {
     if (i.status !== STATUS_OPEN) continue;
@@ -125,13 +152,28 @@ function decorate(data) {
   }
   const rowIdx = new Map();   // F5-P5①：行索引一次建（原每 key 各查 DOM）
   for (const tr of document.querySelectorAll('tr.shot[data-id]')) rowIdx.set(tr.dataset.id, tr);
+  const keep = new Set();
   for (const k of Object.keys(by)) {
     const [carrier, target] = splitKey(k);
     const r = resolveCarrier(carrier, target, data, rowIdx);
     if (!r) continue;
-    r.lamp.appendChild(buildLamp(k, by[k].length, by[k][0].message || ''));
+    keep.add(k);
+    const count = by[k].length, msg = by[k][0].message || '';
+    const old = lampByKey.get(k);
+    if (!(old && old.count === count && old.msg === msg && old.el.isConnected)) {   // 等值且仍在树上：复用
+      if (old) old.el.remove();
+      const lamp = buildLamp(k, count, msg);
+      r.lamp.appendChild(lamp);
+      lampByKey.set(k, { el: lamp, count: count, msg: msg });
+    }
     if (r.row) r.row.classList.add('has-lamp');
   }
+  for (const [k, v] of [...lampByKey]) {             // 消失 key：清
+    if (!keep.has(k)) { v.el.remove(); lampByKey.delete(k); }
+  }
+  const tracked = new Set();                          // 兜底：Map 外残灯（行重建等）
+  for (const v of lampByKey.values()) tracked.add(v.el);
+  for (const n of document.querySelectorAll('.audit-lamp')) if (!tracked.has(n)) n.remove();
   if (openKey && openCard(openKey, data, true) === CARD_GONE) openKey = null;   // 暂时隐藏（筛选）不清 openKey
 }
 
@@ -290,10 +332,10 @@ export async function runAudit() {
   if (!data) return;
   try {
     const res = await api.auditRun(data.scene.id);
-    seq++;                       // 本地权威写：作废在飞旧读
+    writeEpoch++;                // 本地权威写：作废在飞旧读
     if (cur && cur.sceneId === data.scene.id) cur.job = res.job;
     else cur = { sceneId: data.scene.id, issues: [], counts: EMPTY_COUNTS, job: res.job };
-    notify();
+    notify({ source: 'write', jobChanged: true });
     startPoll();
     toast(res.job && res.job.joined ? '审计正在进行——本轮先等它跑完（完成即出结果）' : '审计已开始（按设置跑）');
   } catch (err) { failToast('启动失败', err); }
@@ -302,9 +344,9 @@ export async function runAudit() {
 export async function recheckIssue(i) {
   try {
     const res = await api.auditIssue({ id: i.id, action: 'recheck' });
-    seq++;                       // 本地权威写：作废在飞旧读
+    writeEpoch++;                // 本地权威写：作废在飞旧读
     if (cur && res.job) cur.job = res.job;
-    notify();
+    notify({ source: 'write', jobChanged: true });
     startPoll();
     if (res.job && res.job.joined) {
       toast('本场审计正在跑——重检未单独排上，请等本轮完成后再点一次', 'err');
@@ -358,12 +400,13 @@ function editWaiveNote(i, rowEl) {
 
 function applyIssues(res) {
   if (!cur) return;
-  seq++;                       // 本地权威写：作废在飞旧读（防旧快照复活）
+  writeEpoch++;                // 本地权威写：作废在飞旧读（防旧快照复活）
+  const prev = cur.issues;
   cur.issues = res.issues || [];
   cur.counts = res.counts || cur.counts;
   const data = ctx && ctx.getData();
   if (data) decorate(data);
-  notify();
+  diffNotify(prev, cur.issues, { source: 'write' });
   refreshHistoryIfOpen();
 }
 
@@ -380,26 +423,16 @@ async function tick() {
   if (document.hidden) return;                 // 后台页不拉；回前台立即补一拍
   if (inFlight) { _pending = true; return; }   // 单飞：上一拍未回——记待补（F5-P6①）
   inFlight = true;
-  const sid = cur.sceneId;
-  const my = ++seq;
   try {
-    const res = await api.audit(sid);
-    if (my !== seq) return;                    // 期间有更新的读/本地写：旧快照作废（防复活一拍）
+    const sid = cur.sceneId;
+    const st = await readState(sid, { bypassThrottle: true, source: 'poll' });   // F5-L4：读走单入口
+    if (!st) return;                           // 作废/落空（readState 内已含换场守卫）
     if (!cur || cur.sceneId !== sid) return stopPoll();
-    _warnedTick = false;
-    const st = applyRead(res, sid);
-    const d = ctx && ctx.getData();
-    if (!d || d.scene.id !== sid) return stopPoll();
-    if (cur.job && cur.job.running) {
-      if (st.changed) notify();
-    } else {
+    if (!(cur.job && cur.job.running)) {
       stopPoll();
-      decorate(d);
-      notify();
+      notify({ source: 'poll-done' });
       if (st.wasRunning) onDone(cur.job);
     }
-  } catch (err) {   // F5-P6④：不再静默（本轮只记一次，防每 2s 刷屏）
-    if (!_warnedTick) { _warnedTick = true; console.warn('[audit] 轮询失败，将自动重试', err); }
   } finally {
     inFlight = false;
     if (_pending) { _pending = false; tick(); }   // F5-P6①：补发被拒拍
