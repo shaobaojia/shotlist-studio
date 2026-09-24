@@ -70,19 +70,20 @@ def _rule_key(rule):
 
 # ════════ 上下文装载 ════════
 
-def _norm_keys(x):
-    """镜号/节拍号查找键变体（有序）：原样、去前导零、补两位——P0·S2-W13。"""
-    x = (x or "").strip()
-    if not x:
-        return ()
-    ks = [x]
-    if x.isdigit():
-        d = str(int(x))
-        if d not in ks:
-            ks.append(d)
-        if len(x) == 1:
-            ks.append("0" + x)
-    return tuple(ks)
+_FULLWIDTH = str.maketrans(
+    "０１２３４５６７８９ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ",
+    "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")   # 全角数字/字母 → 半角
+_NO_RE = re.compile(r"^(\d+)\s*([a-zA-Z]?)$")
+
+
+def _canon_no(x):
+    """镜号/节拍号规范键（S2-L3 canonicalizer）：全角→半角、剥空白、数字去前导零、
+    子号统一小写。规范形如 '1' / '17a'；不可解析 → None（旧枚举猜测表退役）。"""
+    s = (x or "").strip().translate(_FULLWIDTH)
+    m = _NO_RE.match(s)
+    if not m:
+        return None
+    return str(int(m.group(1))) + m.group(2).lower()
 
 
 # 列投影超集（P0·S2-W13）：与 fields.SHOT_FIELDS 的对账由测试兜底；新增规则若读
@@ -109,32 +110,33 @@ def load_ctx(con, scene_id):
 
 
 def _index_by_no(rows, col, what):
-    """号 → 行 索引：原样键先注册（精确引用不被补零变体抢占）；变体键见缝插针，
-    同键冲突保留先注册者并告警——P0·S2-W13/B2。"""
+    """号 → 行 索引（S2-L3 canonicalizer）：精确层注册原样键（精确引用不被规范变体抢占）；
+    规范层注册 canon 键，同键冲突保留先注册者并告警——P0·S2-W13/B2。"""
     m = {}
-    for r in rows:
+    for r in rows:                                  # 精确层：原样键
         k = (r[col] or "").strip()
         if k:
             m.setdefault(k, r)
-    for r in rows:
-        for k in _norm_keys(r[col])[1:]:
-            if k in m and m[k]["id"] != r["id"]:
-                sys.stderr.write("[audit] %s号映射冲突：%r（#%s 与 #%s 同键，后者跳过）\n"
-                                 % (what, k, m[k]["id"], r["id"]))
-                continue
-            m.setdefault(k, r)
+    for r in rows:                                  # 规范层：canon 键
+        k = _canon_no(r[col])
+        if not k:
+            continue
+        cur = m.get(k)
+        if cur is None:
+            m[k] = r
+        elif cur["id"] != r["id"]:
+            sys.stderr.write("[audit] %s号映射冲突：%r（#%s 与 #%s 同键，后者跳过）\n"
+                             % (what, k, cur["id"], r["id"]))
     return m
 
 
 def _lookup(m, ref):
-    """引用查找：原样键优先（精确命中），再试归一变体——P0·S2-B2/W10。"""
+    """引用查找（S2-L3）：原样键优先（精确命中），再试 canon 规范键——P0·S2-B2。"""
     t = (ref or "").strip()
     if t in m:
         return m[t]
-    for k in _norm_keys(t)[1:]:
-        if k in m:
-            return m[k]
-    return None
+    k = _canon_no(t)
+    return m.get(k) if k else None
 
 
 # ════════ 程序类规则（纯函数：ctx → findings） ════════
