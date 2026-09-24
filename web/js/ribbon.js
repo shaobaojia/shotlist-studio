@@ -11,7 +11,8 @@ const KEY = 'studio.dock';
 const TIER_SEQ_FB = ['全景', '中全', '中景', '中近', '近景', '特写', '极特'];
 const TIER_H = [10, 14, 18, 22, 26, 30, 34];   // 基准高度（44 高铁带内）
 const H_FLAT = 16;
-const BASE_V = 44;                              // 条带基准高（ST.h 以此为 1）
+let BASE_V = 44, DK_GAP = 18;                   // 条带基准高（ST.h 以此为 1）＋条带上提间距——F5-L3/W11：build 从 CSS 变量读回
+const MIN_H = 40, MAX_H = 380;                  // 条带高限（load 与拖拽共用）
 const PXS = 8, MINW = 6, MAXW = 160, GAP_IDX = 4, GAP_TIME = 1, SLOT = 22;
 const ZMIN = 0.35, ZMAX = 4;
 
@@ -44,7 +45,7 @@ function load() {
   if ('size' in o) ST.size = !!o.size;
   if ('rhythm' in o) ST.rhythm = !!o.rhythm;
   if ('mood' in o) ST.mood = !!o.mood;
-  if (typeof o.h === 'number') ST.h = clamp(Math.round(o.h), 40, 380);
+  if (typeof o.h === 'number') ST.h = clamp(Math.round(o.h), MIN_H, MAX_H);
   if (typeof o.zoom === 'number') ST.zoom = clamp(o.zoom, ZMIN, ZMAX);
 }
 function save() { lsSet(KEY, ST); }
@@ -91,7 +92,11 @@ export function buildRibbon(data, shots) {
   const sceneId = (data.scene && data.scene.id != null) ? data.scene.id : null;
   const NS = 'http://www.w3.org/2000/svg';
   const root = el('div', 'dock');
-  root.dataset.open = ST.open ? '1' : '0';
+  {                                                  // F5-L3/W11：尺寸单源——从 :root CSS 变量读回（值同，防两处漂移）
+    const dcs = getComputedStyle(document.documentElement);
+    BASE_V = parseFloat(dcs.getPropertyValue('--dk-base')) || 44;
+    DK_GAP = parseFloat(dcs.getPropertyValue('--dk-gap')) || 18;
+  }
 
   // ── 浮层 ──
   const panel = el('div', 'dk-panel');
@@ -184,21 +189,22 @@ export function buildRibbon(data, shots) {
     }
     strip.appendChild(svg);
   }
+  let geom = null;                                   // F5-L3/W8：布局几何单源（layout 写、曲线/轴标直读；DOM 只作输出）
   function drawCurve() {
-    if (!svg) return;
-    const vh = ST.h / BASE_V;
+    if (!svg || !geom) return;                       // 几何未生成直接退（原静默 ||0 会错位且不报错）
+    const vh = geom.vh;
     const Y = (v) => (40 - (v / mx) * 32) * vh;
     const pts = [];
     for (const t of segs) {
       if (t.v == null) continue;
-      const x0 = parseFloat(bars[t.i0].style.left) || 0;
-      const xEnd = (parseFloat(bars[t.i1].style.left) || 0) + (parseFloat(bars[t.i1].style.width) || 0);
+      const x0 = geom.xs[t.i0];
+      const xEnd = geom.xs[t.i1] + geom.ws[t.i1];
       pts.push({ x: (x0 + xEnd) / 2, y: Y(t.v), t });
     }
     if (!pts.length) return;
     const fb = pts[0].t, lb = pts[pts.length - 1].t;
-    const lx = parseFloat(bars[fb.i0].style.left) || 0;
-    const rx = (parseFloat(bars[lb.i1].style.left) || 0) + (parseFloat(bars[lb.i1].style.width) || 0);
+    const lx = geom.xs[fb.i0];
+    const rx = geom.xs[lb.i1] + geom.ws[lb.i1];
     const full = [{ x: lx, y: pts[0].y }].concat(pts).concat([{ x: rx, y: pts[pts.length - 1].y }]);
     const d = smoothPath(full);
     pHalo.setAttribute('d', d);
@@ -215,7 +221,7 @@ export function buildRibbon(data, shots) {
   function layout(animate) {
     tipHide();
     const z = ST.zoom, vh = ST.h / BASE_V;
-    const ih = (ST.h + 18) + 'px';
+    const ih = (ST.h + DK_GAP) + 'px';
     if (inner.style.height !== ih) inner.style.height = ih;   // F5-P4①：值变才写（原全量赋值×N）
     const shh = ST.h + 'px';
     if (strip.style.height !== shh) strip.style.height = shh;
@@ -234,6 +240,7 @@ export function buildRibbon(data, shots) {
       }
       xs.push(acc); ws.push(w); acc += w + gap;
     }
+    geom = { xs: xs, ws: ws, vh: vh };               // F5-L3/W8：几何单源（下游直读）
     const lastGap = timeMode ? GAP_TIME : Math.max(2, Math.round(GAP_IDX * z));
     const iw = Math.max(acc - lastGap, 40) + 'px';
     if (inner.style.width !== iw) inner.style.width = iw;
@@ -256,10 +263,7 @@ export function buildRibbon(data, shots) {
         if (b.style.height !== ht) b.style.height = ht;
       }
     }
-    const ut = timeMode ? '轴·时长' : '轴·镜号';
-    if (unitEl.textContent !== ut) unitEl.textContent = ut;
-    const lg = ST.size ? '红＝近/特写 · 点击跳镜' : '点击跳镜';
-    if (legendEl.textContent !== lg) legendEl.textContent = lg;
+    syncChrome();                                    // F5-L3/W9：开关/文字面单出口（原 unit/legend/moodHint 逐点写）
     renderAxis(animate);
     if (svg) {
       if (animate && ST.mood) {                     // 换轴：曲线淡出→重定位→淡入
@@ -271,7 +275,6 @@ export function buildRibbon(data, shots) {
       }
       svg.style.display = ST.mood ? '' : 'none';
     }
-    syncMoodHint();
   }
 
   // 横轴：节奏开＝时间刻度尺；关＝每格镜号
@@ -297,10 +300,10 @@ export function buildRibbon(data, shots) {
           axis.textContent = '';
           for (const l of labels) axis.appendChild(l);
         }
+        if (!geom) return;                          // F5-L3/W8：几何未生成直接退
         for (let i = 0; i < labels.length; i++) {   // 常驻元素只写值（原每帧清空重挂 N 个）
-          const b = bars[i];
-          const w = parseFloat(b.style.width) || 0;
-          const lx = (parseFloat(b.style.left) || 0) + 'px';
+          const w = geom.ws[i];
+          const lx = geom.xs[i] + 'px';
           if (labels[i].style.left !== lx) labels[i].style.left = lx;
           const wv = w + 'px';
           if (labels[i].style.width !== wv) labels[i].style.width = wv;
@@ -318,6 +321,18 @@ export function buildRibbon(data, shots) {
 
   function syncMoodHint() {
     moodHint.style.display = (ST.mood && ST.open && !hasMood) ? '' : 'none';
+  }
+
+  function syncChrome() {                            // F5-L3/W9：开关/文字面单出口（build/layout/toggle 共用，值变才写）
+    const open = ST.open ? '1' : '0';
+    if (root.dataset.open !== open) root.dataset.open = open;
+    const ct = ST.open ? '▴' : '▾';
+    if (caret.textContent !== ct) caret.textContent = ct;
+    const ut = ST.rhythm ? '轴·时长' : '轴·镜号';
+    if (unitEl.textContent !== ut) unitEl.textContent = ut;
+    const lg = ST.size ? '红＝近/特写 · 点击跳镜' : '点击跳镜';
+    if (legendEl.textContent !== lg) legendEl.textContent = lg;
+    syncMoodHint();
   }
 
   function noanimBurst() {
@@ -413,10 +428,8 @@ export function buildRibbon(data, shots) {
   bar.appendChild(legendEl);
   bar.addEventListener('click', () => {
     ST.open = !ST.open;
-    root.dataset.open = ST.open ? '1' : '0';
-    caret.textContent = ST.open ? '▴' : '▾';
     save();
-    syncMoodHint();
+    syncChrome();
   });
 
   root.appendChild(panel);
