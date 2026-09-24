@@ -52,15 +52,23 @@ function startColResize(e, f, opts) {
     last = Math.max(36, Math.min(620, startW + ev.clientX - startX));
     applyColWidth(f.key, last);
   };
-  const onUp = () => {
+  // 收尾幂等 + 兜底（F1-P4）：丢 mouseup（拖出窗口/焦点被抢）不再永久泄漏监听与 .col-resizing
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
     document.removeEventListener('mousemove', onMove, true);
-    document.removeEventListener('mouseup', onUp, true);
+    document.removeEventListener('mouseup', finish, true);
+    window.removeEventListener('blur', finish);
+    document.removeEventListener('pointercancel', finish, true);
     document.body.classList.remove('col-resizing');
     prefs.widths[f.key] = Math.round(last);
     if (opts.savePrefs) opts.savePrefs();
   };
   document.addEventListener('mousemove', onMove, true);
-  document.addEventListener('mouseup', onUp, true);
+  document.addEventListener('mouseup', finish, true);
+  window.addEventListener('blur', finish);
+  document.addEventListener('pointercancel', finish, true);
 }
 
 function tableColumns(beatCol, prefs) {
@@ -68,7 +76,7 @@ function tableColumns(beatCol, prefs) {
   const cols = [{ key: '__toggle', label: '', type: 'toggle', w: 26 }].concat(fields);
   if (beatCol) {
     const i = cols.findIndex((c) => c.key === 'shot_no');
-    cols.splice(i + 1, 0, { key: '__beat', label: '节拍', type: 'beat', w: 110 });
+    cols.splice(i === -1 ? 1 : i + 1, 0, { key: '__beat', label: '节拍', type: 'beat', w: 110 });   // 镜号隐藏时插在 ▸ 之后（F1-B8）
   }
   return cols;
 }
