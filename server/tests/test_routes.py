@@ -4,7 +4,9 @@
 import io
 import re
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
+from unittest import mock
 
 import _boot  # noqa: F401 — 直跑引导（pytest 下由 conftest 等价注入）
 import app as app_mod  # noqa: E402
@@ -14,6 +16,7 @@ from api import draft as draft_api  # noqa: E402
 from api import export as export_api  # noqa: E402
 from api import handlers  # noqa: E402
 from api import prompts as prompts_api  # noqa: E402
+from _fixture import make_prompts_db  # noqa: E402
 from api import recipes as recipes_api  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
@@ -198,3 +201,24 @@ class TestDispatchShapes(unittest.TestCase):
         ok = app_mod.Handler._dispatch(f, route, "/api/probe", {})
         self.assertTrue(ok)
         self.assertEqual(f.sent, [({"ok": True}, 200)])
+
+
+class TestBlocksOpEnvelope(unittest.TestCase):
+    """④ F3-L4 写响应信封：块写 op 附全量 state（前端就地套用的服务端契约）。"""
+
+    def test_op_response_carries_state(self):
+        con = make_prompts_db()
+
+        @contextmanager
+        def fake_rw(db_path=None):
+            yield con
+
+        with mock.patch("core.db.conn_rw", fake_rw):
+            obj, code = prompts_api.blocks_op(None, {"action": "create", "text": "信封样本"}, None)
+        self.assertEqual(code, 200)
+        self.assertTrue(obj["ok"])
+        self.assertIn("block", obj)
+        state = obj["state"]
+        self.assertIn("blocks", state)
+        self.assertIn("categories", state)
+        self.assertIn(obj["block"]["id"], [b["id"] for b in state["blocks"]])

@@ -39,9 +39,10 @@ def scene_or_404(con, scene_no):
     return sc, None
 
 
-def run_actions(spec, body, precheck=None, action=None):
+def run_actions(spec, body, precheck=None, action=None, post=None):
     """分发模板（P7②）：未知 action → 400；precheck(body, action) → (ctx, err)；
     写连接内 spec[action](con, body, ctx) 分派，结果并入 {"ok": True}；ValueError → 400。
+    post(con, out)（可选，F3-L4）：同连接内补发字段（写响应就地套用所需的全量视图）。
     action 缺省取自 body["action"]；prompt_op 的 action 来自 URL（m.group(1)）须显式传。"""
     action = action if action is not None else body.get("action")
     if action not in spec:
@@ -52,6 +53,7 @@ def run_actions(spec, body, precheck=None, action=None):
 
     def run(con):
         out = spec[action](con, body, ctx)
-        return {"ok": True, **(out or {})}, 200
+        extra = post(con, out) if post else None
+        return {"ok": True, **(out or {}), **(extra or {})}, 200
 
     return write(run)

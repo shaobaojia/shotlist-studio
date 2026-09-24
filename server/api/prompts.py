@@ -63,8 +63,10 @@ BLOCK_SPEC = {
 
 
 def blocks_op(m, body, q):
-    """块库写操作：create / update / delete / move / pin / cat_create / cat_update / cat_delete / cat_move。"""
-    return guard.run_actions(BLOCK_SPEC, body, _block_precheck)
+    """块库写操作：create / update / delete / move / pin / cat_create / cat_update / cat_delete / cat_move。
+    写响应附全量 state（F3-L4）：写成功即事实成立，前端就地套用、不再全库重取。"""
+    return guard.run_actions(BLOCK_SPEC, body, _block_precheck,
+                             post=lambda con, out: {"state": prompts.blocks_state(con)})
 
 
 # ── 提示词组（P7②：分发表） ──

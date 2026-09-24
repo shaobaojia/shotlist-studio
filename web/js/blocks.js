@@ -17,6 +17,7 @@ let cache = null;              // { categories:[], blocks:[] }
 const listeners = [];
 let inflight = null;           // 载入中的请求（并发去重）
 let needRefresh = false;       // 上笔写后重取失败（F3-B3）：显示留旧，下次读取补拉
+let cacheGen = 0;              // 写世代（F3-L4）：写响应就地套用 +1；在途旧快照落地时对不上即弃
 
 export async function ensureBlocks(force) {
   if (inflight) {
@@ -25,9 +26,12 @@ export async function ensureBlocks(force) {
     if (inflight) return inflight;                  // 等待期间被并行调用续上了新请求：直接复用它
   }
   if (cache && !force && !needRefresh) return cache;
+  const gen = cacheGen;
   inflight = api.blocks().then((res) => {
-    cache = { categories: res.categories || [], blocks: res.blocks || [] };
-    needRefresh = false;
+    if (gen === cacheGen) {                          // F3-L4：期间发生过写（gen 变）→ 本快照早于写，丢弃
+      cache = { categories: res.categories || [], blocks: res.blocks || [] };
+      needRefresh = false;
+    }
     return cache;
   }).finally(() => { inflight = null; });
   return inflight;
@@ -145,12 +149,18 @@ export function onBlocksChange(fn) {
 
 export async function blockOp(payload) {
   const res = await api.blockOp(payload);           // 写成功即事实成立（F3-B3）——重取失败不再把写报成失败
-  try {
-    await ensureBlocks(true);
-  } catch (err) {
-    needRefresh = true;                             // 缓存可能过期：显示留旧不空窗，下次读取补拉
-    silent(err, 'blocks-refresh');
-    toast('块库刷新失败（显示可能略旧）');
+  if (res && res.state) {                           // F3-L4：写响应带全量 state——就地套用（省一次全库 GET，且必然晚于写事务）
+    cacheGen += 1;                                  // 在途旧快照作废（gen 对不上即弃）
+    cache = { categories: res.state.categories || [], blocks: res.state.blocks || [] };
+    needRefresh = false;
+  } else {
+    try {
+      await ensureBlocks(true);
+    } catch (err) {
+      needRefresh = true;                           // 缓存可能过期：显示留旧不空窗，下次读取补拉
+      silent(err, 'blocks-refresh');
+      toast('块库刷新失败（显示可能略旧）');
+    }
   }
   for (const fn of listeners.slice()) { try { fn(); } catch (e) { silent(e, 'blocks-subscriber'); } }
   return res;

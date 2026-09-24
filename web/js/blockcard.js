@@ -18,25 +18,19 @@ const MIN_W = 180, MAX_W = 360, DEF_W = 236;
 const MIN_H = 130, MAX_H = 380, DEF_H = 190;
 const LS_KEY = 'studio.blockcard';
 
-let dr = null;
-let root = null;
-let innerEl = null;
-let listRefresh = null;
-let insertCb = null;
-let active = false;
-let upMode = false;
-let pendShow = false;                  // 面板入场动画未毕，卡先藏（入场完再浮现）
-let tAppear = null;
-const mem = { w: DEF_W, h: DEF_H, open: false };
-let pinnedOnly = false;        // 置顶筛选（F3-W16：原先 'all'|'pin'，判定收窄为布尔）
-let query = '';
-let loadErr = null;            // 载入失败信息（F3-B5：可上屏可重试）
+// 卡运行时状态单点（F3-L4/W16：原 13 个模块级散变量收拢进一个对象——引用一律 card.*）
+const card = {
+  dr: null, root: null, innerEl: null, listRefresh: null, insertCb: null,   // 抽屉引用 / 根 / 内层 / 列表重绘 / 插入回调
+  active: false, upMode: false, pendShow: false, tAppear: null,             // 激活 / 上贴模式 / 待浮现 / 浮现定时器
+  mem: { w: DEF_W, h: DEF_H, open: false },                                 // 尺寸与开合（落盘）
+  pinnedOnly: false, query: '', loadErr: null,                              // 置顶筛选（W16 已收窄布尔）/ 搜索词 / 载入失败（B5 可上屏重试）
+};
 
 function lsLoad() { return lsGet(LS_KEY, {}) || {}; }
-function lsSave() { lsSet(LS_KEY, mem); }
+function lsSave() { lsSet(LS_KEY, card.mem); }
 
-// 面板几何与贴紧标记：一律走抽屉几何契约（F3-L1）——dr.geom() 只读几何（免疫动画期 rect 漂）、
-// dr.setUnder() 写贴紧类（镜像抑制在抽屉侧）。原先的样式反解（edgeValue/frameRect，含 5 处
+// 面板几何与贴紧标记：一律走抽屉几何契约（F3-L1）——card.dr.geom() 只读几何（免疫动画期 rect 漂）、
+// card.dr.setUnder() 写贴紧类（镜像抑制在抽屉侧）。原先的样式反解（edgeValue/frameRect，含 5 处
 // parseFloat）与 applyUnder 直写类均已退役。
 
 // ── 内容：块库列表（A3 分段标题 + 搜索 + 行点插；含全部收起/展开）──
@@ -59,7 +53,7 @@ function buildList(host) {
   let tSearch = null;                                  // 防抖（F3-W18）：每键整卡重建 → 停 120ms 后一次
   search.addEventListener('input', () => {
     if (tSearch) clearTimeout(tSearch);
-    tSearch = setTimeout(() => { tSearch = null; query = search.value.trim().toLowerCase(); draw(); }, 120);
+    tSearch = setTimeout(() => { tSearch = null; card.query = search.value.trim().toLowerCase(); draw(); }, 120);
   });
   host.appendChild(search);
 
@@ -76,14 +70,13 @@ function buildList(host) {
   // 卡片 API（列表 / 菜单共用）：refresh=重绘；insert=插入到编辑面；foldAll=全收/全展
   const ctx = {
     refresh: () => draw(),
-    insert: (t, b) => { if (insertCb) insertCb(t, b); },
-    folded: folded,
-    foldSave: foldSave,
-    list: list,
+    insert: (t, b) => { if (card.insertCb) card.insertCb(t, b); },
+    isFolded: (key) => folded.has(key),                                     // F3-L4/W11：折叠状态与落盘捆绑——消费者不再直持 Set
+    toggleFold: (key) => { if (folded.has(key)) folded.delete(key); else folded.add(key); foldSave(); },
     foldAll: (open) => {
       if (!blocksData()) return;
       // 只改 folded（F3-W19①）：键从分段规格取，重绘统一交给 draw
-      for (const s of sectionsOf(visibleBlocks({ pinnedOnly: pinnedOnly, query: query }))) {
+      for (const s of sectionsOf(visibleBlocks({ pinnedOnly: card.pinnedOnly, query: card.query }))) {
         if (open) folded.delete(s.key); else folded.add(s.key);
       }
       foldSave();
@@ -93,9 +86,9 @@ function buildList(host) {
   attachBlankMenu(ctx, list);                          // 列表空白右键：新建块 / 新分类 / 全部收起展开
 
   function mkChip(key, label) {
-    const c = el('span', 'bc-fchip' + ((key === 'pin') === pinnedOnly ? ' on' : ''), label);
+    const c = el('span', 'bc-fchip' + ((key === 'pin') === card.pinnedOnly ? ' on' : ''), label);
     c.addEventListener('mousedown', (e) => e.preventDefault());
-    c.addEventListener('click', () => { pinnedOnly = (key === 'pin'); draw(); });
+    c.addEventListener('click', () => { card.pinnedOnly = (key === 'pin'); draw(); });
     return c;
   }
 
@@ -119,8 +112,8 @@ function buildList(host) {
     const d = blocksData();
     list.textContent = '';
     if (!d) {                                          // 载入中 / 失败可重试（F3-B5：失败不再静默）
-      if (loadErr) {
-        const box = el('div', 'bc-empty', '块库加载失败：' + loadErr);
+      if (card.loadErr) {
+        const box = el('div', 'bc-empty', '块库加载失败：' + card.loadErr);
         const rt = el('span', 'bc-retry', '重试');
         rt.addEventListener('click', () => retryLoad());
         box.appendChild(rt);
@@ -132,22 +125,22 @@ function buildList(host) {
       return;
     }
     count.textContent = d.blocks.length + ' 个';
-    const arr = visibleBlocks({ pinnedOnly: pinnedOnly, query: query });
-    if (query) {                                       // 搜索态＝平铺（平铺下不适用拖拽）
+    const arr = visibleBlocks({ pinnedOnly: card.pinnedOnly, query: card.query });
+    if (card.query) {                                       // 搜索态＝平铺（平铺下不适用拖拽）
       if (!arr.length) list.appendChild(el('div', 'bc-empty', '没有匹配的块'));
       renderList(ctx, list, arr, { mode: 'flat' });
       return;
     }
     addFoldAll(sectionsOf(arr));
     if (!d.blocks.length) list.appendChild(el('div', 'bc-empty', '块库为空 —— 底栏「＋新建块」或右键新建'));
-    renderList(ctx, list, arr, { mode: 'sectioned', draggable: !pinnedOnly });
+    renderList(ctx, list, arr, { mode: 'sectioned', draggable: !card.pinnedOnly });
   }
 
   function retryLoad() {
-    loadErr = null;
+    card.loadErr = null;
     draw();
     ensureBlocks(true).then(() => draw()).catch((err) => {
-      loadErr = err.message || String(err);
+      card.loadErr = err.message || String(err);
       silent(err, 'blockcard-load');
       draw();
     });
@@ -158,56 +151,56 @@ function buildList(host) {
 
 // 几何五连写单点（F3-W21②）：宽高 + 落点 + 轴向位移
 function place(w, h, left, top, tf) {
-  root.style.width = w + 'px';
-  root.style.height = h + 'px';
-  root.style.left = left + 'px';
-  root.style.top = top + 'px';
-  root.style.transform = tf;
+  card.root.style.width = w + 'px';
+  card.root.style.height = h + 'px';
+  card.root.style.left = left + 'px';
+  card.root.style.top = top + 'px';
+  card.root.style.transform = tf;
 }
 
 // ── 布局同步（随抽屉几何/贴附/开合；靠 onGeom 订阅跟拖拽与贴附，F3-L1）──
 function layout() {
-  if (!root) return;
-  const g = (dr && dr.geom) ? dr.geom() : null;
-  if (!active || !g || !g.open) {
-    root.hidden = true;
-    if (g) dr.setUnder('none');
+  if (!card.root) return;
+  const g = (card.dr && card.dr.geom) ? card.dr.geom() : null;
+  if (!card.active || !g || !g.open) {
+    card.root.hidden = true;
+    if (g) card.dr.setUnder('none');
     return;
   }
   // 面板入场动画进行中：先藏（否则「块库先于面板出现」）；入场完成事件（onGeom）会再触发本函数
-  if (g.entering) { root.hidden = true; pendShow = true; dr.setUnder('none'); return; }
+  if (g.entering) { card.root.hidden = true; card.pendShow = true; card.dr.setUnder('none'); return; }
   const r = g;
   const up = (g.dock === 'bottom');
-  const switched = (up !== upMode);
-  upMode = up;
-  root.hidden = false;
-  root.classList.toggle('bc-clps', !mem.open);   // 收起态：露边盖干净「纸口」
-  root.classList.toggle('bc-up', up);            // 上贴模式位（标签/拉手转上缘的 CSS 依赖它——重写时勿丢！）
-  dr.setUnder(up ? 'up' : 'left');
-  if (pendShow) {
-    pendShow = false;
-    clearTimeout(tAppear);
-    tAppear = flashClass(root, 'bc-appear', 280);   // F3-W25 单点
+  const switched = (up !== card.upMode);
+  card.upMode = up;
+  card.root.hidden = false;
+  card.root.classList.toggle('bc-clps', !card.mem.open);   // 收起态：露边盖干净「纸口」
+  card.root.classList.toggle('bc-up', up);            // 上贴模式位（标签/拉手转上缘的 CSS 依赖它——重写时勿丢！）
+  card.dr.setUnder(up ? 'up' : 'left');
+  if (card.pendShow) {
+    card.pendShow = false;
+    clearTimeout(card.tAppear);
+    card.tAppear = flashClass(card.root, 'bc-appear', 280);   // F3-W25 单点
   }
-  if (switched) root.classList.add('bc-noanim');
+  if (switched) card.root.classList.add('bc-noanim');
   if (!up) {
-    mem.w = clamp(Math.round(mem.w) || DEF_W, MIN_W, MAX_W);
-    const W = mem.w;
+    card.mem.w = clamp(Math.round(card.mem.w) || DEF_W, MIN_W, MAX_W);
+    const W = card.mem.w;
     const H = Math.max(MIN_H, Math.round(r.height - INSET * 2));
     place(W, H, Math.round(r.left - W + OVERLAP), Math.round(r.top + INSET),
-      mem.open ? 'translateX(0)' : 'translateX(' + (W - OVERLAP - SLIVER) + 'px)');
+      card.mem.open ? 'translateX(0)' : 'translateX(' + (W - OVERLAP - SLIVER) + 'px)');
   } else {
-    mem.h = clamp(Math.round(mem.h) || DEF_H, MIN_H, MAX_H);
-    const H = mem.h;
+    card.mem.h = clamp(Math.round(card.mem.h) || DEF_H, MIN_H, MAX_H);
+    const H = card.mem.h;
     const W = Math.max(MIN_W, Math.round(r.width - INSET * 2));
     place(W, H, Math.round(r.left + INSET), Math.round(r.top + OVERLAP - H),
-      mem.open ? 'translateY(0)' : 'translateY(' + (H - OVERLAP - SLIVER) + 'px)');
+      card.mem.open ? 'translateY(0)' : 'translateY(' + (H - OVERLAP - SLIVER) + 'px)');
   }
-  if (switched) { void root.offsetWidth; root.classList.remove('bc-noanim'); }
+  if (switched) { void card.root.offsetWidth; card.root.classList.remove('bc-noanim'); }
 }
 
 function toggleOpen() {
-  mem.open = !mem.open;
+  card.mem.open = !card.mem.open;
   lsSave();
   layout();
 }
@@ -217,66 +210,66 @@ function startResize(e) {
   if (e.button !== 0) return;
   e.preventDefault();
   e.stopPropagation();
-  const up = upMode;
+  const up = card.upMode;
   const sx = e.clientX, sy = e.clientY;
-  const sw = mem.w, sh = mem.h;
-  root.classList.add('bc-noanim');
+  const sw = card.mem.w, sh = card.mem.h;
+  card.root.classList.add('bc-noanim');
   trackDrag((ev) => {                              // F3-W27①：三件套单点
-    if (!up) mem.w = clamp(Math.round(sw + (sx - ev.clientX)), MIN_W, MAX_W);
-    else mem.h = clamp(Math.round(sh + (sy - ev.clientY)), MIN_H, MAX_H);
+    if (!up) card.mem.w = clamp(Math.round(sw + (sx - ev.clientX)), MIN_W, MAX_W);
+    else card.mem.h = clamp(Math.round(sh + (sy - ev.clientY)), MIN_H, MAX_H);
     layout();
   }, () => {
-    root.classList.remove('bc-noanim');
+    card.root.classList.remove('bc-noanim');
     lsSave();
   });
 }
 
 // ── 对外 ──
 export function initBlockCard(drawer) {
-  if (root) return;
-  dr = drawer;
-  Object.assign(mem, lsLoad());
-  if (!Number.isFinite(mem.w)) mem.w = DEF_W;
-  if (!Number.isFinite(mem.h)) mem.h = DEF_H;
-  if (typeof mem.open !== 'boolean') mem.open = false;
+  if (card.root) return;
+  card.dr = drawer;
+  Object.assign(card.mem, lsLoad());
+  if (!Number.isFinite(card.mem.w)) card.mem.w = DEF_W;
+  if (!Number.isFinite(card.mem.h)) card.mem.h = DEF_H;
+  if (typeof card.mem.open !== 'boolean') card.mem.open = false;
 
-  root = el('div', 'bcard float-card');   // F3-W28：挂基类
-  root.hidden = true;
-  innerEl = el('div', 'bc-inner');
-  root.appendChild(innerEl);
+  card.root = el('div', 'bcard float-card');   // F3-W28：挂基类
+  card.root.hidden = true;
+  card.innerEl = el('div', 'bc-inner');
+  card.root.appendChild(card.innerEl);
   const tab = el('div', 'bc-tab');
   tab.title = '块库　点按抽出 / 收回';
   tab.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
   tab.addEventListener('click', (e) => { e.stopPropagation(); toggleOpen(); });
-  root.appendChild(tab);
+  card.root.appendChild(tab);
   const rz = el('div', 'bc-rz');
   rz.title = '拖拽调宽（左模式）/ 调高（上模式）';
   rz.addEventListener('mousedown', startResize);
-  root.appendChild(rz);
-  document.body.appendChild(root);
+  card.root.appendChild(rz);
+  document.body.appendChild(card.root);
 
-  listRefresh = buildList(innerEl);
-  listRefresh();
-  onBlocksChange(() => { if (listRefresh) listRefresh(); });
-  ensureBlocks().then(() => { if (listRefresh) listRefresh(); }).catch((err) => {   // F3-B5：失败可观察可重试
-    loadErr = err.message || String(err);
+  card.listRefresh = buildList(card.innerEl);
+  card.listRefresh();
+  onBlocksChange(() => { if (card.listRefresh) card.listRefresh(); });
+  ensureBlocks().then(() => { if (card.listRefresh) card.listRefresh(); }).catch((err) => {   // F3-B5：失败可观察可重试
+    card.loadErr = err.message || String(err);
     silent(err, 'blockcard-load');
-    if (listRefresh) listRefresh();
+    if (card.listRefresh) card.listRefresh();
   });
 
   // 跟面板（F3-L1 几何契约）：抽屉几何/贴附/开合/入场完成 → onGeom 订阅（订阅侧已按帧合并）；
   // 原先「全属性观察者 + 样式反解」退役
-  dr.onGeom(() => layout());
+  card.dr.onGeom(() => layout());
   onResizeCoalesced(layout);                       // F3-W27③：与抽屉共用一帧一次
   layout();
 }
 
 export function cardSetActive(on) {
-  active = !!on;
+  card.active = !!on;
   layout();
 }
 
 export function cardSetInsert(fn) {
-  insertCb = fn;
+  card.insertCb = fn;
 }
 

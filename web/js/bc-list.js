@@ -152,7 +152,7 @@ function listSection(ctx, spec, dragOn) {
   const key = spec.key;
   const secEl = el('div', 'bco-sec');
   secEl.dataset.catkey = catKeyOf(spec.cid);   // F3-W4：属性键单点
-  const closed = ctx.folded.has(key);
+  const closed = ctx.isFolded(key);
   const sh = el('div', 'bc-sechead');
   sh.appendChild(el('span', 'bc-secarrow', closed ? '▸' : '▾'));
   const dot = el('span', 'bc-secdot');
@@ -164,8 +164,7 @@ function listSection(ctx, spec, dragOn) {
   attachSecMenu(ctx, sh, spec.cid, nameEl);          // 右键：＋块 / 改名 / 上移 / 下移 / 删类（nameEl 由本模块给出，操作族不再自拼选择器）
   sh.addEventListener('mousedown', (e) => e.preventDefault());
   sh.addEventListener('click', () => {
-    if (closed) ctx.folded.delete(key); else ctx.folded.add(key);
-    ctx.foldSave();
+    ctx.toggleFold(key);
     ctx.refresh();
   });
   secEl.appendChild(sh);
@@ -184,7 +183,7 @@ export function renderList(ctx, listEl, arr, opts) {
   ctx.sectionEl = (cid) => listEl.querySelector('.bco-sec[data-catkey="' + catKeyOf(cid) + '"]');
   ctx.revealSection = (cid) => {
     const key = foldKeyOf(cid);
-    if (ctx.folded.has(key)) { ctx.folded.delete(key); ctx.foldSave(); ctx.refresh(); return true; }
+    if (ctx.isFolded(key)) { ctx.toggleFold(key); ctx.refresh(); return true; }
     return false;
   };
   ctx.editRow = (id) => {
