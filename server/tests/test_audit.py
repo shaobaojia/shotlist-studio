@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
 """审计引擎单测（M4a）：程序规则 / 对账状态机 / 开关 / LLM 注入（内存库，零网络）。"""
 import os
-import sys
 import tempfile
 import threading
 import time
 import unittest
-from pathlib import Path
 
-SERVER = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SERVER))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _boot  # noqa: F401 — 直跑引导（pytest 下由 conftest 等价注入）
 
 from core import audit, fields  # noqa: E402
 from _fixture import conn_factory, make_base_db  # noqa: E402

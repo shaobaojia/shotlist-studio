@@ -143,19 +143,27 @@ class JobBoard:
         self._jobs[key] = job
         self._prune()
 
+    @staticmethod
+    def _evict_keys(keys, jobs, keep):
+        """淘汰序纯函数（P2·S4-P4⑤）：注册序扫描、在跑跳过，返回应删键列表。"""
+        evict = []
+        room = len(keys) - keep
+        for key in keys:                      # 注册序（dict 插入序；P0·S1-W23）
+            if room <= 0:
+                break
+            j = jobs.get(key)
+            if j and j.get("running"):
+                continue
+            evict.append(key)
+            room -= 1
+        return evict
+
     def _prune(self):
         """只淘汰已完成任务（M9）：在跑任务绝不剪——不够删就允许超 keep。"""
         if self._keep is None or len(self._jobs) <= self._keep:
             return
-        room = len(self._jobs) - self._keep
-        for key in list(self._jobs):          # 注册序淘汰（dict 插入序；P0·S1-W23）
-            if room <= 0:
-                break
-            j = self._jobs.get(key)
-            if j and j.get("running"):
-                continue
+        for key in self._evict_keys(list(self._jobs), self._jobs, self._keep):
             self._jobs.pop(key, None)
-            room -= 1
 
     # ── 收尾 ──
 

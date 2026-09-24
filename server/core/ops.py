@@ -11,7 +11,7 @@ from pathlib import Path
 
 from . import db
 
-from core import db, fields
+from core import db, fields, fsutil
 
 # 表级差异位（spec 从 fields 派生；skip_types＝不进写白名单的类型，缺省无）——P0·S1-P1②
 TABLES = {
@@ -124,6 +124,14 @@ def _prune_snapshots(root):
         pass
 
 
+def kv_set(con, key, value):
+    """settings KV 写单点（P2·S4-C6）：upsert；调用方负责事务提交。"""
+    con.execute(
+        "INSERT INTO settings (key, value) VALUES (?,?)"
+        " ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, str(value)))
+    return value
+
+
 def lock_scene(con, scene_id, lock=True, snap_root=None):
     """锁定本场（M2-7）：留底 = 场次版本快照（JSON 落盘 + snapshots 记录）+ 锁定标记。
     锁定 ≠ 禁止编辑（设计稿 §128）；解锁只清标记，不动已留底文件。"""
@@ -137,7 +145,7 @@ def lock_scene(con, scene_id, lock=True, snap_root=None):
         fname = "%s-%s.json" % (sc["scene_no"] or ("scene%d" % scene_id),
                                 datetime.now().strftime("%Y%m%d-%H%M%S"))
         fpath = root / fname
-        fpath.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+        fsutil.dump_json(fpath, payload)   # 原子写单点（P1·S4-P5）
         rel = str(fpath.relative_to(db.DB_PATH.parent.parent))   # 恒仓库相对（snap_root 只决定文件落哪）——P0·S1-W15
         con.execute("INSERT INTO snapshots (scope, kind, label, path) VALUES ('scene','locked',?,?)",
                     (sc["scene_no"], rel))

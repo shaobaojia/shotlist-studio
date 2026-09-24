@@ -7,7 +7,7 @@ import time
 import urllib.error
 import urllib.request
 
-from . import fields
+from . import fields, ops
 
 DEFAULTS = {
     "ai_provider": "deepseek",   # 装饰性字段（W28）：单一 OpenAI 兼容通道，未按 provider 分支
@@ -43,16 +43,12 @@ def save_config(con, data):
             continue
         v = str((data or {}).get(k) or "").strip()
         if v:
-            con.execute(
-                "INSERT INTO settings (key, value) VALUES (?,?)"
-                " ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, v))
+            ops.kv_set(con, k, v)   # KV 写单点（P2·S4-C6）
         else:
             con.execute("DELETE FROM settings WHERE key=?", (k,))
     key = (data or {}).get("api_key")
     if isinstance(key, str) and key.strip():
-        con.execute(
-            "INSERT INTO settings (key, value) VALUES (?,?)"
-            " ON CONFLICT(key) DO UPDATE SET value=excluded.value", (KEY_FIELD, key.strip()))
+        ops.kv_set(con, KEY_FIELD, key.strip())   # KV 写单点（P2·S4-C6）
     con.commit()
     return get_config(con)
 

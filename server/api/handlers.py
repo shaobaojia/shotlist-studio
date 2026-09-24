@@ -41,21 +41,15 @@ def scene(m, q):
     scene_no = unquote(m.group(1))
     con = db.connect()
     try:
-        f = db.film(con)
+        f, sc = db.load_scene(con, scene_no)   # 场装载单点（P1·S4-A8）
         if not f:
             return {"error": "库里还没有影片—先跑迁移脚本"}, 404
-        sc = db.scene_by_no(con, f["id"], scene_no)
         if not sc:
             return {"error": "场景不存在：%s" % scene_no}, 404
         _, beats, shots = db.scene_ctx(con, sc["id"])   # 整场装载单点（P0·S1-W1）
         groups = db.prompt_groups(con, sc["id"])
 
-        by_beat = {}
-        for s in shots:
-            by_beat.setdefault(s.get("beat_id"), []).append(s)
-        for b in beats:
-            b["shots"] = by_beat.pop(b["id"], [])
-        orphan = by_beat.pop(None, [])
+        orphan = db.attach_shots_by_beat(beats, shots)   # 分桶单点（P2·S4-A9；含残留键兜底）
 
         db.attach_group_members(groups, shots)
 
@@ -160,10 +154,9 @@ def renumber(m, body, q):
     scene_no = unquote(m.group(1))
     con = db.connect(rw=True)
     try:
-        f = db.film(con)
+        f, sc = db.load_scene(con, scene_no)   # 场装载单点（P1·S4-A8）
         if not f:
             return {"error": "库里还没有影片"}, 404
-        sc = db.scene_by_no(con, f["id"], scene_no)
         if not sc:
             return {"error": "场景不存在：%s" % scene_no}, 404
         return {"ok": True, "changes": ops.renumber_scene(con, sc["id"])}, 200

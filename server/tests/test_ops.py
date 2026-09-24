@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 """core/ops.py 无头回归（stdlib unittest，直跑：python3 server/tests/test_ops.py -v）。"""
-import sys
 import unittest
-from pathlib import Path
 
-SERVER = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SERVER))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _boot  # noqa: F401 — 直跑引导（pytest 下由 conftest 等价注入）
 
 from core import ops  # noqa: E402
 from _fixture import make_ops_db as make_db, make_ops_db0 as make_db0  # noqa: E402

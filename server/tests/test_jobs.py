@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """任务簿基类单测（L1）：闸门计数 / 登记与并入 / 剪枝护 running / 轻载与收尾 / 释放恰一次。"""
-import sys
 import unittest
-from pathlib import Path
 
-SERVER = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SERVER))
+import _boot  # noqa: F401 — 直跑引导（pytest 下由 conftest 等价注入）
 
 from core import jobs  # noqa: E402
 

@@ -2,20 +2,16 @@
 """AI 创作通道单测（M4b-1）：配方装载 / 目标校验 / 预览任务（注入 stub、零网络）/ 应用落库。"""
 import json
 import os
-import sqlite3
-import sys
 import tempfile
+import threading
 import time as _t
 import unittest
-from pathlib import Path
 
-SERVER = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SERVER))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _boot  # noqa: F401 — 直跑引导（pytest 下由 conftest 等价注入）
 
 from core import ai as core_ai  # noqa: E402
 from core import rewrite  # noqa: E402
-from _fixture import conn_factory, make_base_db  # noqa: E402
+from _fixture import conn_factory, make_base_db, wait_job as wait_for_job  # noqa: E402
 
 
 def _prep(con):
@@ -72,22 +68,10 @@ class Base(unittest.TestCase):
     def preview(self, targets, **kw):
         m = rewrite.PreviewJobs()
         job = m.start(1, targets, connect_factory=self.factory, **kw)
-        deadline = _t.time() + 15
-        while _t.time() < deadline:
-            j = m.get(job["id"])
-            if j and not j["running"]:
-                return m, j
-            _t.sleep(0.05)
-        raise AssertionError("preview job 未在限时内完成")
+        return m, wait_for_job(m, job["id"])
 
     def wait_job(self, m, jid, timeout=15):
-        deadline = _t.time() + timeout
-        while _t.time() < deadline:
-            j = m.get(jid)
-            if j and not j["running"]:
-                return j
-            _t.sleep(0.05)
-        raise AssertionError("job 未在限时内完成")
+        return wait_for_job(m, jid, timeout)
 
     def shot_val(self, no, field="blocking"):
         con = self.factory()
@@ -186,15 +170,23 @@ class TestPreview(Base):
         self.assertEqual(it["kind"], "text")
         self.assertEqual(it["after"], "他愣在原地，喉结滚了一下")
 
-    def test_validation_errors(self):
+    def test_rejects_empty_targets(self):
+        with self.assertRaises(ValueError):
+            rewrite.PreviewJobs().start(1, [], action="rewrite", connect_factory=self.factory)
+
+    def test_rejects_too_many_targets(self):
+        with self.assertRaises(ValueError):
+            rewrite.PreviewJobs().start(1, [self.tshot("01")] * (rewrite.MAX_TARGETS + 1),
+                                        action="rewrite", connect_factory=self.factory)
+
+    def test_rejects_bool_scene(self):
+        with self.assertRaises(ValueError):
+            rewrite.PreviewJobs().start(True, [self.tshot("01")], action="rewrite",
+                                        connect_factory=self.factory)   # bool 不得当 1 用（P0·S3-B1）
+
+    def test_rejects_missing_and_unknown_action(self):
         m = rewrite.PreviewJobs()
         f = self.factory
-        with self.assertRaises(ValueError):
-            m.start(1, [], action="rewrite", connect_factory=f)
-        with self.assertRaises(ValueError):
-            m.start(1, [self.tshot("01")] * 31, action="rewrite", connect_factory=f)
-        with self.assertRaises(ValueError):
-            m.start(True, [self.tshot("01")], action="rewrite", connect_factory=f)   # bool 不得当 1 用（P0·S3-B1）
         with self.assertRaises(ValueError):
             m.start(1, [self.tshot("01")], connect_factory=f)          # 无 action/instruction
         with self.assertRaises(ValueError):
@@ -202,6 +194,10 @@ class TestPreview(Base):
         with self.assertRaises(ValueError):
             m.start(1, [self.tshot("01")], action="rewrite", instruction="x",
                     connect_factory=f)                                  # 两个都给
+
+    def test_rejects_bad_field_and_missing_row(self):
+        m = rewrite.PreviewJobs()
+        f = self.factory
         with self.assertRaises(ValueError):
             m.start(1, [{"table": "shots", "id": 1, "field": "spatial"}],
                     action="rewrite", connect_factory=f)                # 字段不受支持
@@ -239,9 +235,11 @@ class TestGates(Base):
         m = rewrite.PreviewJobs()
         calls = []
 
+        gate = threading.Event()
+
         def slow(cfg, messages):
             calls.append(1)
-            _t.sleep(0.6)
+            gate.wait(5)                     # 闸门同步（P2·S4-P4）：不再真睡
             return {"text": '{"items":[{"i":0,"after":"慢稿"}]}'}
 
         j1 = m.start(1, [self.tshot("01")], action="rewrite",
@@ -250,6 +248,7 @@ class TestGates(Base):
                      chat=slow, connect_factory=self.factory)
         self.assertTrue(j2.get("joined"))
         self.assertEqual(j2["id"], j1["id"])
+        gate.set()
         j = self.wait_job(m, j1["id"])
         self.assertEqual(len(calls), 1)                  # 只外呼了一次
         self.assertEqual(j["items"][0]["after"], "慢稿")
@@ -261,8 +260,10 @@ class TestGates(Base):
         g = _jobs.Gate(1)                            # 独立闸：不碰进程单例
         m = rewrite.PreviewJobs(gate=g)
 
+        gate = threading.Event()
+
         def slow(cfg, messages):
-            _t.sleep(0.5)
+            gate.wait(5)                     # 闸门同步（P2·S4-P4）
             return {"text": '{"items":[{"i":0,"after":"x"}]}'}
 
         j1 = m.start(1, [self.tshot("01")], action="rewrite",
@@ -272,33 +273,31 @@ class TestGates(Base):
         with self.assertRaises(ValueError):
             dm.start_scene(1, "很长的台本。" * 12, chat=slow,
                            connect_factory=self.factory)
+        gate.set()
         self.wait_job(m, j1["id"])
         self.assertTrue(g.acquire())                 # 跑完已释放
         g.release()
 
     def test_prune_registration_order(self):
-        """淘汰按注册序（dict 插入序）；在跑跳过不淘汰（P0·S1-W23）。"""
-        m = rewrite.PreviewJobs(keep=2)
-        with m._lock:
-            m._jobs = {4: {"id": 4, "running": False},
-                       1: {"id": 1, "running": True},
-                       3: {"id": 3, "running": False},
-                       2: {"id": 2, "running": False}}
-            m._prune()
-            self.assertIn(1, m._jobs)
-            self.assertEqual(sorted(m._jobs), [1, 2])
-            m._jobs = {5: {"id": 5, "running": True},
-                       6: {"id": 6, "running": True},
-                       7: {"id": 7, "running": True}}
-            m._prune()
-            self.assertEqual(len(m._jobs), 3)            # 全在跑：超 keep 保留
+        """淘汰按注册序（dict 插入序）；在跑跳过不淘汰（P0·S1-W23；纯函数直测 P2·S4-P4⑤）。"""
+        from core import jobs as _jobs
+        st = _jobs.JobBoard._evict_keys
+        jobs = {4: {"running": False}, 1: {"running": True},
+                3: {"running": False}, 2: {"running": False}}
+        self.assertEqual(st(list(jobs), jobs, 2), [4, 3])    # 注册序淘汰、在跑跳过
+        s = {"a1": {"running": False}, "b2": {"running": False}, "c3": {"running": False}}
+        self.assertEqual(st(list(s), s, 2), ["a1"])          # 字符串键同序（S1-A14 咬合）
+        r = {5: {"running": True}, 6: {"running": True}, 7: {"running": True}}
+        self.assertEqual(st(list(r), r, 2), [])              # 全在跑：超 keep 保留
 
     def test_get_light_while_running(self):
         """轮询期轻载（P7）：在跑时不出大文本，跑完给全量。"""
         m = rewrite.PreviewJobs()
 
+        gate = threading.Event()
+
         def slow(cfg, messages):
-            _t.sleep(0.6)
+            gate.wait(5)                     # 闸门同步（P2·S4-P4）
             return {"text": '{"items":[{"i":0,"after":"A"}]}'}
 
         j = m.start(1, [self.tshot("01")], action="rewrite",
@@ -307,6 +306,7 @@ class TestGates(Base):
         self.assertTrue(mid["running"])
         self.assertNotIn("before", mid["items"][0])
         self.assertEqual(mid["items"][0]["label"], "镜01 · 动作调度")
+        gate.set()
         full = self.wait_job(m, j["id"])
         self.assertEqual(full["items"][0]["before"], "男人看着手机")
         self.assertEqual(full["items"][0]["after"], "A")
@@ -453,16 +453,17 @@ class TestApply(Base):
                 rewrite.apply_items(con, None)                  # 无任务
             m2 = rewrite.PreviewJobs()
 
+            gate = threading.Event()
+
             def slow(cfg, messages):
-                _t.sleep(0.6)
+                gate.wait(5)                 # 闸门同步（P2·S4-P4）
                 return {"text": '{"items":[{"i":0,"after":"慢稿"}]}'}
             j2 = m2.start(1, [self.tshot("01")], action="rewrite",
                           chat=slow, connect_factory=self.factory)
             with self.assertRaises(ValueError):
                 rewrite.apply_items(con, m2.get(j2["id"]))      # 未跑完
-            dl = _t.time() + 10
-            while _t.time() < dl and m2.get(j2["id"])["running"]:
-                _t.sleep(0.1)
+            gate.set()
+            wait_for_job(m2, j2["id"])
         finally:
             con.close()
 

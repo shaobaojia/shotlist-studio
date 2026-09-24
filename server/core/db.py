@@ -73,6 +73,19 @@ def row(con, table, row_id, msg="行不存在"):
     return dict(r)
 
 
+def attach_shots_by_beat(beats, shots):
+    """镜头按 beat_id 分桶挂到 beats（单点，P2·S4-A9）：返回未归节拍行。
+    含残留键兜底（P1·S4-B4 同口径）：beat_id 指向别场/悬空时不静默丢镜。"""
+    by_beat = {}
+    for s in shots:
+        by_beat.setdefault(s.get("beat_id"), []).append(s)
+    for b in beats:
+        b["shots"] = by_beat.pop(b["id"], [])
+    orphan = by_beat.pop(None, [])
+    orphan += [s for mem in by_beat.values() for s in mem]
+    return orphan
+
+
 def group_members(con, group_ids):
     """组成员（多组）：{gid: [行]}，组内按 (position, id)——P0·S3-W2 单点。"""
     out = {gid: [] for gid in group_ids}
@@ -85,6 +98,14 @@ def group_members(con, group_ids):
             " ORDER BY prompt_group_id, position, id" % q, group_ids):
         out.setdefault(r["prompt_group_id"], []).append(dict(r))
     return out
+
+
+def load_scene(con, scene_no):
+    """按场号装载（单点，P1·S4-A8）：返回 (film, scene)；影片缺或场缺时对应项为 None。"""
+    f = film(con)
+    if not f:
+        return None, None
+    return f, scene_by_no(con, f["id"], scene_no)
 
 
 def scene_by_no(con, film_id, scene_no):

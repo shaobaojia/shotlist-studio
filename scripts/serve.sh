@@ -28,13 +28,19 @@ case "${1:-status}" in
     if healthy; then echo "已在运行（健康）"; exit 0; fi
     mkdir -p "$ROOT/data"
     cd "$ROOT" || exit 1
-    setsid bash -c 'echo $$ > '"$PIDFILE"'; ps -o lstart= -p $$ | sed "s/^ *//" >> '"$PIDFILE"'; while true; do
+    setsid bash -c 'echo $$ > '"$PIDFILE"'; ps -o lstart= -p $$ | sed "s/^ *//" >> '"$PIDFILE"'; d=2; while true; do
+      sz=$(wc -c < '"$LOG"' 2>/dev/null || echo 0)
+      [ "$sz" -gt 2097152 ] && mv -f '"$LOG"' '"$LOG"'.1 2>/dev/null || true
       echo "[$(date "+%F %T")] start" >> '"$LOG"'
+      t0=$(date +%s)
       python3 -u server/app.py --port '"$PORT"' >> '"$LOG"' 2>&1
-      echo "[$(date "+%F %T")] exited($?), retry in 2s" >> '"$LOG"'
-      sleep 2
+      rc=$?; ran=$(( $(date +%s) - t0 ))
+      echo "[$(date "+%F %T")] exited($rc) after ${ran}s, retry in ${d}s" >> '"$LOG"'
+      [ "$ran" -ge 30 ] && d=2
+      sleep "$d"
+      [ "$d" -lt 60 ] && d=$((d * 2))
     done' < /dev/null > /dev/null 2>&1 &
-    for i in $(seq 1 12); do sleep 0.5; if healthy; then break; fi; done
+    for i in $(seq 1 60); do sleep 0.5; if healthy; then break; fi; done   # 30s（P2·S4-C5：冷启动更慢不误报）
     if healthy; then
       echo "已启动 → http://127.0.0.1:$PORT/"
     else

@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
 """配方中心单测（M4b-3）：注册表覆盖 / 列表 / 保存+备份 / 恢复默认 / 白名单防穿越。"""
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-SERVER = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SERVER))
+import _boot  # noqa: F401 — 直跑引导（pytest 下由 conftest 等价注入）
 
 from core import recipes  # noqa: E402
 
 
 class TestRegistry(unittest.TestCase):
     def test_registry_covers_disk(self):
-        """真库：注册表 13 份（审计 5 + 创作 8）全部实际存在。"""
-        self.assertEqual(sum(len(v) for v in recipes.REGISTRY.values()), 13)
+        """真库：注册表每一项都有对应文件（份数非契约，不硬编码——P2·S4-B14）。"""
+        self.assertGreater(sum(len(v) for v in recipes.REGISTRY.values()), 0)
         for g, rows in recipes.REGISTRY.items():
             for n, t in rows:
                 p = Path(recipes.db.ROOT) / "recipes" / g / n
@@ -22,7 +20,6 @@ class TestRegistry(unittest.TestCase):
 
     def test_audit_registry_matches_engine(self):
         """审计注册名字串与 audit.py 的 LLM_RECIPES 映射一致。"""
-        sys.path.insert(0, str(SERVER))
         from core import audit
         for key, fname in audit.LLM_RECIPES.items():
             self.assertIn(fname, [n for n, t in recipes.REGISTRY["audit"]],

@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """digest 共享模块单测（L8）：黄金对拍——同一数据下与三域旧实现逐字节等。
 （唯一有意归一：草稿组内速览「空间关系」→「空间」，见 test_draft_members_spec。）"""
-import sys
 import unittest
-from pathlib import Path
 
-SERVER = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SERVER))
+import _boot  # noqa: F401 — 直跑引导（pytest 下由 conftest 等价注入）
 
 from core import audit, digest, draft  # noqa: E402
 

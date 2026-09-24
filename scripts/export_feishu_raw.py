@@ -6,9 +6,14 @@
 - 凭证读库外配置（默认老库目录 feishu_config.json），不打印、不入库
 - 分页拉取 分镜表 / 分析表 全部记录 + 字段定义，原样 JSON 落盘
 """
-import argparse, json, urllib.request
+import argparse, json, sys, urllib.request
 from datetime import datetime, date
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "server"))
+
+from core import fsutil  # noqa: E402
 
 DEFAULT_CONFIG = "/opt/data/skills/scriptwriting/storyboard-shotlist/feishu_config.json"
 API = "https://open.feishu.cn/open-apis"
@@ -42,14 +47,31 @@ def fetch_all_records(app, table, token):
         items += d.get("items", [])
         if not d.get("has_more"):
             break
-        page = d.get("page_token", "")
+        nxt = d.get("page_token", "")
+        if not nxt or nxt == page:
+            break   # 兜底：has_more 却无/重复 token 时不打转（P1·S4-C4）
+        page = nxt
     return items
 
 def fetch_fields(app, table, token):
-    r = api("%s/bitable/v1/apps/%s/tables/%s/fields?page_size=100" % (API, app, table), token)
-    if r.get("code") != 0:
-        raise SystemExit("fields failed: %s %s" % (r.get("code"), r.get("msg")))
-    return r["data"].get("items", [])
+    """字段定义全量拉取（P1·S4-C4：补翻页，>100 字段不再静默少写）。"""
+    items, page = [], ""
+    while True:
+        url = "%s/bitable/v1/apps/%s/tables/%s/fields?page_size=100" % (API, app, table)
+        if page:
+            url += "&page_token=" + page
+        r = api(url, token)
+        if r.get("code") != 0:
+            raise SystemExit("fields failed: %s %s" % (r.get("code"), r.get("msg")))
+        d = r["data"]
+        items += d.get("items", [])
+        if not d.get("has_more"):
+            break
+        nxt = d.get("page_token", "")
+        if not nxt or nxt == page:
+            break   # 兜底（P1·S4-C4）
+        page = nxt
+    return items
 
 def main():
     ap = argparse.ArgumentParser()
@@ -69,11 +91,11 @@ def main():
     for label, tid in tables.items():
         recs = fetch_all_records(app, tid, token)
         fields = fetch_fields(app, tid, token)
-        (out / (label + ".json")).write_text(json.dumps(recs, ensure_ascii=False, indent=1), encoding="utf-8")
-        (out / (label + "_fields.json")).write_text(json.dumps(fields, ensure_ascii=False, indent=1), encoding="utf-8")
+        fsutil.dump_json(out / (label + ".json"), recs)          # 原子写单点（P1·S4-P5）
+        fsutil.dump_json(out / (label + "_fields.json"), fields)
         meta["tables"][label] = {"table_id": tid, "record_count": len(recs), "field_count": len(fields)}
         print("%s: %d records / %d fields" % (label, len(recs), len(fields)))
-    (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    fsutil.dump_json(out / "meta.json", meta)   # 原子写单点（P1·S4-P5）
     print("saved:", out)
 
 if __name__ == "__main__":

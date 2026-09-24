@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "server"))
 
 from core import ai as core_ai  # noqa: E402
 from core import db as core_db  # noqa: E402
+from core import fsutil  # noqa: E402
 
 
 def dump_db(con, mask_keys=False):
@@ -47,6 +48,16 @@ def dump_db(con, mask_keys=False):
     }
 
 
+def prune_exports(outdir, keep=20):
+    """导出件保留最近 keep 份（P2·S4-C3；失败静默）——与 snapshots 留底思路对齐。"""
+    try:
+        files = sorted(outdir.glob("studio-*.json"), key=lambda p: p.stat().st_mtime)
+        for f in files[:-keep]:
+            f.unlink()
+    except OSError:
+        pass
+
+
 def main():
     ap = argparse.ArgumentParser(description="shotlist-studio 全库 JSON 导出")
     ap.add_argument("--out", default=str(ROOT / "data" / "exports"), help="输出目录（默认 data/exports/）")
@@ -63,12 +74,11 @@ def main():
 
     outdir = Path(args.out)
     outdir.mkdir(parents=True, exist_ok=True)
-    fname = outdir / ("studio-%s.json" % time.strftime("%Y%m%d-%H%M%S"))
-    tmp = fname.with_name(fname.name + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, fname)
-    os.chmod(fname, 0o664)
+    # 毫秒后缀：同秒两次导出不再静默覆盖（P1·S4-C2）
+    ts = time.strftime("%Y%m%d-%H%M%S") + "-%03d" % int(time.time() * 1000 % 1000)
+    fname = outdir / ("studio-%s.json" % ts)
+    fsutil.dump_json(fname, data, mode=0o664)   # 原子写单点（P1·S4-P5）
+    prune_exports(outdir)
     counts = {k: len(v) for k, v in data["tables"].items()}
     print("✓ 已导出 %s（%.1f KB）" % (fname, fname.stat().st_size / 1024))
     print("  行数：%s" % json.dumps(counts, ensure_ascii=False))

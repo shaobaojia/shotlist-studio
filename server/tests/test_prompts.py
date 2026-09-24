@@ -2,14 +2,10 @@
 """core/prompts.py 无头回归（stdlib unittest，直跑：python3 server/tests/test_prompts.py -v）。"""
 import copy
 import json
-import sys
 import time
 import unittest
-from pathlib import Path
 
-SERVER = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SERVER))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _boot  # noqa: F401 — 直跑引导（pytest 下由 conftest 等价注入）
 
 from core import prompts  # noqa: E402
 from _fixture import make_prompts_db as make_db  # noqa: E402
@@ -376,15 +372,13 @@ class TestScaleSmoke(unittest.TestCase):
         ids = [r["id"] for r in con.execute("SELECT id FROM shots ORDER BY id")]
         stmts = []
         con.set_trace_callback(stmts.append)
-        t0 = time.perf_counter()
         try:
             prompts.merge_shots(con, ids)
         finally:
             con.set_trace_callback(None)
-        dt = time.perf_counter() - t0
         selects = [s for s in stmts if s.strip().upper().startswith("SELECT")]
+        # 只钉查询预算（真契约）；墙钟断言删除（NAS 抖动即假红，P2·S4-P4④）
         self.assertLessEqual(len(selects), 9, "组查询应预取：SELECT 次数 %d（含 reseq 预读 1 条，P0·S1-W11）" % len(selects))
-        self.assertLess(dt, 1.0, "merge %d 镜耗时 %.3fs" % (len(ids), dt))
 
 
 if __name__ == "__main__":

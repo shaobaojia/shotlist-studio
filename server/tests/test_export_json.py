@@ -2,17 +2,13 @@
 """全库 JSON 导出用例（批7）：形状 / 行数 / JSON 序列化安全。"""
 import importlib.util
 import json
-import sys
 import unittest
-from pathlib import Path
 
-SERVER = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SERVER))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _boot  # noqa: F401 — 直跑引导（pytest 下由 conftest 等价注入）
 
 from _fixture import make_base_db  # noqa: E402
 
-_spec = importlib.util.spec_from_file_location("export_json", SERVER.parent / "scripts" / "export_json.py")
+_spec = importlib.util.spec_from_file_location("export_json", _boot.SERVER.parent / "scripts" / "export_json.py")
 export_json = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(export_json)
 
@@ -48,6 +44,18 @@ class TestExportJson(unittest.TestCase):
         text = json.dumps(data, ensure_ascii=False)
         back = json.loads(text)
         self.assertEqual(back["tables"]["shots"][0]["shot_no"], "01")
+
+    def test_tables_manifest(self):
+        """导出契约：表清单（sorted 稳定）+ JSON 序列化安全（P2·S4-B12）。"""
+        con = make_base_db()
+        data = export_json.dump_db(con)
+        names = sorted(data["tables"])
+        self.assertEqual(names, sorted(names))
+        for must in ("scenes", "shots", "beats", "prompt_groups", "settings", "history"):
+            self.assertIn(must, names)
+        text = json.dumps(data, ensure_ascii=False)
+        self.assertIsInstance(text, str)
+        self.assertGreater(len(text), 100)
 
 
 if __name__ == "__main__":

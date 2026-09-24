@@ -8,13 +8,14 @@
 
 块 = 一段可直接插入提示词的积木文字（插入即固化）；{占位符} 在插入时自动代入当前镜的值。
 块名仅用于本脚本与清单说明；块库里以正文识别（热盒 chip 显示正文前 18 字）。
+占位符清单与前端 web/js/blocks.js 的 PLACEHOLDERS 双语对齐（P2·S4-C7：改一处必须同步另一处）。
 """
 import argparse
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
-from core import db, prompts  # noqa: E402
+from core import db, ops, prompts  # noqa: E402
 
 STYLE_BLOCK = """风格块：
 整体风格：8K IMAX。超写实——禁3D渲染，禁游戏引擎，禁游戏CG过场质感。
@@ -102,6 +103,7 @@ def load(reset=False):
     """内容级幂等：按正文查重、缺什么补什么（半载可续）；全程一个事务、末尾一次 commit。"""
     con = db.connect(rw=True)  # 写边界自带每日快照（core/db.connect 下沉）
     try:
+        # 域外特权（P2·S4-C8）：整表删除不走 prompts 域层单点；安全网 = rw 连接的每日快照
         if reset:
             con.execute("DELETE FROM blocks")
             con.execute("DELETE FROM block_categories")
@@ -119,9 +121,7 @@ def load(reset=False):
                 prompts.block_create(con, text, cid, commit=False)
                 nblk += 1
                 have.add(str(text).strip())
-        con.execute(
-            "INSERT INTO settings (key, value) VALUES ('seed_blocks_version', ?)"
-            " ON CONFLICT(key) DO UPDATE SET value=excluded.value", (SEED_VERSION,))
+        ops.kv_set(con, "seed_blocks_version", SEED_VERSION)   # KV 写单点（P2·S4-C6）
         con.commit()
         total = con.execute("SELECT COUNT(*) AS n FROM blocks").fetchone()["n"]
         print("种子载入：新增 %d 分类 / %d 块（库内共 %d 块）" % (ncat, nblk, total))

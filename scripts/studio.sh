@@ -17,6 +17,14 @@ case "$CMD" in
   test)    cd "$ROOT/server" && exec env UV_DEFAULT_INDEX="${UV_DEFAULT_INDEX:-https://pypi.tuna.tsinghua.edu.cn/simple}" uv run --with pytest python3 -m pytest tests/ -q "$@" ;;
   migrate) cd "$ROOT" && exec python3 scripts/migrate_feishu.py "$@" ;;
   export)  cd "$ROOT" && exec python3 scripts/export_json.py "$@" ;;
-  help)    echo "用法: bash scripts/studio.sh {run|stop|status|test|migrate|export} [参数]" ;;
-  *)       echo "用法: bash scripts/studio.sh {run|stop|status|test|migrate|export} [参数]" >&2; exit 2 ;;
+  seed)
+    case "${1:-}" in
+      blocks)  script="seed_blocks.py" ;;
+      audit)   script="seed_audit_rules.py" ;;
+      recipes) script="seed_recipe_defaults.py" ;;
+      *) echo "用法: bash scripts/studio.sh seed {blocks|audit|recipes} [参数]" >&2; exit 2 ;;
+    esac
+    cd "$ROOT" && exec python3 "scripts/$script" "${@:2}" ;;
+  help)    echo "用法: bash scripts/studio.sh {run|stop|status|test|migrate|export|seed} [参数]" ;;
+  *)       echo "用法: bash scripts/studio.sh {run|stop|status|test|migrate|export|seed} [参数]" >&2; exit 2 ;;
 esac

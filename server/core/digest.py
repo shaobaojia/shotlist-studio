@@ -66,6 +66,18 @@ def beats_lines(beats, kind=False, fields=(), extra=None):
     return out
 
 
+def fmt_dur(sec):
+    """秒 → m′ss″（floor + 秒补零；与图面 fmtDur 同口径。P1·S4-A3 单点）。"""
+    m = int(sec // 60)
+    s2 = int(sec % 60)
+    return "%d′%02d″" % (m, s2)
+
+
+def stats_line(n_shots, n_beats, total_sec):
+    """「N 镜 / M 节拍 / 总时长 X」统计行（P1·S4-A3 单点）。"""
+    return "%d 镜 / %d 节拍 / 总时长 %s" % (n_shots, n_beats, fmt_dur(total_sec))
+
+
 def dur_num(v):
     """时长原文 → float 或 None（纯数才认；唯一「时长→均值」口径）——P0·S2-W7（注记2）。"""
     t = (v or "").strip()

@@ -2,20 +2,15 @@
 """草稿档单测（M4b-4）：两段生成（注入 stub、零网络）/ 解析规整 / 落入落库与顺延 / 组级初稿。"""
 import json
 import os
-import sqlite3
-import sys
 import tempfile
 import threading
 import time as _t
 import unittest
-from pathlib import Path
 
-SERVER = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SERVER))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _boot  # noqa: F401 — 直跑引导（pytest 下由 conftest 等价注入）
 
 from core import draft      # noqa: E402
-from _fixture import conn_factory, make_base_db  # noqa: E402
+from _fixture import conn_factory, make_base_db, wait_job as wait_for_job  # noqa: E402
 
 SCRIPT = "内景 旧公寓客厅 深夜。男人坐在沙发上反复解锁手机，屏幕上没有新消息。他起身走到窗前拉开一条缝，对面楼的灯一盏盏灭着。"
 
@@ -85,13 +80,7 @@ class Base(unittest.TestCase):
             con.close()
 
     def wait(self, m, jid, timeout=15):
-        deadline = _t.time() + timeout
-        while _t.time() < deadline:
-            j = m.get(jid)
-            if j and not j["running"]:
-                return j
-            _t.sleep(0.05)
-        raise AssertionError("job 未在限时内完成")
+        return wait_for_job(m, jid, timeout)
 
     def run_scene(self, sid, payloads, inbox=None, m=None):
         m = m or draft.DraftJobs()
@@ -183,7 +172,7 @@ class TestSceneFlow(Base):
         with self.assertRaises(ValueError):
             m.start_scene(1, "太短", chat=stub({}), connect_factory=self.factory)
         with self.assertRaises(ValueError):
-            m.start_scene(1, "字" * 6001, chat=stub({}), connect_factory=self.factory)
+            m.start_scene(1, "字" * (draft.SCRIPT_MAX + 1), chat=stub({}), connect_factory=self.factory)
         with self.assertRaises(ValueError):
             m.start_scene(99999, SCRIPT, chat=stub({}), connect_factory=self.factory)
         with self.assertRaises(ValueError):
@@ -353,9 +342,11 @@ class TestGates(Base):
         m = draft.DraftJobs()
         calls = []
 
+        gate = threading.Event()
+
         def slow(cfg, messages):
             calls.append(1)
-            _t.sleep(0.5)
+            gate.wait(5)                     # 闸门同步（P2·S4-P4）：不再真睡
             if "草稿·节拍骨架" in messages[0]["content"]:
                 return json.dumps(BEATS_OK, ensure_ascii=False)
             return json.dumps(SHOTS_OK, ensure_ascii=False)
@@ -365,14 +356,16 @@ class TestGates(Base):
         j2 = m.start_scene(sid, SCRIPT, chat=slow, connect_factory=self.factory)
         self.assertTrue(j2.get("joined"))
         self.assertEqual(j2["id"], j1["id"])
+        gate.set()
         self.wait(m, j1["id"])
 
     def test_prompt_join_same_shot(self):
         """同一镜头初稿在跑 → 并入（M10）。"""
         m = draft.DraftJobs()
+        gate = threading.Event()
 
         def slow(cfg, messages):
-            _t.sleep(0.4)
+            gate.wait(5)                     # 闸门同步（P2·S4-P4）
             return "初稿正文"
 
         sid = self.mk_scene()
@@ -381,14 +374,16 @@ class TestGates(Base):
         j2 = m.start_prompt(sid, shid, chat=slow, connect_factory=self.factory)
         self.assertTrue(j2.get("joined"))
         self.assertEqual(j2["id"], j1["id"])
+        gate.set()
         self.wait(m, j1["id"])
 
     def test_prompt_different_shots_both_run(self):
         """不同镜头各自成任务（并入只认同一镜头）。"""
         m = draft.DraftJobs()
+        gate = threading.Event()
 
         def slow(cfg, messages):
-            _t.sleep(0.4)
+            gate.wait(5)                     # 闸门同步（P2·S4-P4）
             return "初稿正文"
 
         sid = self.mk_scene()
@@ -398,6 +393,7 @@ class TestGates(Base):
         j2 = m.start_prompt(sid, s2, chat=slow, connect_factory=self.factory)
         self.assertFalse(j2.get("joined"))
         self.assertNotEqual(j2["id"], j1["id"])
+        gate.set()
         self.wait(m, j1["id"])
         self.wait(m, j2["id"])
 
@@ -405,8 +401,10 @@ class TestGates(Base):
         """轮询期轻载（P7）：在跑时骨架正文不回传，数量字段保留（阶段提示用）。"""
         m = draft.DraftJobs()
 
+        gate = threading.Event()
+
         def slow(cfg, messages):
-            _t.sleep(0.5)
+            gate.wait(5)                     # 闸门同步（P2·S4-P4）
             if "草稿·节拍骨架" in messages[0]["content"]:
                 return json.dumps(BEATS_OK, ensure_ascii=False)
             return json.dumps(SHOTS_OK, ensure_ascii=False)
@@ -417,6 +415,7 @@ class TestGates(Base):
         self.assertTrue(mid["running"])
         self.assertEqual(mid["beats"], [])
         self.assertIn("beats_n", mid)
+        gate.set()
         j2 = self.wait(m, j["id"])
         self.assertGreater(len(j2["beats"]), 0)
 

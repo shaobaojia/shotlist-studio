@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
 """共享测试夹具（审计 §三-1）：test_ops / test_prompts 同源——手写 SQL 建状态，不用被测代码搭夹具。"""
 import sqlite3
-import sys
-from pathlib import Path
+import time
 
-SERVER = Path(__file__).resolve().parents[1]
-SCHEMA = (SERVER / "schema.sql").read_text(encoding="utf-8")
+import _boot   # 引导单点（P2·S4-P3）
 
-sys.path.insert(0, str(SERVER))
+SCHEMA = (_boot.SERVER / "schema.sql").read_text(encoding="utf-8")
+
 from core import ops as _ops   # noqa: E402  只借常量（BEAT_KIND_DEFAULT）；夹具仍手写 SQL
+
+
+def wait_job(m, jid, timeout=15):
+    """轮询到任务终态（单点，P2·S4-P4）：非 running 即返回；超时抛断言。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        j = m.get(jid)
+        if j and not j["running"]:
+            return j
+        time.sleep(0.05)
+    raise AssertionError("job 未在限时内完成")
 
 
 def _conn(db_path=None):

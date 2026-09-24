@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
 """API 薄层用例（批4/P12）：守卫分支 + 任务契约形状（mock 连接与引擎，零网络零库）。"""
-import sys
 import unittest
-from pathlib import Path
 from unittest import mock
 
-SERVER = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SERVER))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _boot  # noqa: F401 — 直跑引导（pytest 下由 conftest 等价注入）
 
 from _fixture import make_base_db  # noqa: E402
 from api import ai as api_ai  # noqa: E402
