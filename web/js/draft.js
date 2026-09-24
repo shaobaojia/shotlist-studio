@@ -5,7 +5,7 @@ import { api } from './api.js';
 import { el, toast, durText } from './ui.js';
 import { limits } from './state.js';
 import { recordCustomUndo } from './edit.js';
-import { pollJob, POLL, failText, joinedToast } from './aicard.js';
+import { pollJob, POLL, failText, joinedToast, cardLife } from './aicard.js';
 import { panelShell, floatEnter, floatLeave, floatClose } from './float.js';
 
 let card = null;      // 场次草稿卡
@@ -191,10 +191,9 @@ function countText(beats, shots) {
 
 export function openPromptDraft(opts) {
   let self = null;                // 本卡实例：轮询只认它
-  let seq = 0;                    // 本轮轮询口令：换轮/关闭即作废（旧闭包只许碰本实例）
-  const stop = () => { seq++; };
+  let life = null;                // 本轮令牌（F4-L2：seq 口令 → cardLife 单点；换轮/关闭即作废）
   const close = () => {
-    stop();
+    if (life) life.close();
     if (self) self.remove();
     if (pd === self) pd = null;
     floatLeave('draft', close);
@@ -234,22 +233,23 @@ export function openPromptDraft(opts) {
   };
 
   const run = async () => {
-    const my = ++seq;                             // 本轮口令：旧轮作废
+    if (life) life.close();                        // 旧轮作废
+    const my = life = cardLife();
     try {
       const res = await api.draftPrompt(opts.sceneId, opts.shotId);
-      if (pd !== self || seq !== my) return;      // 卡已被替换/关闭：本轮作废
+      if (!my.alive()) return;                     // 卡已被替换/关闭：本轮作废
       const jid = res.job.id;
       if (res.job.joined) joinedToast('pdraft');   // F4-W20：文案单点
       const r = await pollJob(() => api.draftJob(jid).then((x) => x.job), {
         interval: POLL.slow, tolerant: true,   // F4-W26：节奏单点
-        alive: () => pd === self && seq === my,
+        alive: () => my.alive(),
       });
       if (r.st === 'abort') return;
       if (r.st !== 'done') { stage.textContent = failText(r, POLL.slow); return; }   // F4-P8：终态文案单点
       if (r.job.error) { stage.textContent = '生成失败：' + r.job.error; return; }
       renderText(r.job.text);
     } catch (err) {
-      if (pd === self && seq === my) stage.textContent = '启动失败：' + err.message;
+      if (my.alive()) stage.textContent = '启动失败：' + err.message;
     }
   };
   run();
