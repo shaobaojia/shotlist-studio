@@ -1,7 +1,7 @@
 // 痕迹回看面板（M2-7）：当前场全操作留痕（旧值 → 新值），可搜索、可刷新。
 // 数据源 /api/history（倒序，最近在前）；面板固定右侧，页面刷新后自动跟新（refreshHistoryIfOpen）。
 import { api } from './api.js';
-import { state } from './state.js';
+import { fieldsOf } from './state.js';
 import { el } from './ui.js';
 
 const ENTITY_LABEL = { shots: '镜头', beats: '节拍', scenes: '场次', prompt_groups: '提示词组', audit: '审计' };
@@ -81,7 +81,7 @@ async function load() {
 function fieldLabel(r) {
   if (SPECIAL_FIELD[r.field]) return SPECIAL_FIELD[r.field];
   try {
-    const pools = { shots: state.meta.shot_fields, beats: state.meta.beat_fields, scenes: state.meta.scene_fields };
+    const pools = { shots: fieldsOf('shots'), beats: fieldsOf('beats'), scenes: fieldsOf('scenes') };
     const f = (pools[r.entity] || []).find((x) => x.key === r.field);
     if (f && f.label) return f.label;
   } catch (e) { /* ignore */ }

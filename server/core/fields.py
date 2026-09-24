@@ -9,6 +9,7 @@ options = 类型化控件的预设清单（下拉）：
   - focal：焦段档位；camera_pos：机位五色（单选）；shot_fn：镜头职能
   运镜（camera_move）不设 options（下拉锁创作）；配 presets 常用档——一键落值，仍可自由手写（自定义）。
 写白名单由 core/ops.py 从各表清单派生（prompt 为虚拟列不进写白名单；position/id/时间戳不直改）。
+multiline = 前端多行编辑判据（F1-P5：原前端白名单 Set 收进字典单源）；w / in_table = 列宽与全片表列（L3 派生用）。
 """
 CAM_TIERS = ["全景 ★", "中全 ★★", "中景 ★★★", "中近 ★★★", "近景 ★★★★", "特写 ★★★★★", "极特 ★★★★★"]
 CAM_FOCALS = ["24mm", "35mm", "50mm", "85mm", "100mm"]
@@ -27,14 +28,14 @@ SHOT_FIELDS = [
     {"key": "shot_no",       "label": "#",        "type": "text",     "w": 42,  "in_table": True},
     {"key": "camera_move",   "label": "运镜",     "type": "text",     "w": 72,  "in_table": True,
      "presets": ["固定", "手持", "缓推", "微推", "拉跟", "上摇", "横移", "跟拍", "弧移", "环绕", "滑动变焦"]},
-    {"key": "spatial",       "label": "空间关系", "type": "spatial",  "w": 160, "in_table": True},
-    {"key": "shot_size",     "label": "摄影机",   "type": "camera",   "w": 110, "in_table": True, "options": CAM_TIERS},
+    {"key": "spatial",       "label": "空间关系", "type": "spatial",  "w": 160, "in_table": True, "multiline": True},
+    {"key": "shot_size",     "label": "摄影机",   "type": "camera",   "w": 110, "in_table": True, "multiline": True, "options": CAM_TIERS},
     {"key": "camera_pos",    "label": "机位",     "type": "jiwei",    "w": 90,  "in_table": True, "options": ["🔴 正打", "🟡 反打", "🟢 第三人称", "🔵 空间环境", "🟣 插入/切出"]},
-    {"key": "blocking",      "label": "动作调度", "type": "text",     "w": 300, "in_table": True},
-    {"key": "dialogue",      "label": "台词",     "type": "dialogue", "w": 180, "in_table": True},
+    {"key": "blocking",      "label": "动作调度", "type": "text",     "w": 300, "in_table": True, "multiline": True},
+    {"key": "dialogue",      "label": "台词",     "type": "dialogue", "w": 180, "in_table": True, "multiline": True},
     {"key": "duration",      "label": "时长",     "type": "duration", "w": 44,  "in_table": True},
-    {"key": "audio",         "label": "音频",     "type": "audio",    "w": 120, "in_table": True},
-    {"key": "director_note", "label": "导演备注", "type": "notes",    "w": 180, "in_table": True},
+    {"key": "audio",         "label": "音频",     "type": "audio",    "w": 120, "in_table": True, "multiline": True},
+    {"key": "director_note", "label": "导演备注", "type": "notes",    "w": 180, "in_table": True, "multiline": True},
     {"key": "prompt",        "label": "提示词",   "type": "prompt",   "w": 160, "in_table": True},
     {"key": "shot_fn",       "label": "职能",     "type": "text",     "w": 56,  "in_table": False, "options": ["建立", "动作镜", "反应镜", "触发", "插入"]},
     {"key": "focal",         "label": "焦段",     "type": "text",     "w": 58,  "in_table": False, "options": CAM_FOCALS},
@@ -43,13 +44,13 @@ SHOT_FIELDS = [
 ]
 
 SCENE_FIELDS = [
-    {"key": "scene_no",   "label": "场号",     "type": "text"},
-    {"key": "title",      "label": "场景名",   "type": "text"},
-    {"key": "value",      "label": "场景价值", "type": "text"},
-    {"key": "pole_start", "label": "起点极",   "type": "text"},
-    {"key": "pole_end",   "label": "终点极",   "type": "text"},
-    {"key": "turn",       "label": "翻转",     "type": "text"},
-    {"key": "pov",        "label": "视点角色", "type": "text"},
+    {"key": "scene_no",   "label": "场号",     "type": "text", "w": 76,  "in_table": True},
+    {"key": "title",      "label": "场景名",   "type": "text", "w": 120, "in_table": True},
+    {"key": "value",      "label": "场景价值", "type": "text", "w": 76,  "in_table": True},
+    {"key": "pole_start", "label": "起点极",   "type": "text", "w": 90,  "in_table": False},
+    {"key": "pole_end",   "label": "终点极",   "type": "text", "w": 90,  "in_table": False},
+    {"key": "turn",       "label": "翻转",     "type": "text", "w": 150, "in_table": True},
+    {"key": "pov",        "label": "视点角色", "type": "text", "w": 64,  "in_table": True},
 ]
 
 BEAT_FIELDS = [
@@ -65,7 +66,7 @@ BEAT_FIELDS = [
     {"key": "mood_temp",      "label": "情绪温度",     "type": "text"},
     {"key": "shot_estimate",  "label": "预估总镜头数", "type": "text"},
     {"key": "rhythm_density", "label": "节奏密度",     "type": "text"},
-    {"key": "beat_action",    "label": "节拍动作",     "type": "text"},
+    {"key": "beat_action",    "label": "节拍动作",     "type": "text", "multiline": True},
     {"key": "beat_attr",      "label": "节拍属性",     "type": "text"},
     {"key": "pov",            "label": "视点角色",     "type": "text"},
 ]

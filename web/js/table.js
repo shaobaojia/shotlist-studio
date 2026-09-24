@@ -1,6 +1,6 @@
 // 表格模块：列构建 / 单元格渲染 / 就地编辑绑定 / 节拍区 / 详情区。
 // 显示规格 = cells.js（老库移植）；编辑引擎 = edit.js；页面组装在 scene.js。
-import { state, fieldOf, groupsById } from './state.js';
+import { state, fieldOf, groupsById, fieldsOf } from './state.js';
 import { el, fmt, toast, flashIntoView } from './ui.js';
 import { cellContent } from './cells.js';
 import { attachEditable, attachCamEditor, parseCam, recordUndo } from './edit.js';
@@ -8,11 +8,9 @@ import { api } from './api.js';
 import { buildPromptBox, openPromptDrawer, paintPromptCell } from './hotbox.js';
 import { isAiField, aiOpenFor } from './aiwrite.js';
 
-const MULTILINE_TYPES = new Set(['spatial', 'dialogue', 'audio', 'notes', 'camera']);
-const MULTILINE_KEYS = new Set(['blocking']);
-
+// 多行编辑判据＝字段字典的 multiline（F1-P5：白名单收进 fields.py 单源）
 function isMultiline(f) {
-  return MULTILINE_TYPES.has(f.type) || MULTILINE_KEYS.has(f.key);
+  return !!(f && f.multiline);
 }
 
 const tableCols = new WeakMap();   // table 元素 → 列定义（列宽跨表同步用）
@@ -66,7 +64,7 @@ function startColResize(e, f, opts) {
 }
 
 function tableColumns(beatCol, prefs) {
-  const fields = state.meta.shot_fields.filter((f) => f.in_table && !(prefs.hidden && prefs.hidden[f.key]));
+  const fields = fieldsOf('shots').filter((f) => f.in_table && !(prefs.hidden && prefs.hidden[f.key]));
   const cols = [{ key: '__toggle', label: '', type: 'toggle', w: 26 }].concat(fields);
   if (beatCol) {
     const i = cols.findIndex((c) => c.key === 'shot_no');
@@ -312,7 +310,7 @@ function lensSave(s, refresh) {
 
 function detailBox(s, groups, data) {
   const box = el('div', 'detail-grid');
-  for (const f of state.meta.shot_fields) {
+  for (const f of fieldsOf('shots')) {
     if (f.type === 'prompt') continue;
     const item = el('div', 'kv-item');
     item.dataset.field = f.key;
@@ -402,7 +400,7 @@ export function beatSection(b, data, opts) {
     if (!b.beat_action) act.classList.add('empty');
     renderBeatAction(act, b);
     attachEditable(act, {
-      table: 'beats', id: b.id, field: 'beat_action', label: '节拍概述', multiline: true,
+      table: 'beats', id: b.id, field: 'beat_action', label: '节拍概述', multiline: isMultiline(fieldOf('beat_action', 'beats')),
       aiOpen: aiOpenFor,
       getValue: () => b.beat_action,
       onLocal: (v) => { b.beat_action = v; },

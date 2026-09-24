@@ -1,7 +1,7 @@
 // 场级页——页面组装：头部（可编）/ 工具条（整理镜号·开关·筛选·跳转）/ 分组与平铺；
 // 表格与节拍区在 table.js；编辑引擎在 edit.js；拖动在 drag.js；筛选在 filter.js。
 import { api, exportUrl, downloadUrl } from './api.js';
-import { state, fieldOf, groupsById } from './state.js';
+import { state, fieldOf, groupsById, fieldsOf } from './state.js';
 import { hashOf, isCurrentScene } from './route.js';
 import { el, fmt, toast, once, durTick, flashIntoView } from './ui.js';
 import { JIWEI_LEGEND } from './cells.js';
@@ -542,7 +542,7 @@ function viewTools() {
     }
   };
   const openColsMenu = (anchor) => {
-    const items = state.meta.shot_fields.filter((f) => f.in_table).map((f) => (
+    const items = fieldsOf('shots').filter((f) => f.in_table).map((f) => (
       { key: f.key, label: f.label || f.key, current: !prefs.hidden[f.key] }
     ));
     items.push({ sep: true }, { key: '__all', label: '全部显示' });

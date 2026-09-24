@@ -1,5 +1,5 @@
 // 筛选与镜号跳转（DOM 级：不重建表格、输入不丢焦）。
-import { state, groupsById } from './state.js';
+import { groupsById, fieldsOf } from './state.js';
 import { el, toast, flashIntoView } from './ui.js';
 
 let filterState = { q: '', noPrompt: false };
@@ -67,7 +67,7 @@ function shotMatches(s, groups) {
   if (filterState.q) {
     const q = filterState.q.toLowerCase();
     let hay = '';
-    for (const f of state.meta.shot_fields) {
+    for (const f of fieldsOf('shots')) {
       if (f.type === 'prompt') continue;
       if (s[f.key] != null) hay += String(s[f.key]).toLowerCase() + '\n';
     }
