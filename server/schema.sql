@@ -167,4 +167,5 @@ CREATE INDEX idx_shots_scene   ON shots(scene_id, position);
 CREATE INDEX idx_shots_group   ON shots(prompt_group_id);
 CREATE INDEX idx_pgroups_scene ON prompt_groups(scene_id, position);
 CREATE INDEX idx_audit_scene   ON audit_issues(scene_id, status);
+CREATE UNIQUE INDEX idx_audit_rules_key ON audit_rules(key);   -- S2-L1：key 单源唯一（NULL 行豁免）
 CREATE INDEX idx_history_scene ON history(scene_id, id);   -- 列序换 id：痕迹面板 ORDER BY id DESC 免临时排序（P0·S1-P8④）

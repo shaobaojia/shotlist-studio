@@ -58,13 +58,14 @@ RULES = [
                                          "盯着", "望着", "望向", "停下脚步", "转过身"]}},
      "field": "blocking", "desc": "模糊词粗筛 + 判定与具象化建议。"},
 ]
-_RULE_BY_TITLE = {r["title"]: r for r in RULES}
+_RULE_BY_KEY = {r["key"]: r for r in RULES}       # 运行链唯一查找面（S2-L1）
+_TITLE_KEY = {r["title"]: r["key"] for r in RULES}   # 老行回填映射（迁移链内部，S2-L1）
 LLM_RECIPES = {r["key"]: r["recipe"] for r in RULES if r.get("recipe")}   # key → 文件名（派生）
 
 
 def _rule_key(rule):
-    """规则键：key 优先；老行（无 key）按 title 回退（迁移回填后不再需要）——P0·S2-W1。"""
-    return rule.get("key") or (_RULE_BY_TITLE.get(rule.get("title")) or {}).get("key")
+    """规则键（S2-L1：key 单源）。迁移+seed 保证库内 key 恒在，运行链不再回退 title。"""
+    return rule.get("key") or ""
 
 
 # ════════ 上下文装载 ════════
@@ -490,7 +491,7 @@ def _params(row):
         return {}, "参数 JSON 损坏：%s" % e
     if not isinstance(p, dict):
         return {}, "参数不是对象"
-    reg = _RULE_BY_TITLE.get(row.get("title")) or {}
+    reg = _RULE_BY_KEY.get(row.get("key")) or {}
     out = {}
     for k, spec in (reg.get("params") or {}).items():
         out[k] = p[k] if (k in p and p[k] is not None) else spec.get("default")
@@ -502,7 +503,7 @@ def _params(row):
 def _check_params(rule, params):
     """写侧参数校验（P0·S2-P2①/P1③）：未知键拒；type 可转；min 下界；空表拒。
     通过时返回规范化后的整体参数（只含 schema 键）。"""
-    reg = _RULE_BY_TITLE.get(rule.get("title")) or {}
+    reg = _RULE_BY_KEY.get(rule.get("key")) or {}
     schema = reg.get("params") or {}
     out = {}
     for k, v in params.items():
@@ -554,7 +555,7 @@ def open_counts(con):
 
 def issues_state(con, scene_id):
     """场问题清单 + 计数 + 孤儿计数（P0·S2-§4：规则表单次读；W11：orphan 可观测）。"""
-    rules = {r["id"]: r for r in con.execute("SELECT id, title, kind FROM audit_rules")}
+    rules = {r["id"]: dict(r) for r in con.execute("SELECT id, key, title, kind FROM audit_rules")}
     rows = [dict(r) for r in con.execute(
         "SELECT * FROM audit_issues WHERE scene_id=?"
         " ORDER BY CASE status WHEN ? THEN 0 WHEN ? THEN 1 ELSE 2 END,"
@@ -566,7 +567,7 @@ def issues_state(con, scene_id):
         row = rules.get(rid)
         if row is None:
             orphan += 1                            # 悬空 rule_id（规则重种后旧 id 不复存在）
-        reg = (_RULE_BY_TITLE.get(row["title"]) or {}) if row else {}
+        reg = (_RULE_BY_KEY.get(row.get("key")) or {}) if row else {}
         r["rule_title"] = row["title"] if row else "?"
         r["kind"] = row["kind"] if row else "?"
         r["field"] = reg.get("field")              # 「去改」目标列（L9：注册表下发）
@@ -580,8 +581,8 @@ def rules_state(con):
         d = dict(r)
         d["enabled"] = bool(d["enabled"])
         d["params"], d["params_error"] = _params(d)
-        reg = _RULE_BY_TITLE.get(d["title"]) or {}
-        d["key"] = d.get("key") or reg.get("key")
+        reg = _RULE_BY_KEY.get(d.get("key")) or {}
+        d["key"] = d.get("key") or ""
         d["desc"] = reg.get("desc", "")
         d["recipe"] = reg.get("recipe")
         d["params_schema"] = {k: {kk: v[kk] for kk in ("label", "type", "min") if kk in v}
@@ -636,11 +637,24 @@ def update_rule(con, rid, enabled=None, params=None):
 
 
 def _ensure_key_column(con):
-    """迁移（幂等）：老库 audit_rules 补 key 列（G1「标题当键」退役）。"""
+    """迁移（幂等）：老库 audit_rules 补 key 列 + 重复 key 收敛 + UNIQUE 索引（G1「标题当键」退役 · S2-L1）。"""
     cols = {r[1] for r in con.execute("PRAGMA table_info(audit_rules)")}
     if "key" not in cols:
         con.execute("ALTER TABLE audit_rules ADD COLUMN key TEXT")
         con.commit()
+    # 重复 key 收敛（保最小 id；被删行的挂靠问题重指保留行）——UNIQUE 索引前置
+    dups = [r[0] for r in con.execute(
+        "SELECT key FROM audit_rules WHERE key IS NOT NULL AND key != ''"
+        " GROUP BY key HAVING COUNT(*) > 1")]
+    for k in dups:
+        ids = [r[0] for r in con.execute(
+            "SELECT id FROM audit_rules WHERE key=? ORDER BY id", (k,))]
+        keep, drop = ids[0], ids[1:]
+        for d in drop:
+            con.execute("UPDATE audit_issues SET rule_id=? WHERE rule_id=?", (keep, d))
+            con.execute("DELETE FROM audit_rules WHERE id=?", (d,))
+    con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_rules_key ON audit_rules(key)")
+    con.commit()
 
 
 def _default_params(r):
@@ -662,7 +676,8 @@ def seed_default_rules(con, reset=False):
     返回：reset 时 = 规则总数；否则 = 新增条数（回填不计）。"""
     _ensure_key_column(con)
     if reset:
-        old = {r["id"]: (r["key"] or r["title"]) for r in con.execute(
+        # S2-L1：老行（无 key）经注册表 title 映射回填后统一按 key 重映
+        old = {r["id"]: (r["key"] or _TITLE_KEY.get(r["title"]) or "") for r in con.execute(
             "SELECT id, title, key FROM audit_rules")}
         links = [(r["id"], r["rule_id"]) for r in con.execute(
             "SELECT id, rule_id FROM audit_issues WHERE rule_id IS NOT NULL")]
@@ -671,21 +686,33 @@ def seed_default_rules(con, reset=False):
         for r in RULES:
             new[r["key"]] = _insert_rule(con, r)
         for iid, old_rid in links:
-            ref = old.get(old_rid)
-            nid = new.get(ref) or new.get(_TITLE_KEY.get(ref) or "")
+            nid = new.get(old.get(old_rid) or "")
             if nid:
                 con.execute("UPDATE audit_issues SET rule_id=? WHERE id=?", (nid, iid))
         con.commit()
         return len(RULES)
-    db_by_title = {r["title"]: r for r in con.execute("SELECT * FROM audit_rules")}
+    # S2-L1：按 key 查重（老行无 key → 经 title 认领并回填——迁移链唯一 title 用点）
+    db_by_key = {}
+    db_by_title = {}
+    for r in con.execute("SELECT * FROM audit_rules"):
+        d = dict(r)
+        if d.get("key"):
+            db_by_key[d["key"]] = d
+        db_by_title[d["title"]] = d
     added = 0
     for r in RULES:
-        row = db_by_title.get(r["title"])
+        row = db_by_key.get(r["key"])
+        if row is None:
+            old = db_by_title.get(r["title"])
+            if old is not None and not old.get("key"):
+                con.execute("UPDATE audit_rules SET key=? WHERE id=?", (r["key"], old["id"]))
+                row = old
+                row["key"] = r["key"]
         if row is None:
             _insert_rule(con, r)
             added += 1
         else:
-            if (dict(row).get("key") or "") != r["key"]:
+            if (row.get("key") or "") != r["key"]:
                 con.execute("UPDATE audit_rules SET key=? WHERE id=?", (r["key"], row["id"]))
             try:
                 cur = json.loads(row["params"] or "{}")
