@@ -1,7 +1,7 @@
 // 场级页——页面组装：头部（可编）/ 工具条（整理镜号·开关·筛选·跳转）/ 分组与平铺；
 // 表格与节拍区在 table.js；编辑引擎在 edit.js；拖动在 drag.js；筛选在 filter.js。
 import { api } from './api.js';
-import { state, fieldOf } from './state.js';
+import { state, fieldOf, groupsById } from './state.js';
 import { hashOf, isCurrentScene } from './route.js';
 import { el, fmt, toast, once, durTick, flashIntoView } from './ui.js';
 import { JIWEI_LEGEND } from './cells.js';
@@ -251,8 +251,7 @@ function paintScene(view) {
     return;
   }
   freeze.appendChild(viewTools());
-  promptGroupsMap = {};
-  for (const g of data.prompt_groups) promptGroupsMap[g.id] = g;
+  promptGroupsMap = groupsById(data);
   const topts = { prefs: prefs, sortState: sortState, onSort: cycleSort, refresh: refreshCurrentView, savePrefs: savePrefs, groups: promptGroupsMap };
   const flat = !!sortState || prefs.viewMode === 'flat';
   if (flat) {

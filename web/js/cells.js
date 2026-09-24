@@ -1,6 +1,7 @@
 // 老库单元格渲染——规格移植自 storyboard-shotlist（buildRow / formatKongjian / JIWEI_SHORT）。
 // 全部 DOM 构建（数据不进 innerHTML），返回 DocumentFragment。
 import { el, durText } from './ui.js';
+import { parseCam } from './edit.js';
 
 // 机位五色 → 单字缩写（原样搬自老库）
 const JIWEI_SHORT = {
@@ -10,13 +11,11 @@ const JIWEI_SHORT = {
   '\u{1F535} 空间环境': '\u{1F535}环',
   '\u{1F7E3} 插入/切出': '\u{1F7E3}插',
 };
-export const JIWEI_LEGEND = ['\u{1F534} 正打', '\u{1F7E1} 反打', '\u{1F7E2} 第三人称', '\u{1F535} 空间环境', '\u{1F7E3} 插入/切出'];
+export const JIWEI_LEGEND = Object.keys(JIWEI_SHORT);   // 单点派生（F1-W16）
 
-// 摄影机列 = 景别 + 焦段（景深后缀识别后丢弃；2026-09-19 实测弃用）
-const LENS_RE = /(\d+mm)(?:·(?:浅|中|深)(?:→(?:浅|中|深))?)?/;
-
-export function cellContent(type, value, extra) {
-  const v = value == null ? '' : String(value);
+export function cellContent(f, s) {
+  const type = f.type;
+  const v = (s && s[f.key]) == null ? '' : String(s[f.key]);
   const frag = document.createDocumentFragment();
   const push = (n) => frag.appendChild(n);
   const txt = (t) => push(document.createTextNode(t));
@@ -34,14 +33,11 @@ export function cellContent(type, value, extra) {
   }
 
   if (type === 'camera') {
-    const raw = v.trim();
-    const m = raw.match(LENS_RE);
-    const lens = m ? m[1] : (extra && extra.focal ? String(extra.focal).trim() : null);
-    const framing = m ? (raw.slice(0, m.index) + raw.slice(m.index + m[0].length)).trim() : raw;
-    const parts = framing.indexOf('\u2193') !== -1
-      ? [framing.split('\u2193')[0].trim(), '\u2193', (framing.split('\u2193')[1] || '').trim()]
-      : [framing];
-    parts.forEach((p, i) => { if (i) br(); txt(p); });
+    // 解析单点（F1-W17）：复用 edit.parseCam；景深后缀丢弃口径不变
+    const p = parseCam(v);
+    const lens = p.lens || ((s && s.focal) ? String(s.focal).trim() : null);
+    const parts = p.t2 ? [p.t1, '\u2193', p.t2] : [p.t1];
+    parts.forEach((it, i) => { if (i) br(); txt(it); });
     if (lens) { br(); push(el('span', 'lens-tech', lens)); }
     return frag;
   }

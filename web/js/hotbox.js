@@ -3,6 +3,7 @@
 // 写作逻辑不变：块库点插（插入即固化）+ 自由手写；{占位符} 在插入瞬间代入当前镜的值。
 import { api } from './api.js';
 import { el, toast, growTextarea, durText, isFloatTarget, isTypingTarget, flashIntoView } from './ui.js';
+import { groupsById } from './state.js';
 import { openMenu, menuEl } from './menu.js';
 import { recordUndo, undo as globalUndo } from './edit.js';
 import { storeAsBlock, byPosition } from './blocks.js';
@@ -756,8 +757,7 @@ export function applyPromptGroups(list) {
 function syncPromptCells() {
   const data = ctx.getData();
   if (!data) return;
-  const map = {};
-  for (const g of data.prompt_groups) map[g.id] = g;
+  const map = groupsById(data);
   for (const s of (ctx.allShots() || [])) {
     updatePromptCell(s, s.prompt_group_id != null ? (map[s.prompt_group_id] || null) : null);
   }

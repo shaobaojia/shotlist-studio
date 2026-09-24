@@ -1,6 +1,6 @@
 // 表格模块：列构建 / 单元格渲染 / 就地编辑绑定 / 节拍区 / 详情区。
 // 显示规格 = cells.js（老库移植）；编辑引擎 = edit.js；页面组装在 scene.js。
-import { state, fieldOf } from './state.js';
+import { state, fieldOf, groupsById } from './state.js';
 import { el, fmt, toast, flashIntoView } from './ui.js';
 import { cellContent } from './cells.js';
 import { attachEditable, attachCamEditor, parseCam, recordUndo } from './edit.js';
@@ -16,12 +16,6 @@ function isMultiline(f) {
 }
 
 const tableCols = new WeakMap();   // table 元素 → 列定义（列宽跨表同步用）
-
-function buildGroupsMap(data) {
-  const m = {};
-  for (const g of data.prompt_groups) m[g.id] = g;
-  return m;
-}
 
 function allShotTables() {
   return Array.from(document.querySelectorAll('table.shots'));
@@ -84,7 +78,7 @@ function tableColumns(beatCol, prefs) {
 export function buildTable(shots, opts) {
   const data = opts.data;
   const cols = tableColumns(!!opts.beatCol, opts.prefs);
-  const groups = opts.groups || buildGroupsMap(data);   // 单帧共用映射（scene 注入）；缺省退回本表一份
+  const groups = opts.groups || groupsById(data);   // 单帧共用映射（scene 注入）；缺省退回本表一份
 
   const wrap = el('div', 'table-wrap');
   const t = el('table', 'shots');
@@ -247,7 +241,7 @@ function shotCell(s, f, groups, data, hook) {
 
 function renderShotField(td, s, f) {
   td.textContent = '';
-  td.appendChild(cellContent(f.type, s[f.key], f.type === 'camera' ? { focal: s.focal } : null));
+  td.appendChild(cellContent(f, s));
 }
 
 function refreshDetailValue(s, key) {

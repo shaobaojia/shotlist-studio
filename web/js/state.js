@@ -6,3 +6,10 @@ export function fieldOf(key, table) {
   const list = table === 'beats' ? m.beat_fields : (table === 'scenes' ? m.scene_fields : m.shot_fields);
   return ((list || []).find((x) => x.key === key)) || null;
 }
+
+// 提示词组映射单点（F1-P7）：id → group（scene 注入 / 各表缺省各拿一份）
+export function groupsById(data) {
+  const m = {};
+  for (const g of (data && data.prompt_groups) || []) m[g.id] = g;
+  return m;
+}

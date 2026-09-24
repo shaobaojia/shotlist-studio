@@ -1,5 +1,5 @@
 // 筛选与镜号跳转（DOM 级：不重建表格、输入不丢焦）。
-import { state } from './state.js';
+import { state, groupsById } from './state.js';
 import { el, toast, flashIntoView } from './ui.js';
 
 let filterState = { q: '', noPrompt: false };
@@ -86,8 +86,7 @@ export function applyFilter(ctx) {
   const data = ctx.getData();
   if (!view || !data) return;
   const active = filterActive();
-  const groups = {};
-  for (const g of data.prompt_groups) groups[g.id] = g;
+  const groups = groupsById(data);
   const map = {};
   for (const s of ctx.allShots()) map[s.id] = s;
   let shown = 0;
