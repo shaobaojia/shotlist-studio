@@ -675,12 +675,17 @@ function renderPreview(pb) {
 }
 
 function refreshPreviewsForGroup(gid) {
-  document.querySelectorAll('.prompt-box').forEach((pb) => {
-    const c = PB_CTX.get(pb);
-    if (!c) return;
-    const g = groupOf(c.s, c.groups);
-    if (g && g.id === gid) renderPreview(pb);
-  });
+  // F4-L4①：按组内镜定向重画（行内引用）——原全表扫 .prompt-box + 逐盒判组退役
+  const map = ctx.groupsMap ? ctx.groupsMap() : null;
+  const g = map ? map[gid] : null;
+  if (!g) return;
+  const shots = ctx.allShots() || [];
+  for (const no of g.member_shots) {
+    const s = shots.find((x) => x.shot_no === no);
+    if (!s) continue;
+    const pb = document.querySelector('tr.detail[data-for="' + s.id + '"] .prompt-box');
+    if (pb) renderPreview(pb);
+  }
 }
 
 function refreshAllPreviews() {
