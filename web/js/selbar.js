@@ -232,8 +232,13 @@ function build() {
 // —— 批量设值·域选择（M5 批2c / F2-W15 域化）：'b:' 节拍 / 's:' 场景 / 裸键=镜头 ——
 function pickField() {
   if (!pick.field) return null;
-  if (pick.field.indexOf('b:') === 0) { const k = pick.field.slice(2); return { dom: DOMAINS.beats, key: k, f: fieldOf(k, 'beats') }; }
-  if (pick.field.indexOf('s:') === 0) { const k = pick.field.slice(2); return { dom: DOMAINS.scenes, key: k, f: fieldOf(k, 'scenes') }; }
+  for (const key of Object.keys(DOMAINS)) {          // F2-W15：前缀解析数据化（原 if 链逐域手抄）
+    const dom = DOMAINS[key];
+    if (dom.prefix && pick.field.indexOf(dom.prefix) === 0) {
+      const k = pick.field.slice(dom.prefix.length);
+      return { dom: dom, key: k, f: fieldOf(k, dom.table) };
+    }
+  }
   return { dom: DOMAINS.shots, key: pick.field, f: fieldOf(pick.field) };
 }
 

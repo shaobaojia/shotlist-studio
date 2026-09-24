@@ -87,8 +87,9 @@ export function notifyRowsChanged(table, field, id) {
   window.dispatchEvent(new CustomEvent('shotlist:rows-changed', { detail: { table: table, field: field, id: id } }));
 }
 
-// cfg: { table, id, field, label, getValue(), onLocal(v), renderCell(),
-//        multiline?, select?: [options], save?: async (oldV, newV) => (抛错=失败) }
+// cfg: { table, id, field, label, getValue(), onLocal(v), renderCell(),   // 回调三件必填（入口校验，F2-L1 硬度统一）
+//        multiline?, select?: [options], presets?, aiOpen?, dbl?, walk?,
+//        write?: async (field, v)（缺省 api.update）, save?: async (oldV, newV) => (抛错=失败) }
 // 编辑句柄（F2-W11）：跨模块入口收进 WeakMap，不再借 DOM expando 传值
 const EDITOR_HANDLES = new WeakMap();
 export function editorHandleAt(host) {
@@ -96,6 +97,10 @@ export function editorHandleAt(host) {
 }
 
 export function attachEditable(host, cfg) {
+  // F2-L1：契约三件必填——入口即拒（内部调用点不再需要逐处守卫；原「有处守卫有处抛错」两种硬度统一）
+  for (const k of ['getValue', 'onLocal', 'renderCell']) {
+    if (typeof cfg[k] !== 'function') throw new Error('attachEditable：cfg 缺 ' + k + '（契约必填）');
+  }
   host.classList.add('editable');
   if (!host.title) host.title = cfg.dbl ? '双击编辑' : '点击编辑';
   host.addEventListener(cfg.dbl ? 'dblclick' : 'click', (ev) => {
