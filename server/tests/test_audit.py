@@ -9,7 +9,7 @@ sys.path.insert(0, str(SERVER))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from core import audit  # noqa: E402
-from _fixture import make_base_db  # noqa: E402
+from _fixture import conn_factory, make_base_db  # noqa: E402
 
 
 def stub_empty(cfg, messages):
@@ -357,11 +357,7 @@ class TestJobManager(unittest.TestCase):
             audit.seed_default_rules(seed)
             seed.close()
 
-            def factory():
-                c = sqlite3.connect(path, timeout=10)
-                c.execute("PRAGMA foreign_keys=ON")
-                c.row_factory = sqlite3.Row
-                return c
+            factory = conn_factory(path)
 
             def slow_stub(cfg, messages):
                 _t.sleep(0.15)
@@ -408,16 +404,15 @@ class TestJobManager(unittest.TestCase):
             entered = threading.Event()
             gate = threading.Event()
 
+            _base_factory = conn_factory(path)
+
             def factory():
                 name = threading.current_thread().name
                 calls.append(name)
                 if name == "starter-1" and calls.count("starter-1") == 1:
                     entered.set()
                     gate.wait(5)
-                c = sqlite3.connect(path, timeout=10)
-                c.execute("PRAGMA foreign_keys=ON")
-                c.row_factory = sqlite3.Row
-                return c
+                return _base_factory()
 
             m = audit.JobManager()
             snaps = {}
@@ -449,9 +444,7 @@ class TestJobManager(unittest.TestCase):
                 _t.sleep(0.1)
             j = m.status(1)
             self.assertFalse(j["running"])
-            con = sqlite3.connect(path, timeout=10)
-            con.execute("PRAGMA foreign_keys=ON")
-            con.row_factory = sqlite3.Row
+            con = conn_factory(path)()
             try:
                 self.assertEqual(audit.issues_state(con, 1)["counts"]["open"], 4)
             finally:

@@ -81,8 +81,13 @@ AI_FIELDS = {
 }
 AI_MAX_TARGETS = 30
 
+# 服务端写上限（单源；随 /api/meta 下发 limits，前端勿手抄）——P0·S1-W16
+BATCH_MAX = 400
+DELETE_MAX = 200
+
 
 def meta():
     return {"shot_fields": SHOT_FIELDS, "scene_fields": SCENE_FIELDS, "beat_fields": BEAT_FIELDS,
             "ai_fields": [k for v in AI_FIELDS.values() for k in v],
-            "ai_max_targets": AI_MAX_TARGETS}
+            "ai_max_targets": AI_MAX_TARGETS,
+            "limits": {"batch": BATCH_MAX, "delete": DELETE_MAX}}

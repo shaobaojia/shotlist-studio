@@ -5,6 +5,8 @@ import json
 import os
 import re
 import sys
+import traceback
+from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -23,6 +25,7 @@ WEB_DIR = (ROOT / "web").resolve()
 
 ROUTES = [
     (re.compile(r"^/api/health$"), handlers.health),
+    (re.compile(r"^/api/export$"), export_api.export_get),   # 统一路由表（原 do_GET 特判退役）——P0·S1-W18
     (re.compile(r"^/api/meta$"), handlers.meta),
     (re.compile(r"^/api/film$"), handlers.film),
     (re.compile(r"^/api/scenes/([^/]+)$"), handlers.scene),
@@ -94,25 +97,32 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, obj, status=200):
         self._send(json.dumps(obj, ensure_ascii=False).encode("utf-8"), status)
 
+    def _dispatch(self, routes, path, *args):
+        """路由分发单点（GET/POST 共用；P0·S1-W18）。返回是否命中。"""
+        for rx, fn in routes:
+            m = rx.match(path)
+            if m:
+                obj, status = fn(m, *args)
+                att = obj.get("__attachment__") if isinstance(obj, dict) else None
+                if att:                                # 原始字节响应（export）：仍留在 app 层用 _send 发出
+                    self._send(att["body"], status, att["ctype"], att.get("extra"))
+                else:
+                    self._json(obj, status)
+                return True
+        return False
+
     def do_GET(self):
         try:
             url = urlparse(self.path)
-            if url.path == "/api/export":
-                export_api.handle(self, parse_qs(url.query))
-                return
             if url.path.startswith("/api/"):
-                for rx, fn in ROUTES:
-                    m = rx.match(url.path)
-                    if m:
-                        obj, status = fn(m, parse_qs(url.query))
-                        self._json(obj, status)
-                        return
-                self._json({"error": "not found"}, 404)
+                if not self._dispatch(ROUTES, url.path, parse_qs(url.query)):
+                    self._json({"error": "not found"}, 404)
                 return
             self._static(url.path)
         except (BrokenPipeError, ConnectionResetError):
             return
         except Exception as e:  # 单请求异常不拖垮服务
+            traceback.print_exc()                      # 现场留痕（P0·S1-P5②）
             self._json({"error": str(e)}, 500)
 
     def do_POST(self):
@@ -128,29 +138,42 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 self._json({"error": "bad json"}, 400)
                 return
-            for rx, fn in POST_ROUTES:
-                mm = rx.match(url.path)
-                if mm:
-                    obj, status = fn(mm, body, parse_qs(url.query))
-                    self._json(obj, status)
-                    return
-            self._json({"error": "not found"}, 404)
+            if not isinstance(body, dict):             # 边界归一：body 必须是 JSON 对象（P0·S1-P4②）
+                self._json({"error": "body 必须为 JSON 对象"}, 400)
+                return
+            if not self._dispatch(POST_ROUTES, url.path, body, parse_qs(url.query)):
+                self._json({"error": "not found"}, 404)
         except (BrokenPipeError, ConnectionResetError):
             return
         except Exception as e:  # 单请求异常不拖垮服务
+            traceback.print_exc()                      # 现场留痕（P0·S1-P5②）
             self._json({"error": str(e)}, 500)
 
     def _static(self, path):
         if path == "/":
             path = "/index.html"
         target = (WEB_DIR / path.lstrip("/")).resolve()
-        if not str(target).startswith(str(WEB_DIR)) or not target.is_file():
+        if not target.is_relative_to(WEB_DIR) or not target.is_file():   # 健全性守卫（不再前缀近似）——P0·S1-B4
             self._json({"error": "not found"}, 404)
             return
+        st = target.stat()
+        etag = '"%x-%x"' % (int(st.st_mtime), st.st_size)
+        if self.headers.get("If-None-Match") == etag:                    # 协商缓存命中——P0·S1-P8②
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         ctype = CONTENT_TYPES.get(target.suffix, "application/octet-stream")
-        self._send(target.read_bytes(), 200, ctype)
+        self._send(target.read_bytes(), 200, ctype,
+                   {"ETag": etag, "Last-Modified": formatdate(st.st_mtime, usegmt=True)})
 
     def log_message(self, fmt, *args):
+        # 静态资源与健康检查不记（降噪；P0·S1-P8③）；API 请求与错误照记
+        req = getattr(self, "requestline", "") or ""
+        if "/api/health" in req or (req.startswith("GET /") and "/api/" not in req):
+            return
         sys.stderr.write("%s %s\n" % (self.address_string(), fmt % args))
 
 

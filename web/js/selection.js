@@ -7,6 +7,7 @@ import { recordUndo, notifyRowsChanged, editorHandleAt } from './edit.js';
 import { toTSV, copyText } from './clipboard.js';
 import { refreshShotCell, visibleRows } from './table.js';
 import { menuOpen } from './menu.js';
+import { state } from './state.js';
 
 let ctx = null;
 const subs = [];
@@ -381,11 +382,14 @@ async function cutSelection() {
   clearSelectionCells();
 }
 
-// 批量上限单点（F2-P4④）：与服务端 handlers.py batch 上限一致（「一次最多 400 项」）
-const MAX_BATCH = 400;
+// 批量上限单点（F2-P4④；S1-W16 接 /api/meta.limits，回退 400——对齐 aiwrite 的 ai_max_targets 范式）
+function maxBatch() {
+  return (state.meta && state.meta.limits && state.meta.limits.batch) || 400;
+}
 export function overCap(n, unit) {
-  if (n <= MAX_BATCH) return false;
-  toast('一次最多 ' + MAX_BATCH + ' ' + unit + '（本次 ' + n + '）', 'err');
+  const cap = maxBatch();
+  if (n <= cap) return false;
+  toast('一次最多 ' + cap + ' ' + unit + '（本次 ' + n + '）', 'err');
   return true;
 }
 

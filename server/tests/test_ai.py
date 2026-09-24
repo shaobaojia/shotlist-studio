@@ -276,17 +276,17 @@ class TestGates(Base):
         self.assertTrue(g.acquire())                 # 跑完已释放
         g.release()
 
-    def test_prune_keeps_running(self):
-        """剪枝只淘汰完成件（M9）：在跑绝不剪，不够删就允许超 keep。"""
+    def test_prune_registration_order(self):
+        """淘汰按注册序（dict 插入序）；在跑跳过不淘汰（P0·S1-W23）。"""
         m = rewrite.PreviewJobs(keep=2)
         with m._lock:
-            m._jobs = {1: {"id": 1, "running": True},
-                       2: {"id": 2, "running": False},
+            m._jobs = {4: {"id": 4, "running": False},
+                       1: {"id": 1, "running": True},
                        3: {"id": 3, "running": False},
-                       4: {"id": 4, "running": False}}
+                       2: {"id": 2, "running": False}}
             m._prune()
             self.assertIn(1, m._jobs)
-            self.assertEqual(sorted(m._jobs), [1, 4])
+            self.assertEqual(sorted(m._jobs), [1, 2])
             m._jobs = {5: {"id": 5, "running": True},
                        6: {"id": 6, "running": True},
                        7: {"id": 7, "running": True}}

@@ -145,7 +145,7 @@ class DraftJobs(jobs.JobBoard):
                    "stage": "beats", "error": None, "ms": 0,
                    "started_at": time.strftime("%Y-%m-%d %H:%M:%S"), "finished_at": None,
                    "beats": [], "shots": [], "applied": False}
-            self._register(job_id, job)
+            self._register(job_id, job, gated=True)
             snap = self._snap(job)
         threading.Thread(target=self._run_scene, args=(
             job_id, sc, script, chat, connect_factory), daemon=True).start()
@@ -159,7 +159,7 @@ class DraftJobs(jobs.JobBoard):
             finally:
                 con.close()
             t0 = time.time()
-            scene_line = digest.scene_line(sc, terse=True)
+            scene_line = digest.scene_line_terse(sc)
             text1 = ai_chat(cfg, [
                 {"role": "system", "content": load_recipe(DRAFT_BEATS_RECIPE)},
                 {"role": "user", "content": scene_line + "\n\n【台本】\n" + script}])
@@ -229,7 +229,7 @@ class DraftJobs(jobs.JobBoard):
                    "running": True, "stage": "prompt", "error": None, "ms": 0,
                    "started_at": time.strftime("%Y-%m-%d %H:%M:%S"), "finished_at": None,
                    "text": None, "members": [m["shot_no"] for m in members]}
-            self._register(job_id, job)
+            self._register(job_id, job, gated=True)
             snap = self._snap(job)
         threading.Thread(target=self._run_prompt, args=(
             job_id, sc, members, blocks, chat, connect_factory), daemon=True).start()
@@ -243,7 +243,7 @@ class DraftJobs(jobs.JobBoard):
             finally:
                 con.close()
             t0 = time.time()
-            lines = [digest.scene_line(sc, terse=True), "", "【组内镜头（%d 镜）】" % len(members)]
+            lines = [digest.scene_line_terse(sc), "", "【组内镜头（%d 镜）】" % len(members)]
             lines += digest.shots_lines(members, _MEMBER_SPEC)
             lines.append("")
             lines.append("【块库（可复用句式）】")

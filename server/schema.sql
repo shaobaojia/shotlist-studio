@@ -9,8 +9,8 @@ PRAGMA user_version = 1;
 CREATE TABLE films (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   title      TEXT NOT NULL,
-  archived   INTEGER NOT NULL DEFAULT 0,
-  meta       TEXT,
+  archived   INTEGER NOT NULL DEFAULT 0,   -- 预留·暂无读写（P0·S1-W14）
+  meta       TEXT,                         -- 预留·暂无读写（仅迁移脚本写入；P0·S1-W14）
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
@@ -27,7 +27,7 @@ CREATE TABLE scenes (
   pole_end   TEXT,
   turn       TEXT,
   pov        TEXT,
-  duration   TEXT,
+  duration   TEXT,                       -- 预留·暂无读写（场级时长未启用；P0·S1-W14）
   script     TEXT,
   locked     INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
@@ -147,8 +147,8 @@ CREATE TABLE history (
 -- 快照
 CREATE TABLE snapshots (
   id    INTEGER PRIMARY KEY AUTOINCREMENT,
-  scope TEXT NOT NULL CHECK (scope IN ('film','scene')),
-  kind  TEXT NOT NULL CHECK (kind IN ('daily','locked','manual')),
+  scope TEXT NOT NULL CHECK (scope IN ('film','scene')),           -- 实写仅 'scene'；'film' 预留（P0·S1-W14）
+  kind  TEXT NOT NULL CHECK (kind IN ('daily','locked','manual')),  -- 实写仅 'locked'；daily/manual 预留（P0·S1-W14）
   label TEXT,
   path  TEXT NOT NULL,
   at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
@@ -167,4 +167,4 @@ CREATE INDEX idx_shots_scene   ON shots(scene_id, position);
 CREATE INDEX idx_shots_group   ON shots(prompt_group_id);
 CREATE INDEX idx_pgroups_scene ON prompt_groups(scene_id, position);
 CREATE INDEX idx_audit_scene   ON audit_issues(scene_id, status);
-CREATE INDEX idx_history_scene ON history(scene_id, at);
+CREATE INDEX idx_history_scene ON history(scene_id, id);   -- 列序换 id：痕迹面板 ORDER BY id DESC 免临时排序（P0·S1-P8④）

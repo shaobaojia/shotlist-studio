@@ -20,10 +20,10 @@ class TestSceneLine(unittest.TestCase):
     def test_full_form_parity(self):
         want = '场：s010 第一场 ｜ 价值：控制 ｜ 弧线：维持 → 失控'
         self.assertEqual(digest.scene_line(SCENE), want)                       # 审计/创作体
-        self.assertEqual(digest.scene_line(SCENE, terse=True), '场：s010 第一场 ｜ 价值：控制 ｜ 弧线：维持 → 失控')             # 草稿体（字段满时同串）
+        self.assertEqual(digest.scene_line_terse(SCENE), '场：s010 第一场 ｜ 价值：控制 ｜ 弧线：维持 → 失控')             # 草稿体（字段满时同串）
 
     def test_terse_omits_empty(self):
-        self.assertEqual(digest.scene_line({"scene_no": "s020", "title": "空场"}, terse=True), '场：s020 空场')
+        self.assertEqual(digest.scene_line_terse({"scene_no": "s020", "title": "空场"}), '场：s020 空场')
 
 
 class TestShotsLines(unittest.TestCase):
@@ -35,6 +35,17 @@ class TestShotsLines(unittest.TestCase):
     def test_draft_members_spec(self):
         """草稿组内速览：逐字节对齐旧格式（唯一有意归一：空间关系 → 空间）。"""
         self.assertEqual(digest.shots_lines(SHOTS, draft._MEMBER_SPEC), ['镜01 ｜ 景别:中景 ｜ 运镜:固定 ｜ 机位:🔴 正打 ｜ 空间:左前沙发 ｜ 动作:男人看着手机 手指滑动', '镜02 ｜ 景别:近景 ｜ 运镜:推 ｜ 机位:🟡 反打 ｜ 动作:男人盯着屏幕 ｜ 台词:「喂？」'])
+
+    def test_spec_keys_registered(self):
+        """digest spec 的键必须在 LABELS 登记（防英文键直写进中文提示词；audit 三组为内联口径同步）——P0·S1-W22。"""
+        from core import rewrite
+        specs = (rewrite._BRIEF, draft._MEMBER_SPEC,
+                 (("camera_pos", 16), ("spatial", 60), ("blocking", 90)),
+                 (("spatial", 70), ("blocking", 110), ("camera_pos", 16)),
+                 (("camera_pos", 20), ("shot_fn", 10), ("shot_size", 24), ("camera_move", 30)))
+        for spec in specs:
+            for f, _w in spec:
+                self.assertIn(f, digest.LABELS, f)
 
     def test_labels_single_source(self):
         self.assertEqual(digest.LABELS["spatial"], "空间")

@@ -112,7 +112,7 @@ def set_group_text(con, group_id, text):
     con.execute(
         "UPDATE prompt_groups SET text=?, updated_at=datetime('now','localtime') WHERE id=?",
         (text, group_id))
-    ops.record_history(con, g["scene_id"], "prompt_groups", group_id, "text", old, text)
+    ops.record_history(con, g["scene_id"], "prompt_groups", group_id, field="text", old_value=old, new_value=text)
     con.commit()
     return {"id": group_id, "text": text, "changed": True}
 
@@ -129,8 +129,8 @@ def merge_shots(con, shot_ids):
         con.execute(
             "UPDATE shots SET prompt_group_id=?, updated_at=datetime('now','localtime') WHERE id=?",
             (nid, s["id"]))
-        ops.record_history(con, s["scene_id"], "prompt_groups", nid, "create", None,
-                           "新建组 · 镜%s" % s["shot_no"])
+        ops.record_history(con, s["scene_id"], "prompt_groups", nid, field="create", old_value=None,
+                           new_value="新建组 · 镜%s" % s["shot_no"])
         _normalize_positions(con, s["scene_id"])
         con.commit()
         return prompt_state(con, s["scene_id"])
@@ -166,11 +166,11 @@ def merge_shots(con, shot_ids):
             "SELECT id, text FROM prompt_groups WHERE id IN (%s)" % q, empties)}
         for gid in empties:
             if (texts.get(gid) or "").strip():
-                ops.record_history(con, scene_id, "prompt_groups", gid, "merge", texts[gid],
-                                   "已并入：%s（原 %s）" % (_shot_refs(moved), _shot_refs(before[gid])))
+                ops.record_history(con, scene_id, "prompt_groups", gid, field="merge", old_value=texts[gid],
+                                   new_value="已并入：%s（原 %s）" % (_shot_refs(moved), _shot_refs(before[gid])))
             con.execute("DELETE FROM prompt_groups WHERE id=?", (gid,))
-    ops.record_history(con, scene_id, "prompt_groups", target_id, "merge_in", None,
-                       ("新建组 · " if made_new else "") + "＋" + _shot_refs(moved))
+    ops.record_history(con, scene_id, "prompt_groups", target_id, field="merge_in", old_value=None,
+                       new_value=("新建组 · " if made_new else "") + "＋" + _shot_refs(moved))
     _normalize_positions(con, scene_id)
     con.commit()
     return prompt_state(con, scene_id)
@@ -215,7 +215,7 @@ def detach_shots(con, shot_ids):
                     note += " · 文本随镜%s保留" % heir["shot_no"]
                 if g:
                     con.execute("DELETE FROM prompt_groups WHERE id=?", (gid,))
-            ops.record_history(con, scene_id, "prompt_groups", gid, "detach", _shot_refs(mem), note)
+            ops.record_history(con, scene_id, "prompt_groups", gid, field="detach", old_value=_shot_refs(mem), new_value=note)
         _normalize_positions(con, scene_id)
         con.commit()
     return prompt_state(con, scene_id)
@@ -234,9 +234,9 @@ def split_group(con, group_id):
         con.execute(
             "UPDATE shots SET prompt_group_id=?, updated_at=datetime('now','localtime') WHERE id=?",
             (nid, m["id"]))
-    ops.record_history(con, g["scene_id"], "prompt_groups", group_id, "split",
-          _shot_refs(members),
-          "%s（拆出 %s）" % (_shot_refs(members[:1]), " / ".join(str(m["shot_no"]) for m in members[1:])))
+    ops.record_history(con, g["scene_id"], "prompt_groups", group_id, field="split",
+          old_value=_shot_refs(members),
+          new_value="%s（拆出 %s）" % (_shot_refs(members[:1]), " / ".join(str(m["shot_no"]) for m in members[1:])))
     _normalize_positions(con, g["scene_id"])
     con.commit()
     return prompt_state(con, g["scene_id"])
@@ -307,8 +307,8 @@ def restore_state(con, scene_id, groups):
     for g in db.prompt_groups(con, scene_id):
         if g["id"] not in keep_ids:
             con.execute("DELETE FROM prompt_groups WHERE id=?", (g["id"],))
-    ops.record_history(con, scene_id, "prompt_groups", None, "restore", None,
-                       "分组状态还原（%d 组）" % len(groups))
+    ops.record_history(con, scene_id, "prompt_groups", None, field="restore", old_value=None,
+                       new_value="分组状态还原（%d 组）" % len(groups))
     con.commit()
     return prompt_state(con, scene_id)
 

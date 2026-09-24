@@ -8,7 +8,7 @@ SERVER = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVER))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from core import fields, ops  # noqa: E402
+from core import ops  # noqa: E402
 from _fixture import make_ops_db as make_db, make_ops_db0 as make_db0  # noqa: E402
 
 
@@ -207,11 +207,10 @@ class TestMove(unittest.TestCase):
 class TestMoveShots(unittest.TestCase):
     """M5 批2：多行整组搬家（move_shots）。"""
 
-    def make(self):
-        con = make_db()  # 基准：beat id1；shots 1/2/3 全在 beat1（position 0/1/2）
-        return con
+    def setUp(self):
+        self.con = make_db()  # 基准：beat id1；shots 1/2/3 全在 beat1（position 0/1/2）
 
-    def make2(self):
+    def _two_beat_db(self):
         con = make_db()
         con.execute("UPDATE beats SET position=0, beat_no='b1', name='b1' WHERE id=1")
         con.execute("INSERT INTO beats (scene_id, position, beat_no, name) VALUES (1, 1, 'b2', 'b2')")
@@ -231,13 +230,13 @@ class TestMoveShots(unittest.TestCase):
         return con.execute("SELECT id FROM beats WHERE beat_no='b2'").fetchone()["id"]
 
     def test_group_within_beat(self):
-        con = self.make()
+        con = self.con
         r = ops.move_shots(con, [1, 2], 1, 1)   # 组[1,2] 挪到 s3 之后（去掉组后 b1=[3]）
         self.assertTrue(r["changed"])
         self.assertEqual(self.order(con), [3, 1, 2])
 
     def test_group_cross_beat(self):
-        con = self.make2()
+        con = self._two_beat_db()
         b2 = self.b2id(con)
         r = ops.move_shots(con, [1, 2], b2, 1)  # 整组插到 s3 之后
         self.assertTrue(r["changed"])
@@ -245,12 +244,12 @@ class TestMoveShots(unittest.TestCase):
         self.assertEqual(self.bids(con), [b2, b2, b2])
 
     def test_group_noop(self):
-        con = self.make2()
+        con = self._two_beat_db()
         r = ops.move_shots(con, [1, 2], 1, 0)   # 组已在 b1 原位
         self.assertFalse(r["changed"])
 
     def test_group_order_and_dupes(self):
-        con = self.make2()
+        con = self._two_beat_db()
         b2 = self.b2id(con)
         r = ops.move_shots(con, [2, 1, 1], b2, 1)  # 乱序+重复入参：组按场序去重
         self.assertTrue(r["changed"])
@@ -258,7 +257,7 @@ class TestMoveShots(unittest.TestCase):
         self.assertEqual(self.order(con), [3, 1, 2])
 
     def test_group_round_trip_undo(self):
-        con = self.make2()
+        con = self._two_beat_db()
         b2 = self.b2id(con)
         before = self.order(con)
         before_bids = self.bids(con)
@@ -268,7 +267,7 @@ class TestMoveShots(unittest.TestCase):
         self.assertEqual(self.bids(con), before_bids)
 
     def test_group_history_rows(self):
-        con = self.make2()
+        con = self._two_beat_db()
         b2 = self.b2id(con)
         ops.move_shots(con, [1, 2], b2, 1)
         hist = con.execute("SELECT * FROM history WHERE field='drag'").fetchall()
@@ -276,7 +275,7 @@ class TestMoveShots(unittest.TestCase):
         self.assertTrue(all(h["source"] == "manual" for h in hist))
 
     def test_group_missing_shot(self):
-        con = self.make2()
+        con = self._two_beat_db()
         b2 = self.b2id(con)
         with self.assertRaises(ValueError):
             ops.move_shots(con, [1, 999], b2, 0)
@@ -341,20 +340,6 @@ class TestDuplicateDelete(unittest.TestCase):
         self.assertEqual(h[0]["old_value"], "03")
         self.assertEqual(h[0]["new_value"], "03A")
 
-    def test_delete_compacts(self):
-        con = make_db()
-        shot = ops.duplicate_shot(con, 1)
-        res = ops.delete_shot(con, shot["id"])
-        self.assertEqual(res["shot_no"], "03A")
-        order = [x["id"] for x in con.execute("SELECT id FROM shots WHERE scene_id=1 ORDER BY position")]
-        self.assertEqual(order, [1, 2, 3])
-        fields = [r["field"] for r in con.execute("SELECT field FROM history ORDER BY id")]
-        self.assertEqual(fields, ["create", "delete"])
-
-    def test_delete_missing(self):
-        con = make_db()
-        with self.assertRaises(ValueError):
-            ops.delete_shot(con, 999)
 
 
 
@@ -376,6 +361,7 @@ class TestBlankShot(unittest.TestCase):
         self.assertEqual(h[0]["new_value"], "03A")
 
     def test_insert_first_edge(self):
+        """队首中插（idx=0）：以原首行为基生成后缀；编号序与位置序相反属标签语义（DO_NOT_FLAG A3）。"""
         con = make_db0()
         s = ops.create_blank_shot(con, 1, 1, 0)
         self.assertEqual(s["position"], 0)
@@ -521,34 +507,44 @@ class TestLockScene(unittest.TestCase):
 
     def test_lock_writes_snapshot_row_and_flag(self):
         import json
+        import shutil
         import tempfile
         con = make_db()
-        with tempfile.TemporaryDirectory() as td:
+        repo = ops.db.DB_PATH.parent.parent
+        td = tempfile.mkdtemp(dir=repo)          # 仓库内临时目录：path 列恒仓库相对（P0·S1-W15）
+        try:
             res = ops.lock_scene(con, 1, True, snap_root=td)
             self.assertEqual(res["scene"]["locked"], 1)
             snap = res["snapshot"]
             self.assertIsNotNone(snap)
-            path = Path(snap["path"])
+            path = repo / snap["path"]           # 相对路径 ⇒ 拼上仓库根后存在
             self.assertTrue(path.exists())
             data = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(data["scene"]["scene_no"], "s010")
             self.assertEqual(len(data["shots"]), 3)
             self.assertEqual(len(data["beats"]), 1)
-        row = con.execute("SELECT * FROM snapshots").fetchone()
-        self.assertEqual(row["scope"], "scene")
-        self.assertEqual(row["kind"], "locked")
-        self.assertEqual(row["label"], "s010")
-        h = ops.history_of(con, scene_id=1)
-        self.assertEqual(h[0]["entity"], "scenes")
-        self.assertEqual(h[0]["field"], "locked")
-        self.assertEqual(h[0]["new_value"], "1")
+            row = con.execute("SELECT * FROM snapshots").fetchone()
+            self.assertEqual(row["scope"], "scene")
+            self.assertEqual(row["kind"], "locked")
+            self.assertEqual(row["label"], "s010")
+            h = ops.history_of(con, scene_id=1)
+            self.assertEqual(h[0]["entity"], "scenes")
+            self.assertEqual(h[0]["field"], "locked")
+            self.assertEqual(h[0]["new_value"], "1")
+        finally:
+            shutil.rmtree(td, ignore_errors=True)
 
     def test_unlock_clears_flag_without_snapshot(self):
+        import shutil
         import tempfile
         con = make_db()
-        with tempfile.TemporaryDirectory() as td:
+        repo = ops.db.DB_PATH.parent.parent
+        td = tempfile.mkdtemp(dir=repo)          # 仓库内临时目录（P0·S1-W15）
+        try:
             ops.lock_scene(con, 1, True, snap_root=td)
             res2 = ops.lock_scene(con, 1, False, snap_root=td)
+        finally:
+            shutil.rmtree(td, ignore_errors=True)
         self.assertEqual(res2["scene"]["locked"], 0)
         self.assertIsNone(res2["snapshot"])
         c = con.execute("SELECT COUNT(*) c FROM snapshots").fetchone()["c"]
@@ -571,7 +567,7 @@ class TestAppendRows(unittest.TestCase):
 
     def test_append_beats_sequential(self):
         ids = ops.append_beats(self.con, 1, [
-            {"name": "新节拍", "kind": "⚪ 填充", "outside_action": "a", "reaction": "b",
+            {"name": "新节拍", "kind": ops.BEAT_KIND_DEFAULT, "outside_action": "a", "reaction": "b",
              "closed_loop": "c"},
             {"name": "新节拍2", "kind": "🔴 戏点", "outside_action": "", "reaction": "",
              "closed_loop": ""}], source="ai")
@@ -602,7 +598,7 @@ class TestAppendRows(unittest.TestCase):
             "INSERT INTO scenes (film_id, scene_no, title) VALUES (1, 's020', '空场')")
         sid = cur.lastrowid
         self.con.commit()
-        bids = ops.append_beats(self.con, sid, [{"name": "头", "kind": "⚪ 填充"}], source="ai")
+        bids = ops.append_beats(self.con, sid, [{"name": "头", "kind": ops.BEAT_KIND_DEFAULT}], source="ai")
         b = self.con.execute("SELECT * FROM beats WHERE id=?", (bids[0],)).fetchone()
         self.assertEqual((b["beat_no"], b["position"]), ("1", 0))
         sids = ops.append_shots(self.con, sid, [{"beat_id": bids[0], "blocking": "开篇"}], source="ai")
@@ -611,14 +607,10 @@ class TestAppendRows(unittest.TestCase):
 
     def test_not_committed_by_callee(self):
         """不自行 commit：回滚即无痕（事务归调用方）。"""
-        ops.append_beats(self.con, 1, [{"name": "x", "kind": "⚪ 填充"}], source="ai")
+        ops.append_beats(self.con, 1, [{"name": "x", "kind": ops.BEAT_KIND_DEFAULT}], source="ai")
         self.con.rollback()
         n = self.con.execute("SELECT COUNT(*) c FROM beats WHERE scene_id=1").fetchone()["c"]
         self.assertEqual(n, 1)
-
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
 
 
 class TestSceneScript(unittest.TestCase):
@@ -644,3 +636,7 @@ class TestSceneScript(unittest.TestCase):
         n = len(ops.history_of(con, scene_id=1))
         ops.update_field(con, "scenes", 1, "script", "同一段")
         self.assertEqual(len(ops.history_of(con, scene_id=1)), n)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

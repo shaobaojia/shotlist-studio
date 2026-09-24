@@ -61,9 +61,15 @@ def prompt_groups(con, scene_id):
         "SELECT * FROM prompt_groups WHERE scene_id=? ORDER BY position, id", (scene_id,)))
 
 
+def beat_kinds(con):
+    """节拍类型值域（去重去空；读库单点——接口层 DISTINCT 下沉）——P0·S1-W12。"""
+    return [r["kind"] for r in con.execute(
+        "SELECT DISTINCT kind FROM beats WHERE kind IS NOT NULL AND kind<>'' ORDER BY kind")]
+
+
 def attach_group_members(groups, shots):
-    """把镜头按 prompt_group_id 挂到组上（单趟分桶）：补 member_shots / member_ids。
-    传入的 groups 与 shots 均须已按 (position, id) 排序（本模块各查询保证）。"""
+    """把镜头按 prompt_group_id 挂到组上（单趟分桶）：原地补 member_shots / member_ids。
+    纯命令（无返回值）；传入的 groups 与 shots 均须已按 (position, id) 排序（本模块各查询保证）——P0·S1-W13。"""
     buckets = {}
     for s in shots:
         buckets.setdefault(s["prompt_group_id"], []).append(s)
@@ -71,4 +77,13 @@ def attach_group_members(groups, shots):
         mem = buckets.get(g["id"], [])
         g["member_shots"] = [s["shot_no"] for s in mem]
         g["member_ids"] = [s["id"] for s in mem]
-    return groups
+
+
+def scene_ctx(con, scene_id):
+    """整场装载（单点）：(场行 dict, beats, shots)，均位置序；场不存在 → None——P0·S1-W1。"""
+    sc = con.execute("SELECT * FROM scenes WHERE id=?", (scene_id,)).fetchone()
+    if not sc:
+        return None
+    return (dict(sc),
+            _dicts(con.execute("SELECT * FROM beats WHERE scene_id=? ORDER BY position, id", (scene_id,))),
+            _dicts(con.execute("SELECT * FROM shots WHERE scene_id=? ORDER BY position, id", (scene_id,))))

@@ -37,14 +37,10 @@ def load_recipe(name):
 # ════════ 目标校验与上下文装载 ════════
 
 def _load_scene(con, scene_id):
-    sc = con.execute("SELECT * FROM scenes WHERE id=?", (scene_id,)).fetchone()
-    if not sc:
+    ctx = db.scene_ctx(con, scene_id)   # 整场装载单点（P0·S1-W1）
+    if not ctx:
         raise ValueError("场景不存在")
-    beats = [dict(r) for r in con.execute(
-        "SELECT * FROM beats WHERE scene_id=? ORDER BY position, id", (scene_id,))]
-    shots = [dict(r) for r in con.execute(
-        "SELECT * FROM shots WHERE scene_id=? ORDER BY position, id", (scene_id,))]
-    return dict(sc), beats, shots
+    return ctx
 
 
 def _norm_targets(con, scene_id, targets):
@@ -198,7 +194,7 @@ class PreviewJobs(jobs.JobBoard):
                    "finished_at": None, "error": None, "ms": 0,
                    "total": len(items), "done": 0, "items": items}
             job["done"] = self._done(job)
-            self._register(job_id, job)
+            self._register(job_id, job, gated=True)
             snap = self._snap(job)
         threading.Thread(target=self._run,
                          args=(job_id, sc, beats, shots, items, action, instruction,

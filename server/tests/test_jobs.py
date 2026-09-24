@@ -33,8 +33,7 @@ class TestGate(unittest.TestCase):
         self.assertTrue(g.acquire())
         self.assertFalse(g.acquire())
 
-    def test_shared_singleton(self):
-        self.assertIs(jobs.TASKS, jobs.TASKS)
+    def test_tasks_limit(self):
         self.assertEqual(jobs.TASKS.limit, jobs.TASKS_MAX)
 
 
@@ -44,7 +43,7 @@ class TestBoard(unittest.TestCase):
         b = Board(gate=g)
         with b._lock:
             self.assertTrue(b._gate_acquire())           # 认领名额（与 _register 成对）
-            b._register(7, {"id": 7, "running": True, "heavy": "X", "error": None})
+            b._register(7, {"id": 7, "running": True, "heavy": "X", "error": None}, gated=True)
         self.assertFalse(g.acquire())                    # 名额已占
         snap = b.get(7)
         self.assertTrue(snap["running"])
@@ -89,14 +88,15 @@ class TestBoard(unittest.TestCase):
             self.assertEqual(b._seq_id(), 1)
             self.assertEqual(b._seq_id(), 2)
 
-    def test_prune_keeps_running(self):
+    def test_prune_registration_order(self):
+        """淘汰按注册序（dict 插入序）；在跑跳过不淘汰（P0·S1-W23）。"""
         b = Board(keep=2)
         with b._lock:
-            b._jobs = {1: {"running": True}, 2: {"running": False},
-                       3: {"running": False}, 4: {"running": False}}
+            b._jobs = {4: {"running": False}, 1: {"running": True},
+                       3: {"running": False}, 2: {"running": False}}
             b._prune()
             self.assertIn(1, b._jobs)
-            self.assertEqual(sorted(b._jobs), [1, 4])
+            self.assertEqual(sorted(b._jobs), [1, 2])
             b._jobs = {5: {"running": True}, 6: {"running": True}, 7: {"running": True}}
             b._prune()
             self.assertEqual(len(b._jobs), 3)            # 全在跑：超 keep 保留

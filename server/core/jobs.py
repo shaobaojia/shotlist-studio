@@ -75,9 +75,9 @@ class JobBoard:
             if not job:
                 return None
             self._touch(job)
-            if job.get("running"):
-                return self._light(job)
-            return self._snap(job)
+            running = bool(job.get("running"))
+        # 快照构建移出锁（P0·S1-W24）：终态不再被写者触碰；running 走子类 _light（浅拷）
+        return self._light(job) if running else self._snap(job)
 
     # ── 启动期原语（锁内使用） ──
 
@@ -100,9 +100,9 @@ class JobBoard:
         self._seq += 1
         return self._seq
 
-    def _register(self, key, job):
-        """锁内：登记任务 + 记账闸名额 + 剪枝（须紧跟在成功的 _gate_acquire 之后）。"""
-        if self._gate is not None:
+    def _register(self, key, job, gated=False):
+        """锁内：登记任务 + 剪枝；gated=True 时记账闸名额（须紧跟在成功的 _gate_acquire 之后）——P0·S1-B6。"""
+        if gated and self._gate is not None:
             self._gated.add(key)
         self._jobs[key] = job
         self._prune()
@@ -112,13 +112,13 @@ class JobBoard:
         if self._keep is None or len(self._jobs) <= self._keep:
             return
         room = len(self._jobs) - self._keep
-        for old in sorted(self._jobs):
+        for key in list(self._jobs):          # 注册序淘汰（dict 插入序；P0·S1-W23）
             if room <= 0:
                 break
-            j = self._jobs.get(old)
+            j = self._jobs.get(key)
             if j and j.get("running"):
                 continue
-            self._jobs.pop(old, None)
+            self._jobs.pop(key, None)
             room -= 1
 
     # ── 收尾 ──

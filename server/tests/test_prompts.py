@@ -383,7 +383,7 @@ class TestScaleSmoke(unittest.TestCase):
             con.set_trace_callback(None)
         dt = time.perf_counter() - t0
         selects = [s for s in stmts if s.strip().upper().startswith("SELECT")]
-        self.assertLessEqual(len(selects), 8, "组查询应预取：SELECT 次数 %d" % len(selects))
+        self.assertLessEqual(len(selects), 9, "组查询应预取：SELECT 次数 %d（含 reseq 预读 1 条，P0·S1-W11）" % len(selects))
         self.assertLess(dt, 1.0, "merge %d 镜耗时 %.3fs" % (len(ids), dt))
 
 

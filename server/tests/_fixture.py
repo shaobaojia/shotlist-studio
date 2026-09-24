@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """共享测试夹具（审计 §三-1）：test_ops / test_prompts 同源——手写 SQL 建状态，不用被测代码搭夹具。"""
 import sqlite3
+import sys
 from pathlib import Path
 
 SERVER = Path(__file__).resolve().parents[1]
 SCHEMA = (SERVER / "schema.sql").read_text(encoding="utf-8")
+
+sys.path.insert(0, str(SERVER))
+from core import ops as _ops   # noqa: E402  只借常量（BEAT_KIND_DEFAULT）；夹具仍手写 SQL
 
 
 def _conn(db_path=None):
@@ -20,7 +24,8 @@ def make_ops_db():
     con = _conn()
     con.execute("INSERT INTO films (title) VALUES ('t')")
     con.execute("INSERT INTO scenes (film_id, scene_no, title, value) VALUES (1, 's010', '第一场', '控制')")
-    con.execute("INSERT INTO beats (scene_id, beat_no, name, kind) VALUES (1, '1', '被领导打压', '⚪ 填充')")
+    con.execute("INSERT INTO beats (scene_id, beat_no, name, kind) VALUES (1, '1', '被领导打压', ?)",
+                (_ops.BEAT_KIND_DEFAULT,))
     for i, no in enumerate(["03", "01", "17A"], start=1):
         con.execute("INSERT INTO shots (scene_id, beat_id, position, shot_no, blocking) VALUES (1, 1, ?, ?, ?)",
                     (i, no, "动作%d" % i))
@@ -56,10 +61,11 @@ def make_prompts_db():
     return con
 
 
-def conn_factory(db_path):
-    """临时库连接工厂（与生产 rw 连接同形；注入 job 类 connect_factory 用，批4/P12）。"""
+def conn_factory(db_path, timeout=10):
+    """临时库连接工厂（与生产 rw 连接同形；注入 job 类 connect_factory 用，批4/P12；
+    P0·S1-P3④ 上收 test_audit 三处手抄）。"""
     def f():
-        con = sqlite3.connect(db_path, timeout=10)
+        con = sqlite3.connect(db_path, timeout=timeout)
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA foreign_keys=ON")
         return con
@@ -74,7 +80,8 @@ def make_base_db(db_path=None):
     con.execute("INSERT INTO scenes (film_id, scene_no, title, value, pole_start, pole_end)"
                 " VALUES (1, 's010', '第一场', '控制', '维持', '失控')")
     con.execute("INSERT INTO beats (scene_id, beat_no, kind, name, outside_action, reaction, closed_loop)"
-                " VALUES (1, '1', '⚪ 填充', '被领导打压', '领导来电话吼骂', '男人僵住', '是')")
+                " VALUES (1, '1', ?, '被领导打压', '领导来电话吼骂', '男人僵住', '是')",
+                (_ops.BEAT_KIND_DEFAULT,))
     con.execute("INSERT INTO beats (scene_id, beat_no, kind, name, outside_action, reaction, closed_loop)"
                 " VALUES (1, '2', '🔴 戏点', '误发消息', '消息误发', '男人瞳孔收缩', '是')")
     rows = [("01", 1, "中景", "—", ""), ("02", 1, "", "", "「喂？」"),

@@ -70,13 +70,10 @@ def _norm_keys(x):
 
 
 def load_ctx(con, scene_id):
-    sc = con.execute("SELECT * FROM scenes WHERE id=?", (scene_id,)).fetchone()
-    if not sc:
+    ctx = db.scene_ctx(con, scene_id)   # 整场装载单点（P0·S1-W1）
+    if not ctx:
         raise ValueError("场景不存在")
-    beats = [dict(r) for r in con.execute(
-        "SELECT * FROM beats WHERE scene_id=? ORDER BY position, id", (scene_id,))]
-    shots = [dict(r) for r in con.execute(
-        "SELECT * FROM shots WHERE scene_id=? ORDER BY position, id", (scene_id,))]
+    sc, beats, shots = ctx
     sb, bb = {}, {}
     for s in shots:
         for k in _norm_keys(s["shot_no"]):
@@ -84,7 +81,7 @@ def load_ctx(con, scene_id):
     for b in beats:
         for k in _norm_keys(b["beat_no"]):
             bb.setdefault(k, b)
-    return {"scene": dict(sc), "beats": beats, "shots": shots,
+    return {"scene": sc, "beats": beats, "shots": shots,
             "shot_by_no": sb, "beat_by_no": bb}
 
 
@@ -179,14 +176,14 @@ def digest_axis(ctx, p):
     return "\n".join([digest.scene_line(ctx["scene"]), "节拍：" + beats, "镜头（按顺序）："] +
                      digest.shots_lines(ctx["shots"],
                                         (("camera_pos", 16), ("spatial", 60), ("blocking", 90)),
-                                        colon=": "))
+                                        style="audit"))
 
 
 def digest_space(ctx, p):
     return "\n".join([digest.scene_line(ctx["scene"]), "镜头（按顺序）："] +
                      digest.shots_lines(ctx["shots"],
                                         (("spatial", 70), ("blocking", 110), ("camera_pos", 16)),
-                                        colon=": "))
+                                        style="audit"))
 
 
 def digest_camera(ctx, p):
@@ -194,7 +191,7 @@ def digest_camera(ctx, p):
                      digest.shots_lines(ctx["shots"],
                                         (("camera_pos", 20), ("shot_fn", 10),
                                          ("shot_size", 24), ("camera_move", 30)),
-                                        colon=": "))
+                                        style="audit"))
 
 
 def digest_rhythm(ctx, p):
@@ -485,7 +482,7 @@ def waive_issue(con, issue_id, note=None):
         return
     con.execute("UPDATE audit_issues SET status='waived', waive_note=?,"
                 " updated_at=datetime('now','localtime') WHERE id=?", (note, issue_id))
-    ops.record_history(con, row["scene_id"], "audit", issue_id, "status", row["status"], "waived")
+    ops.record_history(con, row["scene_id"], "audit", issue_id, field="status", old_value=row["status"], new_value="waived")
     con.commit()
 
 
@@ -497,7 +494,7 @@ def unwaive_issue(con, issue_id):
         return
     con.execute("UPDATE audit_issues SET status='open', waive_note=NULL,"
                 " updated_at=datetime('now','localtime') WHERE id=?", (issue_id,))
-    ops.record_history(con, row["scene_id"], "audit", issue_id, "status", "waived", "open")
+    ops.record_history(con, row["scene_id"], "audit", issue_id, field="status", old_value="waived", new_value="open")
     con.commit()
 
 
@@ -605,7 +602,7 @@ class JobManager(jobs.JobBoard):
                 "rules": [{"id": r["id"], "title": r["title"], "kind": r["kind"],
                            "state": "pending", "found": 0, "error": None, "ms": 0} for r in rules],
             }
-            self._register(scene_id, job)
+            self._register(scene_id, job, gated=False)   # 审计不在闸内（P0·S1-B6）
             snap = self._snap(job)
             snap["joined"] = False
         threading.Thread(target=self._run, args=(scene_id, only, chat, connect_factory),

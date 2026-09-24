@@ -22,6 +22,12 @@ from core import fields  # noqa: E402
 from core import rewrite  # noqa: E402
 
 
+def _dead():
+    """坏请求不应触达连接（R13 收敛：全文件唯一一处）——P0·S1-P3④。"""
+    return mock.patch.object(core_db, "connect",
+                             side_effect=AssertionError("坏请求触达了写连接"))
+
+
 class TestMeta(unittest.TestCase):
     def test_ai_capability_from_meta(self):
         """P8：AI 能力位与上限经 /api/meta 下发（单源 core/fields）。"""
@@ -129,8 +135,7 @@ class TestAiSettingsLayer(unittest.TestCase):
         self.assertNotIn("api_key", res["config"])
 
     def test_settings_set_unknown_only_400(self):
-        with mock.patch.object(core_db, "connect",
-                               side_effect=AssertionError("坏请求触达了连接")):
+        with _dead():
             res, code = api_ai.settings_set(None, {"foo": 1}, {})
         self.assertEqual(code, 400)
 
@@ -241,13 +246,8 @@ class TestDraftThinLayer(unittest.TestCase):
 class TestPromptsThinLayer(unittest.TestCase):
     """提示词/块库薄层（补零覆盖）：守卫先于写连接 + 域错 → 400。"""
 
-    @staticmethod
-    def _dead():
-        return mock.patch.object(core_db, "connect",
-                                 side_effect=AssertionError("坏请求触达了写连接"))
-
     def test_blocks_unknown_action(self):
-        with self._dead():
+        with _dead():
             res, code = api_prompts.blocks_op(None, {"action": "zzz"}, {})
         self.assertEqual(code, 400)
         self.assertIn("未知 action", res["error"])
@@ -257,7 +257,7 @@ class TestPromptsThinLayer(unittest.TestCase):
                  {"action": "pin", "id": 1, "pinned": "yes"},
                  {"action": "update"},                          # 缺 id
                  {"action": "cat_move", "id": "x"})
-        with self._dead():
+        with _dead():
             for body in cases:
                 res, code = api_prompts.blocks_op(None, dict(body), {})
                 self.assertEqual(code, 400, "body=%r" % (body,))
@@ -277,13 +277,13 @@ class TestPromptsThinLayer(unittest.TestCase):
     def test_prompt_unknown_action(self):
         m = mock.MagicMock()
         m.group.return_value = "zzz"
-        with self._dead():
+        with _dead():
             res, code = api_prompts.prompt_op(m, {}, {})
         self.assertEqual(code, 400)
 
     def test_prompt_guards_pre_connect(self):
         cases = (("set_text", {}), ("split", {"group_id": "x"}), ("restore", {}))
-        with self._dead():
+        with _dead():
             for action, body in cases:
                 m = mock.MagicMock()
                 m.group.return_value = action
@@ -299,14 +299,10 @@ class TestAuditThinLayer(unittest.TestCase):
         core_audit.seed_default_rules(self.con)
 
     def tearDown(self):
-        try:
-            self.con.close()
-        except Exception:
-            pass
+        self.con.close()
 
     def test_issue_op_guards(self):
-        with mock.patch.object(core_db, "connect",
-                               side_effect=AssertionError("坏请求触达了连接")):
+        with _dead():
             for body in ({"action": "zzz", "id": 1}, {"action": "waive"},
                          {"action": "recheck", "id": "x"}):
                 res, code = api_audit.issue_op(None, body, {})
@@ -393,8 +389,7 @@ class TestDeleteGuards(unittest.TestCase):
                {"id": 1},                       # 缺 table + id 形态
                {"table": "zzz", "ids": [1]},    # 非法表名
                {"table": "shots"})              # 有 table 缺 id/ids
-        with mock.patch.object(core_db, "connect",
-                               side_effect=AssertionError("坏请求触达了写连接")):
+        with _dead():
             for body in bad:
                 res, code = api_handlers.delete_row(None, dict(body), {})
                 self.assertEqual(code, 400, "body=%r" % (body,))
@@ -405,8 +400,7 @@ class TestHistoryParams(unittest.TestCase):
     """history 参数守卫（P0·S1-B3）：非数字 scene_id → 400（不再 500），且不触达连接。"""
 
     def test_scene_id_not_int_400(self):
-        with mock.patch.object(core_db, "connect",
-                               side_effect=AssertionError("坏请求触达了连接")):
+        with _dead():
             res, code = api_handlers.history(None, {"scene_id": ["abc"]})
         self.assertEqual(code, 400)
         self.assertIn("scene_id", res["error"])

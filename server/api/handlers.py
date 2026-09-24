@@ -1,6 +1,9 @@
 """接口层：组装 JSON 载荷。GET handler：(match, query)；POST handler：(match, body, query)。"""
+import sqlite3
+import sys
 from urllib.parse import unquote
 
+from api import params
 from core import db, fields, ops
 
 
@@ -13,12 +16,11 @@ def meta(m, q):
     try:
         con = db.connect()
         try:
-            rows = con.execute(
-                "SELECT DISTINCT kind FROM beats WHERE kind IS NOT NULL AND kind<>'' ORDER BY kind")
-            obj["beat_kinds"] = [r["kind"] for r in rows]
+            obj["beat_kinds"] = db.beat_kinds(con)   # 读库单点（P0·S1-W12）
         finally:
             con.close()
-    except Exception:
+    except (sqlite3.Error, OSError) as e:            # 收窄兜底 + 留痕（P0·S1-P5①）
+        sys.stderr.write("meta: beat_kinds 读取失败：%s\n" % e)
         obj["beat_kinds"] = []
     return obj, 200
 
@@ -45,8 +47,7 @@ def scene(m, q):
         sc = db.scene_by_no(con, f["id"], scene_no)
         if not sc:
             return {"error": "场景不存在：%s" % scene_no}, 404
-        beats = db.beats(con, sc["id"])
-        shots = db.shots(con, sc["id"])
+        _, beats, shots = db.scene_ctx(con, sc["id"])   # 整场装载单点（P0·S1-W1）
         groups = db.prompt_groups(con, sc["id"])
 
         by_beat = {}
@@ -67,32 +68,31 @@ def scene(m, q):
 
 
 def history(m, q):
-    sid_raw = (q.get("scene_id") or [None])[0]
+    sid_raw = params.q1(q, "scene_id")
     sid = None
     if sid_raw not in (None, ""):
         try:
-            sid = int(sid_raw)
-        except (TypeError, ValueError):
-            return {"error": "参数不完整（scene_id）"}, 400   # 非数字 → 400（不再 500；P0·S1-B3）
+            sid = params.as_int(sid_raw, "scene_id")
+        except ValueError as e:
+            return {"error": str(e)}, 400   # 非数字 → 400（不再 500；P0·S1-B3）
     try:
-        limit = int((q.get("limit") or [str(ops.HISTORY_LIMIT_DEFAULT)])[0])
-    except (TypeError, ValueError):
+        limit = params.as_int(params.q1(q, "limit") or str(ops.HISTORY_LIMIT_DEFAULT), "limit")
+    except ValueError:
         limit = ops.HISTORY_LIMIT_DEFAULT
-    limit = min(ops.HISTORY_LIMIT_MAX, max(1, limit))
     con = db.connect()
     try:
-        return {"history": ops.history_of(con, sid, limit)}, 200
+        return {"history": ops.history_of(con, sid, limit)}, 200   # 上限钳制在 ops（P0·S1-P2④）
     finally:
         con.close()
 
 
 def update(m, body, q):
     """M2 写路径：单字段更新（白名单 + 痕迹）。"""
-    table = (body or {}).get("table")
-    row_id = (body or {}).get("id")
-    field = (body or {}).get("field")
-    value = (body or {}).get("value")
-    if table not in ("shots", "beats", "scenes") or not isinstance(row_id, int) or not field:
+    table = body.get("table")
+    row_id = body.get("id")
+    field = body.get("field")
+    value = body.get("value")
+    if table not in ops.TABLES_ALLOWED or not isinstance(row_id, int) or not field:
         return {"error": "参数不完整（table/id/field）"}, 400
     # 场号 trim/非空/唯一校验已下沉 ops._apply_field（update / batch 同源；P0·S1-B1）
     con = db.connect(rw=True)
@@ -108,11 +108,11 @@ def update(m, body, q):
 
 def batch(m, body, q):
     """M2-4 写路径：批量单字段更新（逐项白名单 + 痕迹；上限 400 项）。"""
-    items = (body or {}).get("ops")
+    items = body.get("ops")
     if not isinstance(items, list) or not items:
         return {"error": "参数不完整（ops）"}, 400
-    if len(items) > 400:
-        return {"error": "一次最多 400 项"}, 400
+    if len(items) > fields.BATCH_MAX:
+        return {"error": "一次最多 %d 项" % fields.BATCH_MAX}, 400
     con = db.connect(rw=True)
     try:
         res = ops.batch_update(con, items)
@@ -122,17 +122,18 @@ def batch(m, body, q):
 
 
 def move(m, body, q):
-    table = (body or {}).get("table")
-    rid = (body or {}).get("id")
-    ids = (body or {}).get("ids")
-    index = (body or {}).get("index", 0)
+    table = body.get("table")
+    rid = body.get("id")
+    ids = body.get("ids")
+    index = body.get("index", 0)
     ok_ids = isinstance(ids, list) and len(ids) >= 1 and all(isinstance(x, int) for x in ids)
-    if table not in ("shots", "beats", "scenes") or not (isinstance(rid, int) or ok_ids):
-        return {"error": "参数不完整（table/id/index）"}, 400
+    err_params = {"error": "参数不完整（table/id/index）"}, 400   # 同函数三处同文案（P0·S1-P4④）
+    if table not in ops.TABLES_ALLOWED or not (isinstance(rid, int) or ok_ids):
+        return err_params
     con = db.connect(rw=True)
     try:
         if table == "shots":
-            bid = (body or {}).get("beat_id")
+            bid = body.get("beat_id")
             if not isinstance(bid, int):
                 return {"error": "缺少目标节拍 beat_id"}, 400
             if ok_ids:
@@ -141,11 +142,11 @@ def move(m, body, q):
                 res = ops.move_shot(con, rid, bid, index)
         elif table == "beats":
             if not isinstance(rid, int):
-                return {"error": "参数不完整（table/id/index）"}, 400
+                return err_params
             res = ops.move_beat(con, rid, index)
         else:
             if not isinstance(rid, int):
-                return {"error": "参数不完整（table/id/index）"}, 400
+                return err_params
             res = ops.move_scene(con, rid, index)
         return {"ok": True, "moved": res}, 200
     except ValueError as e:
@@ -171,10 +172,10 @@ def renumber(m, body, q):
 
 
 def duplicate(m, body, q):
-    """M2-5/6 副本：镜头行 / 节拍（连镜头）/ 场次（整场）深拷。"""
-    table = (body or {}).get("table") or "shots"
-    rid = (body or {}).get("id")
-    if table not in ("shots", "beats", "scenes") or not isinstance(rid, int):
+    """M2-5/6 副本：镜头行 / 节拍（连镜头）/ 场次（整场）深拷。table 必填显式（不再默认 shots；P0·S1-P1④）。"""
+    table = body.get("table")
+    rid = body.get("id")
+    if table not in ops.TABLES_ALLOWED or not isinstance(rid, int):
         return {"error": "参数不完整（table/id）"}, 400
     con = db.connect(rw=True)
     try:
@@ -192,17 +193,17 @@ def duplicate(m, body, q):
 def delete_row(m, body, q):
     """M2-6 删除：镜头行（可多行）/ 节拍（镜头落未归或连删）/ 场次（整场级联）；返回快照供撤销。
     防呆：table 必填显式（不再默认 shots——误删事故根因，2026-09-22 收口）。"""
-    table = (body or {}).get("table")
-    if table not in ("shots", "beats", "scenes"):
+    table = body.get("table")
+    if table not in ops.TABLES_ALLOWED:
         return {"error": "缺少或非法 table（不默认 shots）"}, 400
-    ids = (body or {}).get("ids")
-    if ids is None and isinstance((body or {}).get("id"), int):
-        ids = [(body or {}).get("id")]
+    ids = body.get("ids")
+    if ids is None and isinstance(body.get("id"), int):
+        ids = [body.get("id")]
     if not isinstance(ids, list) or not ids \
             or not all(isinstance(x, int) for x in ids):
         return {"error": "参数不完整（table + id/ids）"}, 400
-    if len(ids) > 200:
-        return {"error": "一次最多 200 行"}, 400
+    if len(ids) > fields.DELETE_MAX:
+        return {"error": "一次最多 %d 行" % fields.DELETE_MAX}, 400
     con = db.connect(rw=True)
     try:
         if table == "shots":
@@ -210,7 +211,7 @@ def delete_row(m, body, q):
         if len(ids) != 1:
             return {"error": "该删除一次只能一项"}, 400
         if table == "beats":
-            res = ops.delete_beat(con, ids[0], with_shots=bool((body or {}).get("with_shots")))
+            res = ops.delete_beat(con, ids[0], with_shots=bool(body.get("with_shots")))
             return {"ok": True, "deleted": res}, 200
         return {"ok": True, "deleted": ops.delete_scene(con, ids[0])}, 200
     except ValueError as e:
@@ -220,26 +221,27 @@ def delete_row(m, body, q):
 
 
 def create(m, body, q):
-    """M2-6 创建：空镜头（可指定插入位）/ 空节拍（末尾）/ 空场（末尾）。"""
-    kind = (body or {}).get("kind")
+    """M2-6 创建：空镜头（可指定插入位）/ 空节拍（末尾）/ 空场（末尾）。守卫先于写连接（P0·S1-P4①）。"""
+    kind = body.get("kind")
+    if kind not in ("shot", "beat", "scene"):
+        return {"error": "未知 kind：%s" % kind}, 400
+    scene_id = body.get("scene_id")
+    beat_id = body.get("beat_id")
+    index = body.get("index", 0)
+    if kind == "shot":
+        if not isinstance(scene_id, int) or not isinstance(index, int) \
+                or (beat_id is not None and not isinstance(beat_id, int)):
+            return {"error": "参数不完整（scene_id/beat_id/index）"}, 400
+    elif kind == "beat":
+        if not isinstance(scene_id, int):
+            return {"error": "参数不完整（scene_id）"}, 400
     con = db.connect(rw=True)
     try:
         if kind == "shot":
-            scene_id = (body or {}).get("scene_id")
-            beat_id = (body or {}).get("beat_id")
-            index = (body or {}).get("index", 0)
-            if not isinstance(scene_id, int) or not isinstance(index, int) \
-                    or (beat_id is not None and not isinstance(beat_id, int)):
-                return {"error": "参数不完整（scene_id/beat_id/index）"}, 400
             return {"ok": True, "shot": ops.create_blank_shot(con, scene_id, beat_id, index)}, 200
         if kind == "beat":
-            scene_id = (body or {}).get("scene_id")
-            if not isinstance(scene_id, int):
-                return {"error": "参数不完整（scene_id）"}, 400
             return {"ok": True, "beat": ops.create_beat(con, scene_id)}, 200
-        if kind == "scene":
-            return {"ok": True, "scene": ops.create_scene(con)}, 200
-        return {"error": "未知 kind：%s" % kind}, 400
+        return {"ok": True, "scene": ops.create_scene(con)}, 200
     except ValueError as e:
         return {"error": str(e)}, 400
     finally:
@@ -247,27 +249,30 @@ def create(m, body, q):
 
 
 def restore(m, body, q):
-    """M2-6 撤销专用还原：删行 / 删节拍 / 删场 的完整回插。"""
-    kind = (body or {}).get("kind")
+    """M2-6 撤销专用还原：删行 / 删节拍 / 删场 的完整回插。守卫先于写连接（P0·S1-P4①）。"""
+    kind = body.get("kind")
+    if kind not in ("shots", "beat", "scene"):
+        return {"error": "未知 kind：%s" % kind}, 400
+    rows = body.get("rows")
+    beat = body.get("beat")
+    shot_ids = body.get("shot_ids") or []
+    payload = body.get("payload")
+    if kind == "shots":
+        if not isinstance(rows, list) or not rows:
+            return {"error": "参数不完整（rows）"}, 400
+    elif kind == "beat":
+        if not isinstance(beat, dict):
+            return {"error": "参数不完整（beat）"}, 400
+    else:
+        if not isinstance(payload, dict) or not isinstance(payload.get("scene"), dict):
+            return {"error": "参数不完整（payload）"}, 400
     con = db.connect(rw=True)
     try:
         if kind == "shots":
-            rows = (body or {}).get("rows")
-            if not isinstance(rows, list) or not rows:
-                return {"error": "参数不完整（rows）"}, 400
             return {"ok": True, "shots": ops.restore_shots(con, rows)}, 200
         if kind == "beat":
-            beat = (body or {}).get("beat")
-            shot_ids = (body or {}).get("shot_ids") or []
-            if not isinstance(beat, dict):
-                return {"error": "参数不完整（beat）"}, 400
             return {"ok": True, "beat": ops.restore_beat(con, beat, shot_ids)}, 200
-        if kind == "scene":
-            payload = (body or {}).get("payload")
-            if not isinstance(payload, dict) or not isinstance(payload.get("scene"), dict):
-                return {"error": "参数不完整（payload）"}, 400
-            return {"ok": True, "scene": ops.restore_scene_full(con, payload)}, 200
-        return {"error": "未知 kind：%s" % kind}, 400
+        return {"ok": True, "scene": ops.restore_scene_full(con, payload)}, 200
     except ValueError as e:
         return {"error": str(e)}, 400
     finally:
@@ -276,8 +281,8 @@ def restore(m, body, q):
 
 def lock(m, body, q):
     """M2-7 锁定本场：场次版本快照（落盘 + snapshots 记录）+ 锁定标记（锁定 ≠ 禁止编辑）。"""
-    rid = (body or {}).get("id")
-    lock_flag = bool((body or {}).get("lock", True))
+    rid = body.get("id")
+    lock_flag = bool(body.get("lock", True))
     if not isinstance(rid, int):
         return {"error": "参数不完整（id）"}, 400
     con = db.connect(rw=True)
