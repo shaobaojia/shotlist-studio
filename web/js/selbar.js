@@ -1,26 +1,52 @@
 // 表底选区条（M2-4）：选区出现时浮出——计数 / 批量设值（枚举走菜单、文本走输入）/ 复制 / 清空。
-import { state, fieldOf } from './state.js';
+// F2-W15 域单点：每域＝字段清单（服务端 batch 能力位派生，W14）+ 落值函数 + 菜单前缀 + 计数文案。
+// F2-W13：字段变更才重建；值变更走局部同步（输入框焦点不再被重建吞掉）。
+import { state, fieldOf, fieldsOf } from './state.js';
 import { el } from './ui.js';
-import { openMenu } from './menu.js';
-import { onChange, current, clearSel, rectOf, copySelection, clearSelectionCells, applyFieldValue, applyBeatFieldValue, applySceneFieldValue, selBeatIds } from './selection.js';
+import { openMenu, optItems } from './menu.js';
+import { onChange, current, clearSel, rectOf, copySelection, clearSelectionCells, applyFieldValue, applyBeatFieldValue, applySceneFieldValue, selBeatIds, selRowIds } from './selection.js';
 import { deleteSelectedRows } from './cellmenu.js';
 import { mergeShotsByIds, detachShotsByIds } from './hotbox.js';
 import { runCmdbarFromSel } from './aiwrite.js';
 
-// 可批量设值的字段（枚举优先排前；镜号/景深/虚拟列不进）
-const BATCH_KEYS = ['camera_pos', 'shot_size', 'focal', 'shot_fn', 'camera_move', 'spatial', 'blocking', 'dialogue', 'duration', 'audio', 'director_note', 'pov'];
-// 节拍字段（M5 批2c；节拍序号不进——批量改名无意义）与场景字段（场号不进——唯一性/路由）
-const BEAT_BATCH_KEYS = ['name', 'kind', 'beat_action', 'outside_action', 'reaction', 'closed_loop', 'rhythm_section', 'rhythm_note', 'mood_temp', 'shot_estimate', 'rhythm_density', 'beat_attr', 'note', 'pov'];
-const SCENE_BATCH_KEYS = ['title', 'value', 'pole_start', 'pole_end', 'turn', 'pov'];
 const CLEAR = '（清空）';
+
+// 域单点（F2-W15）
+const DOMAINS = {
+  shots: {
+    table: 'shots', prefix: '', fbtn: '',
+    count: () => { const rc = rectOf(); return (rc ? rc.r2 - rc.r1 + 1 : 0) + ' 镜'; },
+    apply: (k, v, label) => applyFieldValue(k, v, label),
+  },
+  beats: {
+    table: 'beats', prefix: 'b:', fbtn: '节拍·',
+    count: () => selBeatIds().length + ' 个节拍',
+    apply: (k, v, label) => applyBeatFieldValue(k, v, label),
+  },
+  scenes: {
+    table: 'scenes', prefix: 's:', fbtn: '场景·',
+    count: () => '本场',
+    apply: (k, v, label) => applySceneFieldValue(k, v, label),
+  },
+};
+
+// 可批量设值字段清单（F2-W14）：服务端 batch 能力位派生，不再前端手抄
+function batchItems(dom) {
+  return fieldsOf(dom.table).filter((f) => f.batch)
+    .map((f) => ({ key: dom.prefix + f.key, label: f.label }));
+}
 
 let bar = null;
 let countEl = null;
 let delBtn = null;
 let mergeBtn = null;
+let vbtnRef = null;      // 值按钮（枚举域）
+let vinRef = null;       // 值输入框（文本域）
+let builtField = null;   // 已构建的字段（含域前缀）——值变化只做局部同步
 let pick = { field: null, value: null };
-let sig = '';
 let aiDraft = '';
+let lastCount = null;    // 计数缓存（W13：同值不重写）
+let lastMergeOff = null;
 
 export function initSelBar() {
   onChange(onSel);
@@ -30,13 +56,29 @@ function onSel(s) {
   if (!s) {
     if (bar) bar.style.display = 'none';
     pick = { field: null, value: null };
-    sig = '';
+    builtField = null;
+    vbtnRef = null;
+    vinRef = null;
+    lastCount = null;
+    lastMergeOff = null;
     return;
   }
-  const want = JSON.stringify([pick.field, pick.value]);
-  if (!bar || want !== sig) build();
+  if (!bar || builtField !== pick.field) build();
+  else syncValue();
   updateCount(s);
   bar.style.display = 'flex';
+}
+
+// 值变化局部同步（W13）：按钮文本 / 输入框值就地更新，不重建（编辑中焦点不丢）
+function syncValue() {
+  if (vbtnRef) {
+    const t = pick.value == null ? '值…' : (pick.value === '' ? CLEAR : pick.value);
+    if (vbtnRef.textContent !== t) vbtnRef.textContent = t;
+  }
+  if (vinRef && document.activeElement !== vinRef) {
+    const t = pick.value == null ? '' : pick.value;
+    if (vinRef.value !== t) vinRef.value = t;
+  }
 }
 
 function updateCount(s) {
@@ -45,30 +87,27 @@ function updateCount(s) {
   if (!rc) return;
   const m = rc.r2 - rc.r1 + 1;
   const colsN = rc.c2 - rc.c1 + 1;
+  let txt;
   if (colsN === 1) {
     const f = fieldOf(s.cols[rc.c1]);
-    countEl.textContent = '已选 ' + m + ' 镜 · ' + (f ? f.label : s.cols[rc.c1]);
+    txt = '已选 ' + m + ' 镜 · ' + (f ? f.label : s.cols[rc.c1]);
   } else {
-    countEl.textContent = '已选 ' + (m * colsN) + ' 格 · ' + m + ' 镜 · ' + colsN + ' 列';
+    txt = '已选 ' + (m * colsN) + ' 格 · ' + m + ' 镜 · ' + colsN + ' 列';
   }
-  if (delBtn) delBtn.textContent = '删除行（' + m + '）';
-  if (mergeBtn) {
+  if (txt !== lastCount) {
+    countEl.textContent = txt;
+    lastCount = txt;
+  }
+  if (delBtn) {
+    const dt = '删除行（' + m + '）';
+    if (delBtn.textContent !== dt) delBtn.textContent = dt;
+  }
+  if (mergeBtn && lastMergeOff !== (m < 2)) {
     const off = m < 2;
+    lastMergeOff = off;
     mergeBtn.disabled = off;
     mergeBtn.title = off ? '至少选 2 镜才能并为一组' : '把选中的镜头合并为一个提示词组（保留首组文本，可 Ctrl+Z）';
   }
-}
-
-function selectedRowIds() {
-  const s = current();
-  const rc = rectOf();
-  if (!s || !rc) return [];
-  const ids = [];
-  for (let r = rc.r1; r <= rc.r2; r++) {
-    const tr = s.rows[r];
-    if (tr) ids.push(Number(tr.dataset.id));
-  }
-  return ids;
 }
 
 function build() {
@@ -78,7 +117,9 @@ function build() {
     bar.style.display = 'none';
     document.body.appendChild(bar);
   }
-  sig = JSON.stringify([pick.field, pick.value]);
+  builtField = pick.field;
+  lastCount = null;
+  lastMergeOff = null;
   bar.textContent = '';
   countEl = el('span', 'sbar-count');
   bar.appendChild(countEl);
@@ -87,28 +128,19 @@ function build() {
   bar.appendChild(mid);
   const pf = pickField();
   const f = pf ? pf.f : null;
-  const optsList = (pf && pf.dom === 'beats' && pf.key === 'kind')
+  const optsList = (pf && pf.dom.table === 'beats' && pf.key === 'kind')
     ? ((state.meta && state.meta.beat_kinds) || [])
     : (f && f.options && f.options.length ? f.options : null);
 
   const fbtn = el('button', 'tool-btn',
-    f ? (pf.dom === 'beats' ? '节拍·' : (pf.dom === 'scenes' ? '场景·' : '')) + f.label : '设值…');
+    f ? pf.dom.fbtn + f.label : '设值…');
   fbtn.title = '选择要批量设置的字段（镜头 / 节拍 / 场景）';
   fbtn.addEventListener('click', () => {
-    const items = BATCH_KEYS.map((k) => {
-      const ff = fieldOf(k);
-      return ff ? { key: k, label: ff.label, current: k === pick.field } : null;
-    }).filter(Boolean);
+    const items = optItems(batchItems(DOMAINS.shots), pick.field);
     items.push({ sep: true }, { label: '— 节拍字段（套到所选行所在节拍）—', disabled: true });
-    BEAT_BATCH_KEYS.forEach((k) => {
-      const ff = fieldOf(k, 'beats');
-      if (ff) items.push({ key: 'b:' + k, label: ff.label, current: pick.field === 'b:' + k });
-    });
+    items.push.apply(items, optItems(batchItems(DOMAINS.beats), pick.field));
     items.push({ sep: true }, { label: '— 场景字段（套到本场）—', disabled: true });
-    SCENE_BATCH_KEYS.forEach((k) => {
-      const ff = fieldOf(k, 'scenes');
-      if (ff) items.push({ key: 's:' + k, label: ff.label, current: pick.field === 's:' + k });
-    });
+    items.push.apply(items, optItems(batchItems(DOMAINS.scenes), pick.field));
     openMenu(fbtn, items, (k) => {
       pick = { field: k, value: null };
       build();
@@ -116,16 +148,19 @@ function build() {
   });
   mid.appendChild(fbtn);
 
+  vbtnRef = null;
+  vinRef = null;
   if (f) {
     if (optsList && optsList.length) {
       const vbtn = el('button', 'tool-btn', pick.value == null ? '值…' : (pick.value === '' ? CLEAR : pick.value));
+      vbtnRef = vbtn;
       vbtn.title = '选值（拾取即套用）';
       vbtn.addEventListener('click', () => {
-        const items = optsList.map((o) => ({ key: o, label: o, current: o === pick.value }))
+        const items = optItems(optsList, pick.value)
           .concat([{ sep: true }, { key: '', label: CLEAR, current: pick.value === '' }]);
         openMenu(vbtn, items, (v) => {
           pick.value = v;
-          build();
+          syncValue();
           applyPicked(pf, v, f);
         });
       });
@@ -133,15 +168,15 @@ function build() {
     } else {
       const inp = document.createElement('input');
       inp.className = 'sbar-input';
-      inp.placeholder = '值…（回车' + (pf.dom === 'scenes' ? '套到本场' : '套到 ' + applyTargetText(pf)) + '）';
+      inp.placeholder = '值…（回车' + (pf.dom === DOMAINS.scenes ? '套到本场' : '套到 ' + applyTargetText(pf)) + '）';
       inp.value = pick.value == null ? '' : pick.value;
+      vinRef = inp;
       inp.addEventListener('input', () => { pick.value = inp.value; });
       inp.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
           pick.value = inp.value;
-          sig = JSON.stringify([pick.field, pick.value]);
-          applyPicked(pf, pick.value, f);
+          applyPicked(pf, pick.value, f);     // W13：sig 手动补写退役（builtField 已就位）
         }
       });
       mid.appendChild(inp);
@@ -152,12 +187,12 @@ function build() {
   }
 
   const gm = el('button', 'tool-btn', '并为一组');
-  gm.addEventListener('click', () => mergeShotsByIds(selectedRowIds()));
+  gm.addEventListener('click', () => mergeShotsByIds(selRowIds()));
   mergeBtn = gm;
   bar.appendChild(gm);
   const gh = el('button', 'tool-btn', '独立成组');
   gh.title = '选中的镜头各自拆成独立的提示词组（可 Ctrl+Z）';
-  gh.addEventListener('click', () => detachShotsByIds(selectedRowIds()));
+  gh.addEventListener('click', () => detachShotsByIds(selRowIds()));
   bar.appendChild(gh);
 
   const cp = el('button', 'tool-btn', '复制');
@@ -194,24 +229,19 @@ function build() {
   if (s) updateCount(s);
 }
 
-// —— 批量设值·域选择（M5 批2c）：'b:' 节拍 / 's:' 场景 / 裸键=镜头 ——
+// —— 批量设值·域选择（M5 批2c / F2-W15 域化）：'b:' 节拍 / 's:' 场景 / 裸键=镜头 ——
 function pickField() {
   if (!pick.field) return null;
-  if (pick.field.indexOf('b:') === 0) { const k = pick.field.slice(2); return { dom: 'beats', key: k, f: fieldOf(k, 'beats') }; }
-  if (pick.field.indexOf('s:') === 0) { const k = pick.field.slice(2); return { dom: 'scenes', key: k, f: fieldOf(k, 'scenes') }; }
-  return { dom: 'shots', key: pick.field, f: fieldOf(pick.field) };
+  if (pick.field.indexOf('b:') === 0) { const k = pick.field.slice(2); return { dom: DOMAINS.beats, key: k, f: fieldOf(k, 'beats') }; }
+  if (pick.field.indexOf('s:') === 0) { const k = pick.field.slice(2); return { dom: DOMAINS.scenes, key: k, f: fieldOf(k, 'scenes') }; }
+  return { dom: DOMAINS.shots, key: pick.field, f: fieldOf(pick.field) };
 }
 
 function applyTargetText(pf) {
-  const rc0 = rectOf();
-  if (pf.dom === 'beats') return selBeatIds().length + ' 个节拍';
-  if (pf.dom === 'scenes') return '本场';
-  return (rc0 ? rc0.r2 - rc0.r1 + 1 : 0) + ' 镜';
+  return pf.dom.count(pf);
 }
 
 function applyPicked(pf, v, f) {
   const label = '批量设值 · ' + f.label;
-  if (pf.dom === 'beats') applyBeatFieldValue(pf.key, v, label);
-  else if (pf.dom === 'scenes') applySceneFieldValue(pf.key, v, label);
-  else applyFieldValue(pf.key, v, label);
+  pf.dom.apply(pf.key, v, label);
 }
