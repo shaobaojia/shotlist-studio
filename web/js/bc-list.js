@@ -17,10 +17,31 @@ import {
 // ── 拖拽：排序 / 换类 / 拖到段头＝进该组末尾；指示元素 O(1) 清除 ──
 let dragging = null;
 let markedEl = null;
-function clearDropMarks() { if (markedEl) { markedEl.classList.remove('drop-above', 'drop-below', 'drop-end'); markedEl = null; } }
+const BCO_DROP = ['drop-above', 'drop-below', 'drop-end'];   // 落点标记类清单（F3-L3 单点）
+function clearDropMarks() { if (markedEl) { markedEl.classList.remove(...BCO_DROP); markedEl = null; } }
 function setDropMark(el0, cls) { clearDropMarks(); markedEl = el0; el0.classList.add(cls); }
 function draggedBlock() {
   return findBlock(dragging.id);   // F3-W2：块查找单点
+}
+
+// 拖放目标骨架单点（F3-L3）：原 bindRowDrop/bindRowsDrop/bindHeadDrop 三份手写骨架收编
+// spec：{ accept(ev)：接受判定（缺省全接受）· mark(ev, r)：落点类名（缺省 'drop-end'）· drop(ev, r)：落位动作 }
+function bindDropTarget(el0, spec) {
+  el0.addEventListener('dragover', (ev) => {
+    if (!dragging || (spec.accept && !spec.accept(ev))) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    setDropMark(el0, spec.mark ? spec.mark(ev, el0.getBoundingClientRect()) : 'drop-end');
+  });
+  el0.addEventListener('dragleave', () => {
+    if (markedEl === el0) clearDropMarks();
+  });
+  el0.addEventListener('drop', (ev) => {
+    if (!dragging || (spec.accept && !spec.accept(ev))) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    spec.drop(ev, el0.getBoundingClientRect());
+  });
 }
 
 function gripOf(row, b) {
@@ -43,66 +64,39 @@ function gripOf(row, b) {
 }
 
 function bindRowDrop(row, b, catId) {
-  row.addEventListener('dragover', (ev) => {
-    if (!dragging || dragging.id === b.id) return;
-    ev.preventDefault();
-    ev.stopPropagation();
-    const r = row.getBoundingClientRect();
-    setDropMark(row, ev.clientY < r.top + r.height / 2 ? 'drop-above' : 'drop-below');
-  });
-  row.addEventListener('dragleave', () => {
-    if (markedEl === row) { row.classList.remove('drop-above', 'drop-below'); markedEl = null; }
-  });
-  row.addEventListener('drop', (ev) => {
-    if (!dragging || dragging.id === b.id) return;
-    ev.preventDefault();
-    ev.stopPropagation();
-    const r = row.getBoundingClientRect();
-    const below = ev.clientY >= r.top + r.height / 2;
-    const src = draggedBlock();
-    const idx = dropIndex(catId, dragging.id, b.id, below);
-    clearDropMarks();
-    if (src) moveBlockTo(src, catId, idx);
+  bindDropTarget(row, {
+    accept: () => dragging.id !== b.id,
+    mark: (ev, r) => (ev.clientY < r.top + r.height / 2 ? 'drop-above' : 'drop-below'),
+    drop: (ev, r) => {
+      const below = ev.clientY >= r.top + r.height / 2;
+      const src = draggedBlock();
+      const idx = dropIndex(catId, dragging.id, b.id, below);
+      clearDropMarks();
+      if (src) moveBlockTo(src, catId, idx);
+    },
   });
 }
 
 function bindRowsDrop(rowsEl, catId) {
-  rowsEl.addEventListener('dragover', (ev) => {
-    if (!dragging || ev.target !== rowsEl) return;
-    ev.preventDefault();
-    setDropMark(rowsEl, 'drop-end');
-  });
-  rowsEl.addEventListener('dragleave', (ev) => {
-    if (ev.target === rowsEl && markedEl === rowsEl) { rowsEl.classList.remove('drop-end'); markedEl = null; }
-  });
-  rowsEl.addEventListener('drop', (ev) => {
-    if (!dragging || ev.target !== rowsEl) return;
-    ev.preventDefault();
-    const src = draggedBlock();
-    const idx = dropIndex(catId, dragging.id, null);
-    clearDropMarks();
-    if (src) moveBlockTo(src, catId, idx);   // 空区＝放到本组末尾
+  bindDropTarget(rowsEl, {
+    accept: (ev) => ev.target === rowsEl,
+    drop: () => {
+      const src = draggedBlock();
+      const idx = dropIndex(catId, dragging.id, null);
+      clearDropMarks();
+      if (src) moveBlockTo(src, catId, idx);   // 空区＝放到本组末尾
+    },
   });
 }
 
 function bindHeadDrop(sh, catId) {
-  sh.addEventListener('dragover', (ev) => {
-    if (!dragging) return;
-    ev.preventDefault();
-    ev.stopPropagation();
-    setDropMark(sh, 'drop-end');
-  });
-  sh.addEventListener('dragleave', () => {
-    if (markedEl === sh) { sh.classList.remove('drop-end'); markedEl = null; }
-  });
-  sh.addEventListener('drop', (ev) => {
-    if (!dragging) return;
-    ev.preventDefault();
-    ev.stopPropagation();
-    const src = draggedBlock();
-    const idx = dropIndex(catId, dragging.id, null);
-    clearDropMarks();
-    if (src) moveBlockTo(src, catId, idx);   // 拖到组头上＝进该组末尾
+  bindDropTarget(sh, {
+    drop: () => {
+      const src = draggedBlock();
+      const idx = dropIndex(catId, dragging.id, null);
+      clearDropMarks();
+      if (src) moveBlockTo(src, catId, idx);   // 拖到组头上＝进该组末尾
+    },
   });
 }
 

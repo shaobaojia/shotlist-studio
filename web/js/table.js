@@ -2,7 +2,7 @@
 // 显示规格 = cells.js（老库移植）；编辑引擎 = edit.js；页面组装在 scene.js。
 import { state, fieldOf, groupsById, fieldsOf, fieldLabel } from './state.js';
 import { buildGrid, applyColWidthTo } from './grid.js';
-import { el, fmt, toast, flashIntoView } from './ui.js';
+import { el, fmt, toast, flashIntoView, trackDrag } from './ui.js';
 import { cellContent } from './cells.js';
 import { attachEditable, attachCamEditor, recordUndo, batchUpdate } from './edit.js';
 import { api } from './api.js';
@@ -41,23 +41,13 @@ function startColResize(e, f, opts) {
     last = Math.max(36, Math.min(620, startW + ev.clientX - startX));
     applyColWidth(f.key, last);
   };
-  // 收尾幂等 + 兜底（F1-P4）：丢 mouseup（拖出窗口/焦点被抢）不再永久泄漏监听与 .col-resizing
-  let done = false;
+  // 收尾：松键/焦点被抢/指针取消统一走 trackDrag 兜底（F3-L3 手势单点；原 F1-P4 手写四件套退役）
   const finish = () => {
-    if (done) return;
-    done = true;
-    document.removeEventListener('mousemove', onMove, true);
-    document.removeEventListener('mouseup', finish, true);
-    window.removeEventListener('blur', finish);
-    document.removeEventListener('pointercancel', finish, true);
     document.body.classList.remove('col-resizing');
     prefs.widths[f.key] = Math.round(last);
     if (opts.savePrefs) opts.savePrefs();
   };
-  document.addEventListener('mousemove', onMove, true);
-  document.addEventListener('mouseup', finish, true);
-  window.addEventListener('blur', finish);
-  document.addEventListener('pointercancel', finish, true);
+  trackDrag(onMove, finish);
 }
 
 function tableColumns(beatCol, prefs) {

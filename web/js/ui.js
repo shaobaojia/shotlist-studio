@@ -59,10 +59,16 @@ export function flashClass(el0, cls, ms, opts) {
 }
 
 // 指针拖拽三件套单点（F3-W27①）：capture 绑定 + 收尾卸绑 + 松键护栏（窗口外松开后裸移自动收工）
+// + 收尾幂等 + blur/pointercancel 兜底（F3-L3：焦点被抢/指针取消即收工——与 F1-P4 列宽兜底同机制）
 export function trackDrag(onMove, onEnd) {
+  let finished = false;
   const done = () => {
+    if (finished) return;
+    finished = true;
     document.removeEventListener('mousemove', move, true);
     document.removeEventListener('mouseup', done, true);
+    window.removeEventListener('blur', done);
+    document.removeEventListener('pointercancel', done, true);
     if (onEnd) onEnd();
   };
   const move = (ev) => {
@@ -71,6 +77,8 @@ export function trackDrag(onMove, onEnd) {
   };
   document.addEventListener('mousemove', move, true);
   document.addEventListener('mouseup', done, true);
+  window.addEventListener('blur', done);
+  document.addEventListener('pointercancel', done, true);
 }
 
 // 视口 resize rAF 合并单点（F3-W27③）：多个监听者共用，一帧至多一次
