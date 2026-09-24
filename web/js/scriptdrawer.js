@@ -2,7 +2,7 @@
 // 形态：右侧浮动卡 · 查看 ⇄ 编辑（一步撤销）· 钉住时切场跟随。
 // 导入：整本粘贴 → 按场号行首切分（「s010 …」/「10、…」）→ 逐场勾选覆盖（一步可撤）。
 import { api } from './api.js';
-import { el, toast, growTextarea } from './ui.js';
+import { el, toast, growTextarea, isFloatTarget, isTypingTarget } from './ui.js';
 import { menuEl } from './menu.js';
 import { recordUndo } from './edit.js';
 import { writeClipboard } from './clipboard.js';
@@ -35,7 +35,7 @@ function ensureDrawer() {
     if (t && t.closest && t.closest('.menu')) return;
     const inDrawer = !!(t && dr.el.contains(t));
     if (!inDrawer && t && t.closest && t.closest('.drawer')) return;
-    if (!inDrawer && t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (!inDrawer && isTypingTarget(t)) return;
     if (S.mode === 'edit') { toView(); return; }
     if (!dr.isPinned()) commitClose();
   });
@@ -192,7 +192,7 @@ function onOutside(e) {
   if (!dr || !dr.isOpen()) return;
   const t = e.target;
   if (menuEl() && menuEl().contains(t)) return;
-  if (t.closest && t.closest('.float-card:not(.scene-freeze), .drawer, #block-manager, #hist-panel, #sel-bar, .ai-diff, [id^="ai-"]')) return;
+  if (isFloatTarget(t, { prompt: true })) return;   // 单点名单（F1-B5）
   if (dr.isPinned()) return;
   commitClose();
 }

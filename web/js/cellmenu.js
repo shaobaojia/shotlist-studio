@@ -1,7 +1,7 @@
 // 右键菜单（M2-3；M2-5 行副本；M2-6 结构操作）：镜头行（插入/删除/副本/清空）+ 节拍头（副本/删除）+ 选区变体。
 // 挂在 #view 上（事件委托）；复制走 execCommand 兜底（局域 http 下无 clipboard API）。
 import { api } from './api.js';
-import { toast } from './ui.js';
+import { toast, isTypingTarget } from './ui.js';
 import { openMenu, menuOpen } from './menu.js';
 import { recordUndo } from './edit.js';
 import { writeClipboard, pasteBlock, toTSV, tableFieldKeys } from './clipboard.js';
@@ -44,7 +44,7 @@ export function bindCellMenu(view, ctx) {
   document.addEventListener('paste', (e) => {
     if (menuOpen()) return;
     const t = e.target;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (isTypingTarget(t)) return;
     if (document.querySelector('.cell-editor, .cam-editor')) return;
     const anchor = pasteAnchor || (selCurrent() ? tlCell() : null);
     if (!anchor) return;

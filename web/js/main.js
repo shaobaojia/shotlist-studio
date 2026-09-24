@@ -1,7 +1,7 @@
 // 入口：导航（场次标签：切换 / 拖动排序 / 右键副本·删除 / 末尾＋加场）、路由、全局快捷键。
 import { api } from './api.js';
 import { state } from './state.js';
-import { el, toast, once, installWheelGuards } from './ui.js';
+import { el, toast, once, installWheelGuards, isTypingTarget } from './ui.js';
 import { parseHash, sceneNo, hashOf } from './route.js';
 import { renderFilm } from './film.js';
 import { renderScene, refreshCurrentView } from './scene.js';
@@ -275,8 +275,7 @@ window.addEventListener('shotlist:audit-changed', scheduleNavBadges);
 document.addEventListener('keydown', async (e) => {
   if (!(e.ctrlKey || e.metaKey) || String(e.key).toLowerCase() !== 'z') return;
   if (e.shiftKey || e.altKey) return;   // 重做等组合不归全局撤销管（P0·F1-B2）
-  const ae = document.activeElement;
-  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+  if (isTypingTarget(document.activeElement, { select: true })) return;
   e.preventDefault();
   const ok = await undo();
   if (ok) { await refreshCurrentView(); }

@@ -71,9 +71,22 @@ export function durText(v) {
 }
 
 
-// 浮层单点判定（批4/L1）：浮卡根统一挂 .float-card；点外监听一律走这里
-export function isFloatTarget(t) {
-  return !!(t && t.closest && t.closest('.float-card, .menu'));
+// 浮层豁免单点（批4/L1 + F1-B5）：结构浮层根名单；点外监听一律走这里，勿再手抄。
+// .scene-freeze（吸顶场头）是在流页面元素、不挂 .float-card：天然不算浮层（F1-B5）。
+// opts.prompt：附加「提示词预览 / 提示词列」（抽屉点外判定用）。
+const FLOAT_SEL = '.float-card, .menu, .drawer, .bcard, #block-manager, #draft-card, #hist-panel, #sel-bar, .ai-diff, [id^="ai-"]';
+const FLOAT_SEL_PROMPT = FLOAT_SEL + ', .prompt-box, .cell-prompt';
+export function isFloatTarget(t, opts) {
+  if (!t || !t.closest) return false;
+  return !!t.closest((opts && opts.prompt) ? FLOAT_SEL_PROMPT : FLOAT_SEL);
+}
+
+// 「是否输入中」单点（F1-P9）：编辑面/输入框内不劫持全局键；opts.select＝把 SELECT 也算输入中
+export function isTypingTarget(t, opts) {
+  if (!t || !t.tagName) return false;
+  const tag = t.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || t.isContentEditable) return true;
+  return tag === 'SELECT' && !!(opts && opts.select);
 }
 
 

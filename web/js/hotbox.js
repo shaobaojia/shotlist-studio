@@ -2,7 +2,7 @@
 // 交互口径：Ctrl+Enter 保存并下一镜 · Esc 编辑→查看（不保存）· 查看态 Esc→关闭 · 未钉住点抽屉外＝保存并关闭 · 钉住＝不关（切镜跟随）。
 // 写作逻辑不变：块库点插（插入即固化）+ 自由手写；{占位符} 在插入瞬间代入当前镜的值。
 import { api } from './api.js';
-import { el, toast, growTextarea, durText } from './ui.js';
+import { el, toast, growTextarea, durText, isFloatTarget, isTypingTarget } from './ui.js';
 import { openMenu, menuEl } from './menu.js';
 import { recordUndo, undo as globalUndo } from './edit.js';
 import { storeAsBlock, byPosition } from './blocks.js';
@@ -94,9 +94,7 @@ function ensureDrawer() {
       if (t && t.closest && t.closest('.menu')) return;                       // 菜单自管优先
       const inDrawer = !!(t && dr.el.contains(t));
       if (!inDrawer && t && t.closest && t.closest('.drawer')) return;        // 焦点在别的抽屉：让它家处理
-      if (!inDrawer && t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
-        return;                                                                 // 别处编辑中：不介入（编辑面内由 ta 自管）
-      }
+      if (!inDrawer && isTypingTarget(t)) return;                               // 别处编辑中：不介入（编辑面内由 ta 自管）
       if (S.mode === 'edit') { renderDrawer('view'); return; }
       if (!dr.isPinned()) commitClose();
     });
@@ -604,9 +602,7 @@ function onOutside(e) {
   const t = e.target;
   if (!dr || !dr.isOpen()) return;
   if (menuEl() && menuEl().contains(t)) return;
-  if (t.closest && t.closest('.float-card:not(.scene-freeze), .drawer, .bcard, #block-manager, #draft-card, #hist-panel, #sel-bar, .ai-diff, [id^="ai-"], .prompt-box, .cell-prompt')) {
-    return;                                     // 浮卡/菜单/块库管理/AI 卡/详情预览/提示词列：不算点外（场头不豁免）
-  }
+  if (isFloatTarget(t, { prompt: true })) return;   // 单点名单（F1-B5）：浮卡/抽屉/块库/AI 卡/详情预览/提示词列不算点外
   if (dr.isPinned()) return;                    // 钉住：不关
   commitClose();                                // 保存（若编辑中）并关闭
 }
