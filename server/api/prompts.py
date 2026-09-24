@@ -1,13 +1,12 @@
+# -*- coding: utf-8 -*-
 """提示词与块库接口层（M3）：GET /api/blocks；POST /api/blocks（action 分发）；POST /api/prompt/<action>。
 
-纪律：参数守卫先于写连接（坏请求不触发写路径）；域层错误统一 ValueError → 400。"""
-from api import params
-from core import db, prompts
-
-BLOCK_ACTIONS = {"create", "update", "delete", "move", "pin",
-                 "cat_create", "cat_update", "cat_delete", "cat_move"}
-BLOCK_UPDATE_KEYS = ("text", "category_id", "pinned", "position")  # 块可写字段（投影白名单）
-PROMPT_ACTIONS = {"set_text", "merge", "detach", "split", "restore"}
+纪律：可前移的参数守卫先于写连接（坏请求不触发写路径）——create/cat_create/cat_update 的
+域值校验（文本/名称非空与长度）仍在域层连接内执行（历史口径，见 W26）；域层错误统一
+ValueError → 400。分发骨架走 api._guard.run_actions（P0·S3-P7②）；body 由边界归一（app.py，S1-P4②）。
+"""
+from api import _guard, params
+from core import db, fields, prompts
 
 
 def _req_int(body, key):
@@ -26,81 +25,74 @@ def blocks(m, q):
         con.close()
 
 
-def blocks_op(m, body, q):
-    """块库写操作：create / update / delete / move / pin / cat_create / cat_update / cat_delete / cat_move。"""
-    body = body or {}
-    action = body.get("action")
-    if action not in BLOCK_ACTIONS:
-        return {"error": "未知 action：%s" % action}, 400
-    # ── 参数前置校验（进写连接之前） ──
-    rid = None
+# ── 块库（P7②：分发表） ──
+
+def _block_precheck(body, action):
+    ctx = {}
     if action in ("update", "delete", "move", "pin", "cat_update", "cat_delete", "cat_move"):
         rid, err = _req_int(body, "id")
         if err:
-            return err
+            return None, err
+        ctx["rid"] = rid
     if action == "pin" and not isinstance(body.get("pinned"), bool):
-        return {"error": "参数不完整（pinned）"}, 400
-    data = None
+        return None, ({"error": "参数不完整（pinned）"}, 400)
     if action == "update":
-        data = {k: body[k] for k in BLOCK_UPDATE_KEYS if k in body}
+        data = {k: body[k] for k in fields.BLOCK_WRITE_KEYS if k in body}
         if not data:                                   # L10：投影空检查前移（坏请求不触写连接）
-            return {"error": "参数不完整（无可写字段）"}, 400
-    con = db.connect(rw=True)
-    try:
-        if action == "create":
-            return {"ok": True, "block": prompts.block_create(con, body.get("text"), body.get("category_id"))}, 200
-        if action == "update":
-            return {"ok": True, "block": prompts.block_update(con, rid, data)}, 200
-        if action == "delete":
-            return {"ok": True, "deleted": prompts.block_delete(con, rid)}, 200
-        if action == "move":
-            return {"ok": True, "moved": prompts.block_move(con, rid, body.get("dir"))["moved"]}, 200
-        if action == "pin":
-            return {"ok": True, "block": prompts.block_update(con, rid, {"pinned": body.get("pinned")})}, 200
-        if action == "cat_create":
-            return {"ok": True, "category": prompts.cat_create(con, body.get("name"))}, 200
-        if action == "cat_update":
-            return {"ok": True, "category": prompts.cat_update(con, rid, body.get("name"))}, 200
-        if action == "cat_delete":
-            prompts.cat_delete(con, rid)
-            return {"ok": True}, 200
-        return {"ok": True, "moved": prompts.cat_move(con, rid, body.get("dir"))["moved"]}, 200
-    except ValueError as e:
-        return {"error": str(e)}, 400
-    finally:
-        con.close()
+            return None, ({"error": "参数不完整（无可写字段）"}, 400)
+        ctx["data"] = data
+    return ctx, None
+
+
+def _cat_delete(con, b, ctx):
+    prompts.cat_delete(con, ctx["rid"])
+    return {}
+
+
+BLOCK_SPEC = {
+    "create": lambda con, b, c: {"block": prompts.block_create(con, b.get("text"), b.get("category_id"))},
+    "update": lambda con, b, c: {"block": prompts.block_update(con, c["rid"], c["data"])},
+    "delete": lambda con, b, c: {"deleted": prompts.block_delete(con, c["rid"])},
+    "move": lambda con, b, c: {"moved": prompts.block_move(con, c["rid"], b.get("dir"))["moved"]},
+    "pin": lambda con, b, c: {"block": prompts.block_update(con, c["rid"], {"pinned": b.get("pinned")})},
+    "cat_create": lambda con, b, c: {"category": prompts.cat_create(con, b.get("name"))},
+    "cat_update": lambda con, b, c: {"category": prompts.cat_update(con, c["rid"], b.get("name"))},
+    "cat_delete": _cat_delete,
+    "cat_move": lambda con, b, c: {"moved": prompts.cat_move(con, c["rid"], b.get("dir"))["moved"]},
+}
+
+
+def blocks_op(m, body, q):
+    """块库写操作：create / update / delete / move / pin / cat_create / cat_update / cat_delete / cat_move。"""
+    return _guard.run_actions(BLOCK_SPEC, body, _block_precheck)
+
+
+# ── 提示词组（P7②：分发表） ──
+
+def _prompt_precheck(body, action):
+    ctx = {}
+    if action in ("set_text", "split"):
+        gid, err = _req_int(body, "group_id")
+        if err:
+            return None, err
+        ctx["gid"] = gid
+    if action == "restore":
+        sid, err = _req_int(body, "scene_id")
+        if err:
+            return None, err
+        ctx["sid"] = sid
+    return ctx, None
+
+
+PROMPT_SPEC = {
+    "set_text": lambda con, b, c: prompts.set_group_text(con, c["gid"], b.get("text")),
+    "merge": lambda con, b, c: {"groups": prompts.merge_shots(con, b.get("shot_ids"))},
+    "detach": lambda con, b, c: {"groups": prompts.detach_shots(con, b.get("shot_ids"))},
+    "split": lambda con, b, c: {"groups": prompts.split_group(con, c["gid"])},
+    "restore": lambda con, b, c: {"groups": prompts.restore_state(con, c["sid"], b.get("groups"))},
+}
 
 
 def prompt_op(m, body, q):
     """提示词组写操作：set_text / merge / detach / split / restore。"""
-    action = m.group(1)
-    body = body or {}
-    if action not in PROMPT_ACTIONS:
-        return {"error": "未知 action：%s" % action}, 400
-    # ── 参数前置校验（进写连接之前） ──
-    gid = None
-    if action in ("set_text", "split"):
-        gid, err = _req_int(body, "group_id")
-        if err:
-            return err
-    sid = None
-    if action == "restore":
-        sid, err = _req_int(body, "scene_id")
-        if err:
-            return err
-    con = db.connect(rw=True)
-    try:
-        if action == "set_text":
-            res = prompts.set_group_text(con, gid, body.get("text"))
-            return {"ok": True, **res}, 200
-        if action == "merge":
-            return {"ok": True, "groups": prompts.merge_shots(con, body.get("shot_ids"))}, 200
-        if action == "detach":
-            return {"ok": True, "groups": prompts.detach_shots(con, body.get("shot_ids"))}, 200
-        if action == "split":
-            return {"ok": True, "groups": prompts.split_group(con, gid)}, 200
-        return {"ok": True, "groups": prompts.restore_state(con, sid, body.get("groups"))}, 200
-    except ValueError as e:
-        return {"error": str(e)}, 400
-    finally:
-        con.close()
+    return _guard.run_actions(PROMPT_SPEC, body, _prompt_precheck, action=m.group(1))

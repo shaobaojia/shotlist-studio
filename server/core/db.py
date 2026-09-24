@@ -40,6 +40,53 @@ def scenes(con, film_id):
         " FROM scenes sc WHERE sc.film_id=? ORDER BY sc.position", (film_id,)))
 
 
+_RESOLVE_CACHE = {}     # base → resolve 结果（P0·S3-W31：每请求常量不重算）
+
+
+def resolved_base(base):
+    """base 的 resolve 缓存（P0·S3-W31）。"""
+    k = str(base)
+    if k not in _RESOLVE_CACHE:
+        _RESOLVE_CACHE[k] = Path(base).resolve()
+    return _RESOLVE_CACHE[k]
+
+
+def safe_join(base, *parts):
+    """解析并校验路径仍在 base 内（单点，P0·S3-W32）：resolve + is_relative_to；越界 raise ValueError。"""
+    b = resolved_base(base)
+    p = b.joinpath(*parts).resolve()
+    if not p.is_relative_to(b):
+        raise ValueError("非法路径")
+    return p
+
+
+def qmarks(n):
+    """占位串：n 个「?」逗号相连（单点，P0·S3-W7）。"""
+    return ",".join("?" * n)
+
+
+def row(con, table, row_id, msg="行不存在"):
+    """取行否则 raise（单点，P0·S3-W8）：文案可定制（场景/镜头/节拍/块）。"""
+    r = con.execute("SELECT * FROM %s WHERE id=?" % table, (row_id,)).fetchone()
+    if not r:
+        raise ValueError(msg)
+    return dict(r)
+
+
+def group_members(con, group_ids):
+    """组成员（多组）：{gid: [行]}，组内按 (position, id)——P0·S3-W2 单点。"""
+    out = {gid: [] for gid in group_ids}
+    group_ids = [g for g in group_ids if g is not None]
+    if not group_ids:
+        return out
+    q = qmarks(len(group_ids))
+    for r in con.execute(
+            "SELECT * FROM shots WHERE prompt_group_id IN (%s)"
+            " ORDER BY prompt_group_id, position, id" % q, group_ids):
+        out.setdefault(r["prompt_group_id"], []).append(dict(r))
+    return out
+
+
 def scene_by_no(con, film_id, scene_no):
     rows = _dicts(con.execute(
         "SELECT * FROM scenes WHERE film_id=? AND scene_no=?", (film_id, scene_no)))

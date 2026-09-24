@@ -109,14 +109,31 @@ class Base(unittest.TestCase):
 
 class TestParse(unittest.TestCase):
     def test_beats_normalize(self):
-        out = draft.parse_beats(json.dumps(BEATS_OK, ensure_ascii=False))
-        self.assertEqual(len(out), 2)                     # 空壳被丢
+        out, dropped, note = draft.parse_beats(json.dumps(BEATS_OK, ensure_ascii=False))
+        self.assertEqual(len(out), 2)                     # 空壳被丢（W16：计入丢弃数）
         self.assertEqual(out[1]["kind"], "⚪ 填充")        # 坏 kind 归填充
+        self.assertIn("kind_raw", out[1])                  # W16：原文随行带回（不再静默改写）
+        self.assertGreaterEqual(dropped, 1)
+        self.assertIsNone(note)
 
     def test_shots_normalize(self):
-        out = draft.parse_shots(json.dumps(SHOTS_OK, ensure_ascii=False), 2)
-        self.assertEqual(len(out), 2)                     # 越界被丢
+        out, dropped, note = draft.parse_shots(json.dumps(SHOTS_OK, ensure_ascii=False), 2)
+        self.assertEqual(len(out), 2)                     # 越界被丢（W16：计入丢弃数）
         self.assertEqual(out[1]["camera_pos"], "🔴 正打")  # 裸词「正打」→ 五色值
+        self.assertGreaterEqual(dropped, 1)
+        self.assertIsNone(note)
+
+    def test_container_gate_and_note(self):
+        """B2/P5③：容器非数组不炸解析器；不可解析回留痕（原文长度+首 200）。"""
+        out, _, _ = draft.parse_beats('{"beats": {"name": "误发", "kind": "🔴 戏点"}}')
+        self.assertEqual(out, [])
+        out2, _, _ = draft.parse_beats('{"beats": 3}')
+        self.assertEqual(out2, [])
+        out3, _, note3 = draft.parse_beats("不是 JSON")
+        self.assertEqual(out3, [])
+        self.assertIn("不可解析", note3)
+        out4, _, _ = draft.parse_shots('{"shots": {"beat": 1}}', 1)
+        self.assertEqual(out4, [])
 
     def test_fence_strip(self):
         self.assertEqual(draft._strip_fence("```\n正文\n```"), "正文")
@@ -131,7 +148,9 @@ class TestSceneFlow(Base):
         self.assertIsNone(j["error"])
         self.assertEqual(len(j["beats"]), 2)
         self.assertEqual(len(j["shots"]), 2)
-        self.assertEqual(j["stage"], "done")
+        self.assertFalse(j["running"])                    # W20：终态由 running/error 表达
+        self.assertEqual(j["stage"], "shots")             # stage 停在生成阶段（不再写 done）
+        self.assertEqual(j["dropped"], 2)                 # W16：空壳 1 + 越界 1
         self.assertGreaterEqual(j["ms"], 0)
         self.assertEqual(len(inbox), 2)
         self.assertIn(SCRIPT, inbox[0][1]["content"])

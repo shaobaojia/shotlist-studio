@@ -25,6 +25,11 @@ export function groupsById(data) {
   return m;
 }
 
+// 限额单点（S3-P6②）：/api/meta.limits 服务端单源——各模块勿手抄数值
+export function limits() {
+  return (state.meta && state.meta.limits) || {};
+}
+
 // F5-D5：场次显示名单点（导航 chip / ⌘K / 台本抽屉）
 export function sceneLabel(sc) {
   if (!sc) return '';

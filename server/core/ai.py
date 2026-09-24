@@ -7,13 +7,19 @@ import time
 import urllib.error
 import urllib.request
 
+from . import fields
+
 DEFAULTS = {
-    "ai_provider": "deepseek",
+    "ai_provider": "deepseek",   # 装饰性字段（W28）：单一 OpenAI 兼容通道，未按 provider 分支
     "ai_model": "deepseek-flash",
     "ai_base_url": "https://api.deepseek.com",
 }
 KEY_FIELD = "ai_api_key"
-CONFIG_FIELDS = ("ai_provider", "ai_model", "ai_base_url")
+CONFIG_FIELDS = tuple(DEFAULTS)      # W24：由 DEFAULTS 派生（原手抄第二份）
+TEMPERATURE = 0.2                    # 默认采样温度（P6①：temperature 为显式传参入口）
+TIMEOUT_S = fields.AI_TIMEOUT_S
+PROBE_TIMEOUT_S = 30
+DETAIL_MAX = 300                     # 错误详情/回包预览截断
 
 
 class AiError(RuntimeError):
@@ -51,10 +57,17 @@ def save_config(con, data):
     return get_config(con)
 
 
+# 外名 ↔ 内名单表（P7⑤）：写入映射与 public_config 同源，勿分头手抄
+OUTER_FIELDS = (("provider", "ai_provider"), ("model", "ai_model"),
+                ("base_url", "ai_base_url"))
+
+
 def public_config(cfg):
     """给前端的脱敏视图（永不回传 key 明文）。"""
-    return {"provider": cfg["ai_provider"], "model": cfg["ai_model"],
-            "base_url": cfg["ai_base_url"], "has_key": cfg["has_key"]}
+    out = {"has_key": cfg["has_key"]}
+    for outer, inner in OUTER_FIELDS:
+        out[outer] = cfg[inner]
+    return out
 
 
 def require_key(cfg):
@@ -86,11 +99,23 @@ def extract_json(text):
     return obj
 
 
-def channel(con, chat_fn=None, precheck=True):
+def open_channel(chat_fn=None, connect_factory=None, temperature=TEMPERATURE):
+    """任务通道（含连接）：开只读连接 → channel → 关连接；返回 (cfg, talk)——
+    P0·S3-W15（rewrite/draft 三处逐字样板收口）。"""
+    from . import db
+    con = connect_factory() if connect_factory else db.connect()
+    try:
+        return channel(con, chat_fn, temperature=temperature)
+    finally:
+        con.close()
+
+
+def channel(con, chat_fn=None, precheck=True, temperature=TEMPERATURE):
     """任务通道单点（L2）：读配置 + key 预检 → 返回 (cfg, chat)。
 
     chat(cfg, messages) 直出归一文本文（dict→text / str 原样）；
-    chat_fn = 测试注入桩（同形状）；注入时不预检（测试无需真 key）。"""
+    chat_fn = 测试注入桩（同形状）；注入时不预检（测试无需真 key）。
+    temperature（P6③）：按动作分档入口——缺省 TEMPERATURE。"""
     cfg = get_config(con)
     if precheck and chat_fn is None:
         require_key(cfg)
@@ -98,12 +123,12 @@ def channel(con, chat_fn=None, precheck=True):
     def talk(c, messages):
         if chat_fn is not None:
             return reply_text(chat_fn(c, messages))
-        return reply_text(chat(c, messages))
+        return reply_text(chat(c, messages, temperature=temperature))
 
     return cfg, talk
 
 
-def chat(cfg, messages, temperature=0.2, timeout=180):
+def chat(cfg, messages, temperature=TEMPERATURE, timeout=TIMEOUT_S):
     """一次对话调用（非流式）。失败抛 AiError。返回 {text, ms, model}。"""
     require_key(cfg)
     url = cfg["ai_base_url"].rstrip("/") + "/chat/completions"
@@ -120,7 +145,7 @@ def chat(cfg, messages, temperature=0.2, timeout=180):
     except urllib.error.HTTPError as e:
         detail = ""
         try:
-            detail = e.read().decode("utf-8", "replace")[:300]
+            detail = e.read().decode("utf-8", "replace")[:DETAIL_MAX]
         except Exception:
             pass
         raise AiError("HTTP %s：%s" % (e.code, detail))
@@ -130,10 +155,10 @@ def chat(cfg, messages, temperature=0.2, timeout=180):
         obj = json.loads(raw)
         text = obj["choices"][0]["message"]["content"]
     except Exception:
-        raise AiError("响应解析失败：%s" % raw[:300])
+        raise AiError("响应解析失败：%s" % raw[:DETAIL_MAX])
     return {"text": text, "ms": int((time.time() - t0) * 1000), "model": cfg["ai_model"]}
 
 
 def probe(cfg):
     """连通性小测：一句话往返（原名 test——与接口层 handler 重名易混，批3 改名）。"""
-    return chat(cfg, [{"role": "user", "content": "只回复两个字：在的"}], temperature=0, timeout=30)
+    return chat(cfg, [{"role": "user", "content": "只回复两个字：在的"}], temperature=0, timeout=PROBE_TIMEOUT_S)

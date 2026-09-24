@@ -12,6 +12,12 @@ import threading
 import time
 
 TASKS_MAX = 4                 # 全通道同时进行的外呼上限（改写/草稿共用；审计任务不在内）
+GATE_BUSY_MSG = "生成任务过多（同时最多 %d 个）——请等一个跑完再试"   # 闸门文案单点（P0·S3-P4）
+
+
+def now_ts():
+    """统一时间戳（秒级）：started_at / finished_at 共用（P0·S3-W17）。"""
+    return time.strftime("%Y-%m-%d %H:%M:%S")
 
 
 class Gate:
@@ -66,7 +72,8 @@ class JobBoard:
         return None
 
     def _light(self, job):
-        """轮询期轻载变换（P7）：在跑时只回必要字段；默认退化为整快照。"""
+        """轮询期轻载变换（P7）：在跑时只回必要字段；默认退化为整快照。
+        子类覆写时须覆盖 job 全部大字段（文本/列表），否则轮询面照旧全量回传（W22）。"""
         return self._snap(job)
 
     def get(self, key):
@@ -75,9 +82,38 @@ class JobBoard:
             if not job:
                 return None
             self._touch(job)
-            running = bool(job.get("running"))
-        # 快照构建移出锁（P0·S1-W24）：终态不再被写者触碰；running 走子类 _light（浅拷）
-        return self._light(job) if running else self._snap(job)
+            if job.get("running"):
+                return self._light(job)          # 在跑：子类轻载（P7）
+            cache = job.get("_done_cache")
+            if cache is None or cache.get("applied") != job.get("applied"):
+                cache = self._snap(job)
+                job["_done_cache"] = cache       # 完成态首拍缓存（P0·S3-W35）：只以 applied 变更失效
+            return cache
+        # 约定：完成态缓存按「只读」返回（轮询 / apply 侧不得原地改）——快照语义自 S1-W24/P7 起为只读共享
+
+    # ── 启动期模板（子类给三个钩子；P0·S3-P4） ──
+
+    def start_job(self, find, build, run, run_args=()):
+        """启动任务（模板方法）：锁内三步（查重并入 → 闸门 → 登记）+ 快照，锁外起线程。
+
+        find：谓词——查在跑同目标任务（命中 → 返回其快照并入）；build：构造 (job_id, job)；
+        build 只给条目形状——running / started_at 由本方法统一补。run(job_id, *run_args)：
+        线程入口。返回快照（新任务或加入快照 joined=True）。闸门满 → ValueError（文案单点）。
+        """
+        with self._lock:
+            joined = self._find_running(find)
+            if joined:
+                return joined
+            if not self._gate_acquire():
+                raise ValueError(GATE_BUSY_MSG % self._gate.limit)
+            job_id = self._seq_id()
+            job = build(job_id)
+            job.setdefault("running", True)
+            job["started_at"] = now_ts()
+            self._register(job_id, job, gated=True)
+            snap = self._snap(job)
+        threading.Thread(target=run, args=(job_id, *run_args), daemon=True).start()
+        return snap
 
     # ── 启动期原语（锁内使用） ──
 
@@ -130,7 +166,7 @@ class JobBoard:
             if job:
                 job["running"] = False
                 job["error"] = err
-                job["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                job["finished_at"] = now_ts()
                 self._touch(job)
             gated = key in self._gated
             self._gated.discard(key)

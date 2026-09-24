@@ -35,6 +35,14 @@ def req_int_q(q, name):
     return v
 
 
+def req_str(body, key):
+    """body 里的非空字符串；缺失/非法 → ValueError（400 文案统一）。——P0·S3-P7①"""
+    v = body.get(key)
+    if not isinstance(v, str) or not v:
+        raise ValueError("参数不完整（%s）" % key)
+    return v
+
+
 def req_table(body):
     """POST body 的表名（合法域＝ops.TABLES_ALLOWED）；非法 → ValueError。"""
     table = body.get("table")

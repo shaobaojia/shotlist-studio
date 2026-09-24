@@ -4,7 +4,7 @@ import { api, exportUrl, downloadUrl } from './api.js';
 import { state, fieldOf, groupsById, fieldsOf, fieldLabel } from './state.js';
 import { hashOf, isCurrentScene } from './route.js';
 import { el, fmt, toast, once, durTick, flashIntoView, silent, lsGet, lsSet, setVarPx, filmChanged } from './ui.js';
-import { JIWEI_LEGEND } from './cells.js';
+import { jiweiLegend } from './cells.js';
 import { buildTable, beatSection } from './table.js';
 import { bindCellMenu } from './cellmenu.js';
 import { bindSelection, clearSel, current as selCurrent, rectOf, selRowIds } from './selection.js';
@@ -476,7 +476,7 @@ function sceneHead(sc, data) {
 
   const legend = el('span', 'kv legend');
   legend.appendChild(el('b', null, '机位'));
-  legend.appendChild(document.createTextNode(JIWEI_LEGEND.join(' ')));
+  legend.appendChild(document.createTextNode(jiweiLegend().join(' ')));
   meta.appendChild(legend);
   head.appendChild(meta);
   return head;

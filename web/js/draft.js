@@ -3,6 +3,7 @@
 // 组级初稿只出稿，插进编辑面由调用方决定（未保存，保存才落库）。
 import { api } from './api.js';
 import { el, toast, durText } from './ui.js';
+import { limits } from './state.js';
 import { recordCustomUndo } from './edit.js';
 import { pollJob, POLL, failText, joinedToast } from './aicard.js';
 import { panelShell, floatEnter, floatLeave, floatClose } from './float.js';
@@ -67,8 +68,16 @@ function showForm() {
 }
 
 async function startRun(script) {
-  if (!script || script.trim().length < 30) {
-    toast('台本太短——至少贴 30 字', 'err');
+  const t = (script || '').trim();
+  const lim = limits();                                // S3-P6②：限额随 meta（服务端单源）
+  const lo = lim.script_min || 0;
+  const hi = lim.script_max || 0;
+  if (t.length < lo) {
+    toast('台本太短——至少贴 ' + lo + ' 字', 'err');
+    return;
+  }
+  if (hi && t.length > hi) {
+    toast('台本太长——上限 ' + hi + ' 字', 'err');
     return;
   }
   D.lastScript = script;
@@ -116,7 +125,8 @@ function pollScene() {
 function showPreview(j) {
   const b = D.body;
   b.textContent = '';
-  b.appendChild(el('div', 'as-sec-t', countText(j.beats.length, j.shots.length) + '（初稿——落入后每行可改）。'));
+  const dropped = j.dropped ? '（另有 ' + j.dropped + ' 条未通过校验，已忽略）' : '';   // S3-W16
+  b.appendChild(el('div', 'as-sec-t', countText(j.beats.length, j.shots.length) + dropped + '（初稿——落入后每行可改）。'));
   const list = el('div', 'dz-list');
   const byBeat = new Map();                       // F4-W34：一次分桶（原每拍 j.shots.filter 一趟 O(beats×shots)）
   for (const s of j.shots) {

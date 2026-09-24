@@ -1,17 +1,31 @@
 // 老库单元格渲染——规格移植自 storyboard-shotlist（buildRow / formatKongjian / JIWEI_SHORT）。
 // 全部 DOM 构建（数据不进 innerHTML），返回 DocumentFragment。
 import { el, durText } from './ui.js';
+import { fieldOf } from './state.js';
 import { parseCam } from './edit.js';
 
-// 机位五色 → 单字缩写（原样搬自老库）
-const JIWEI_SHORT = {
-  '\u{1F534} 正打': '\u{1F534}正',
-  '\u{1F7E1} 反打': '\u{1F7E1}反',
-  '\u{1F7E2} 第三人称': '\u{1F7E2}三',
-  '\u{1F535} 空间环境': '\u{1F535}环',
-  '\u{1F7E3} 插入/切出': '\u{1F7E3}插',
-};
-export const JIWEI_LEGEND = Object.keys(JIWEI_SHORT);   // 单点派生（F1-W16）
+// 机位五色枚举随 meta（S3-P3②：服务端单源）；缩写 = 各选项定字（视觉细节，留在 UI 层）
+const JIWEI_ABBR = { '正打': '正', '反打': '反', '第三人称': '三', '空间环境': '环', '插入/切出': '插' };
+
+function jiweiOptions() {
+  const f = fieldOf('camera_pos');
+  return (f && f.options) || [];
+}
+
+// 机位图例（原 JIWEI_LEGEND 常量 → 函数；用法 .join(' ') 不变）
+export function jiweiLegend() {
+  return jiweiOptions();
+}
+
+function jiweiShort(v) {
+  for (const o of jiweiOptions()) {
+    if (o === v) {
+      const name = o.replace(/^\S+\s*/, '');           // 去 emoji 前缀
+      return o.split(/\s+/)[0] + (JIWEI_ABBR[name] || name[0] || '');
+    }
+  }
+  return v;                                            // 未注册值原样（同旧口径）
+}
 
 export function cellContent(f, s) {
   const type = f.type;
@@ -43,7 +57,7 @@ export function cellContent(f, s) {
   }
 
   if (type === 'jiwei') {
-    txt(JIWEI_SHORT[v] || v);
+    txt(jiweiShort(v));
     return frag;
   }
 

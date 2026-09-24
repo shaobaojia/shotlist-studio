@@ -27,26 +27,27 @@ def main():
     plan = []
     for g, items in recipes.REGISTRY.items():
         for n, t in items:
-            src = root / "recipes" / g / n
-            dst = root / "data" / "recipe-defaults" / g / n
-            same = src.is_file() and dst.is_file() and src.read_bytes() == dst.read_bytes()
-            plan.append((g, n, src, dst, same))
+            plan.append({"g": g, "n": n,
+                         "src": recipes.source_path(root, g, n),    # P8①/W34：布局单点 + dict
+                         "dst": recipes.default_path(root, g, n)})
     if args.list:
-        for g, n, src, dst, same in plan:
+        for it in plan:
+            src, dst = it["src"], it["dst"]
             if not src.is_file():
                 state = "缺源文件"
             elif not dst.is_file():
                 state = "缺出厂副本"
-            elif same:
+            elif src.read_bytes() == dst.read_bytes():              # W34②：same 只在 --list 算
                 state = "一致"
             else:
                 state = "内容不同"
-            print("[%s] %s/%s" % (state, g, n))
+            print("[%s] %s/%s" % (state, it["g"], it["n"]))
         return
     written = kept = 0
-    for g, n, src, dst, same in plan:
+    for it in plan:
+        src, dst = it["src"], it["dst"]
         if not src.is_file():
-            print("跳过（源缺失）：%s/%s" % (g, n))
+            print("跳过（源缺失）：%s/%s" % (it["g"], it["n"]))
             continue
         if dst.is_file() and not args.force:
             kept += 1

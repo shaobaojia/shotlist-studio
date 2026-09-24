@@ -31,6 +31,21 @@ def scene_line_terse(sc):
     return SEP.join(parts)
 
 
+def beat_line(b, no, style="terse"):
+    """节拍单行（单点，P0·S3-W18）：terse → 「节拍N[kind] 名」（rewrite 用；逐字节同历史输出）；
+    labeled → 「N ｜ 名 ｜ kind ｜ 外界动作:… ｜ 反应:… ｜ 闭环:…」（draft 用）。"""
+    if style == "labeled":
+        return "%s ｜ %s ｜ %s ｜ 外界动作:%s ｜ 反应:%s ｜ 闭环:%s" % (
+            no, b.get("name") or "", b.get("kind") or "",
+            b.get("outside_action") or "", b.get("reaction") or "", b.get("closed_loop") or "")
+    seg = "节拍%s" % no
+    if b.get("kind"):
+        seg += "[%s]" % b["kind"]
+    if b.get("name"):
+        seg += " " + b["name"]
+    return seg
+
+
 def beats_lines(beats, kind=False, fields=(), extra=None):
     """节拍行（单点，P0·S2-W7）：「节拍 N 名」（kind=True 加 [kind]）；
     fields=((列, 标签, 截宽),…) 追加「 ｜ 标签：值」段；extra(beat, seg) 兜底追加（rhythm 时长段）。"""

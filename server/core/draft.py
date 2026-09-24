@@ -6,79 +6,114 @@
 - 组级初稿只出稿（文本），进编辑面与否由前端决定；不自动保存。
 - 配方现读（recipes/ai/draft_*.md）——与四动作同口径。
 """
-import threading
 import time
 
 from . import ai, db, digest, fields, jobs, ops
 from .rewrite import load_recipe
 
 
-def _obj_or_empty(text):
-    """回包 → dict；不可解析回 {}（草稿域「宁缺毋滥」语义；解析走 ai.extract_json）——P0·S2-§7。"""
+def _parse_reply(text):
+    """回包 → (dict, note)：不可解析回 ({}, 留痕)。留痕=原文长度+首 200 字（P0·S3-P5③：
+    解析失败现场可复盘——此前原始回包一字不留）。"""
+    t = text or ""
     try:
-        return ai.extract_json(text)
-    except ValueError:
-        return {}
+        return ai.extract_json(t), None
+    except ValueError as e:
+        return {}, "回包不可解析（%s；原文 %d 字：%.200s）" % (e, len(t), t)
 
 DRAFT_BEATS_RECIPE = "draft_beats.md"
 DRAFT_SHOTS_RECIPE = "draft_shots.md"
 DRAFT_PROMPT_RECIPE = "draft_prompt.md"
 MAX_BEATS, MAX_SHOTS = 8, 40
-SCRIPT_MIN, SCRIPT_MAX = 30, 6000
-KINDS = ("🔴 戏点", "🟡 空间建立", "⚪ 填充")
-CAM_POS = ("🔴 正打", "🟡 反打", "🟢 第三人称", "🔵 空间环境", "🟣 插入/切出")
+SCRIPT_MIN, SCRIPT_MAX = fields.SCRIPT_MIN, fields.SCRIPT_MAX    # P6②：单源
+KINDS = tuple(fields.BEAT_KINDS)                                  # P3②：单源（随 meta 下发 options）
+CAM_POS = tuple(next(f["options"] for f in fields.SHOT_FIELDS
+                     if f["key"] == "camera_pos"))                # P3①：单源派生
+NAME_MAX, TEXT_MAX = 40, 200          # 节拍名 / 文本段（P6①：截断宽度单点）
+BLOCKING_MAX, MOVE_MAX, POS_MAX, DUR_MAX = 300, 60, 40, 20
+ERR_MAX, LINE_MAX = 300, 80           # 任务错误 / 初稿台本行
+DRAFT_TEXT_MAX = fields.DRAFT_TEXT_MAX
 
 
 # ── 解析（宁缺毋滥；种类 / 机位归一化） ──────────────────────────
 
+def _norm_option(v, options):
+    """裸值归一（P0·S3-P3③）：命中选项全称（先精确、再「选项含裸值」容错——声明序首个）；
+    无命中 → None（调用侧决定保底——不再对 options 改标点/字序静默失配）。"""
+    t = (v or "").strip()
+    if not t:
+        return None
+    if t in options:
+        return t
+    for o in options:
+        if t in o:
+            return o
+    return None
+
+
 def parse_beats(text):
-    obj = _obj_or_empty(text)
+    """回包 → (节拍列表, 丢弃数, 留痕note)——P0·S3-B2/W16：容器级闸门 + 丢弃有数 + 解析留痕。"""
+    obj, note = _parse_reply(text)
+    rows = obj.get("beats")
+    rows = rows if isinstance(rows, list) else []        # B2：非数组容器直接为空（此前 KeyError/TypeError）
     out = []
-    for b in (obj.get("beats") or [])[:MAX_BEATS]:
+    dropped = max(0, len(rows) - MAX_BEATS)
+    for b in rows[:MAX_BEATS]:
         if not isinstance(b, dict):
+            dropped += 1
             continue
-        name = str(b.get("name") or "").strip()[:40]
+        name = str(b.get("name") or "").strip()[:NAME_MAX]
         kind = str(b.get("kind") or "").strip()
+        item = {"name": name or "新节拍", "kind": "⚪ 填充"}
         if kind not in KINDS:
-            kind = "⚪ 填充"
-        oa = str(b.get("outside_action") or "").strip()[:200]
-        rc = str(b.get("reaction") or "").strip()[:200]
-        cl = str(b.get("closed_loop") or "").strip()[:200]
+            if kind:
+                item["kind_raw"] = kind[:NAME_MAX]       # W16：不再静默改写——原文随行带回（前端可提示）
+        else:
+            item["kind"] = kind
+        oa = str(b.get("outside_action") or "").strip()[:TEXT_MAX]
+        rc = str(b.get("reaction") or "").strip()[:TEXT_MAX]
+        cl = str(b.get("closed_loop") or "").strip()[:TEXT_MAX]
         if not (name or oa or rc):
+            dropped += 1
             continue
-        out.append({"name": name or "新节拍", "kind": kind,
-                    "outside_action": oa, "reaction": rc, "closed_loop": cl})
-    return out
+        item.update(outside_action=oa, reaction=rc, closed_loop=cl)
+        out.append(item)
+    return out, dropped, note
 
 
 def parse_shots(text, nbeats):
-    obj = _obj_or_empty(text)
+    """回包 → (镜头列表, 丢弃数, 留痕note)——P0·S3-B2/W16：容器级闸门 + 丢弃有数 + 解析留痕。"""
+    obj, note = _parse_reply(text)
+    rows = obj.get("shots")
+    rows = rows if isinstance(rows, list) else []        # B2：非数组容器直接为空
     out = []
-    for s in (obj.get("shots") or [])[:MAX_SHOTS]:
+    dropped = max(0, len(rows) - MAX_SHOTS)
+    for s in rows[:MAX_SHOTS]:
         if not isinstance(s, dict):
+            dropped += 1
             continue
         try:
             bi = int(s.get("beat"))
         except (TypeError, ValueError):
+            dropped += 1
             continue
         if not (1 <= bi <= nbeats):
+            dropped += 1
             continue
-        blk = str(s.get("blocking") or "").strip()[:300]
-        dlg = str(s.get("dialogue") or "").strip()[:200]
+        blk = str(s.get("blocking") or "").strip()[:BLOCKING_MAX]
+        dlg = str(s.get("dialogue") or "").strip()[:TEXT_MAX]
         if not blk and not dlg:
+            dropped += 1
             continue
         pos = str(s.get("camera_pos") or "").strip()
         if pos and pos not in CAM_POS:
-            for cand in CAM_POS:                      # 裸词容错：正打 → 🔴 正打
-                if pos in cand:
-                    pos = cand
-                    break
+            pos = _norm_option(pos, CAM_POS) or pos         # P3③：按 options 归一（精确+容错）
         out.append({"beat": bi,
-                    "camera_move": str(s.get("camera_move") or "").strip()[:60],
-                    "camera_pos": pos[:40],
+                    "camera_move": str(s.get("camera_move") or "").strip()[:MOVE_MAX],
+                    "camera_pos": pos[:POS_MAX],
                     "blocking": blk, "dialogue": dlg,
                     "duration": _strip_dur(s.get("duration"))})
-    return out
+    return out, dropped, note
 
 
 def _strip_dur(v):
@@ -86,7 +121,7 @@ def _strip_dur(v):
     v = str(v or "").strip()
     while v and (v[-1] in "sS" or v.endswith("秒")):
         v = v[:-1]
-    return v[:20]
+    return v[:DUR_MAX]
 
 
 def _strip_fence(t):
@@ -134,70 +169,56 @@ class DraftJobs(jobs.JobBoard):
             raise ValueError("台本太长（上限 %d 字）" % SCRIPT_MAX)
         con = connect_factory() if connect_factory else db.connect()
         try:
-            sc = con.execute("SELECT * FROM scenes WHERE id=?", (scene_id,)).fetchone()
-            if not sc:
-                raise ValueError("场景不存在")
-            sc = dict(sc)
+            sc = db.row(con, "scenes", scene_id, "场景不存在")     # W19/W8：取行单点
         finally:
             con.close()
-        with self._lock:
-            joined = self._find_running(          # 同场去重（M10）：连点并入同一任务
-                lambda j: j.get("kind") == "scene" and j.get("scene_id") == scene_id)
-            if joined:
-                return joined
-            if not self._gate_acquire():
-                raise ValueError("生成任务过多（同时最多 %d 个）——请等一个跑完再试"
-                                 % self._gate.limit)
-            job_id = self._seq_id()
-            job = {"id": job_id, "kind": "scene", "scene_id": scene_id, "running": True,
-                   "stage": "beats", "error": None, "ms": 0,
-                   "started_at": time.strftime("%Y-%m-%d %H:%M:%S"), "finished_at": None,
-                   "beats": [], "shots": [], "applied": False}
-            self._register(job_id, job, gated=True)
-            snap = self._snap(job)
-        threading.Thread(target=self._run_scene, args=(
-            job_id, sc, script, chat, connect_factory), daemon=True).start()
-        return snap
+
+        def build(job_id):
+            return {"id": job_id, "kind": "scene", "scene_id": scene_id,
+                    "stage": "beats", "error": None, "ms": 0,
+                    "finished_at": None, "beats": [], "shots": [], "applied": False}
+
+        return self.start_job(              # P4 启动模板（锁内三步 + 快照 + 起线程）
+            find=lambda j: j.get("kind") == "scene" and j.get("scene_id") == scene_id,
+            build=build, run=self._run_scene,
+            run_args=(sc, script, chat, connect_factory))
 
     def _run_scene(self, job_id, sc, script, chat, connect_factory):
         try:
-            con = connect_factory() if connect_factory else db.connect()
-            try:
-                cfg, ai_chat = ai.channel(con, chat)
-            finally:
-                con.close()
+            cfg, ai_chat = ai.open_channel(chat, connect_factory)    # W15：开通道单点
             t0 = time.time()
             scene_line = digest.scene_line_terse(sc)
             text1 = ai_chat(cfg, [
                 {"role": "system", "content": load_recipe(DRAFT_BEATS_RECIPE)},
                 {"role": "user", "content": scene_line + "\n\n【台本】\n" + script}])
-            beats = parse_beats(text1)
+            beats, dropped, pnote = parse_beats(text1)
             if not beats:
-                raise ValueError("节拍骨架生成为空——可「重来」")
+                raise ValueError("节拍骨架生成为空——可「重来」" + ("；%s" % pnote if pnote else ""))
             with self._lock:
                 j = self._jobs.get(job_id)
                 if j:
                     j["beats"] = beats
+                    j["dropped"] = dropped          # W16：丢弃有数（前端可提示）
                     j["stage"] = "shots"
             lines = [scene_line, "", "【台本】", script, "", "【节拍骨架】"]
-            for i, b in enumerate(beats):
-                lines.append("%d ｜ %s ｜ %s ｜ 外界动作:%s ｜ 反应:%s ｜ 闭环:%s" % (
-                    i + 1, b["name"], b["kind"], b["outside_action"], b["reaction"], b["closed_loop"]))
+            lines += [digest.beat_line(b, i + 1, style="labeled")   # W18：节拍行单点
+                      for i, b in enumerate(beats)]
             text2 = ai_chat(cfg, [
                 {"role": "system", "content": load_recipe(DRAFT_SHOTS_RECIPE)},
                 {"role": "user", "content": "\n".join(lines)}])
-            shots = parse_shots(text2, len(beats))
+            shots, dropped2, pnote2 = parse_shots(text2, len(beats))
             if not shots:
-                raise ValueError("镜头行生成为空——可「重来」")
+                raise ValueError("镜头行生成为空——可「重来」" + ("；%s" % pnote2 if pnote2 else ""))
             with self._lock:
                 j = self._jobs.get(job_id)
                 if j:
                     j["shots"] = shots
-                    j["stage"] = "done"
+                    j["dropped"] = dropped + dropped2
                     j["ms"] = int((time.time() - t0) * 1000)
+                    # W20：stage 只表生成阶段（beats→shots）——终态由 running/error 表达
             self._finish(job_id)
         except Exception as e:      # noqa: BLE001 —— 任务错误留给前端展示
-            self._finish(job_id, str(e)[:300])
+            self._finish(job_id, str(e)[:ERR_MAX])
 
     # ── 组级：提示词初稿 ──
 
@@ -206,50 +227,32 @@ class DraftJobs(jobs.JobBoard):
             raise ValueError("参数不完整（scene_id / shot_id）")
         con = connect_factory() if connect_factory else db.connect()
         try:
-            sc = con.execute("SELECT * FROM scenes WHERE id=?", (scene_id,)).fetchone()
-            if not sc:
-                raise ValueError("场景不存在")
-            sh = con.execute("SELECT * FROM shots WHERE id=?", (shot_id,)).fetchone()
-            if not sh or sh["scene_id"] != scene_id:
+            sc = db.row(con, "scenes", scene_id, "场景不存在")            # W19/W8
+            sh = db.row(con, "shots", shot_id, "镜头不存在或不属于本场")
+            if sh["scene_id"] != scene_id:
                 raise ValueError("镜头不存在或不属于本场")
             if sh["prompt_group_id"] is not None:
-                members = list(con.execute(
-                    "SELECT * FROM shots WHERE prompt_group_id=? ORDER BY position, id",
-                    (sh["prompt_group_id"],)))
+                members = db.group_members(con, [sh["prompt_group_id"]])[sh["prompt_group_id"]]  # W2
             else:
                 members = [sh]
-            members = [dict(m) for m in members]
             blocks = [r[0] for r in con.execute(
                 "SELECT text FROM blocks ORDER BY position, id LIMIT 80")]
-            sc = dict(sc)
         finally:
             con.close()
-        with self._lock:
-            joined = self._find_running(          # 同一镜头的初稿在跑 → 并入（M10）
-                lambda j: j.get("kind") == "prompt" and j.get("shot_id") == shot_id)
-            if joined:
-                return joined
-            if not self._gate_acquire():
-                raise ValueError("生成任务过多（同时最多 %d 个）——请等一个跑完再试"
-                                 % self._gate.limit)
-            job_id = self._seq_id()
-            job = {"id": job_id, "kind": "prompt", "scene_id": scene_id, "shot_id": shot_id,
-                   "running": True, "stage": "prompt", "error": None, "ms": 0,
-                   "started_at": time.strftime("%Y-%m-%d %H:%M:%S"), "finished_at": None,
-                   "text": None, "members": [m["shot_no"] for m in members]}
-            self._register(job_id, job, gated=True)
-            snap = self._snap(job)
-        threading.Thread(target=self._run_prompt, args=(
-            job_id, sc, members, blocks, chat, connect_factory), daemon=True).start()
-        return snap
+
+        def build(job_id):
+            return {"id": job_id, "kind": "prompt", "scene_id": scene_id, "shot_id": shot_id,
+                    "stage": "prompt", "error": None, "ms": 0, "finished_at": None,
+                    "text": None, "members": [m["shot_no"] for m in members]}
+
+        return self.start_job(
+            find=lambda j: j.get("kind") == "prompt" and j.get("shot_id") == shot_id,
+            build=build, run=self._run_prompt,
+            run_args=(sc, members, blocks, chat, connect_factory))
 
     def _run_prompt(self, job_id, sc, members, blocks, chat, connect_factory):
         try:
-            con = connect_factory() if connect_factory else db.connect()
-            try:
-                cfg, ai_chat = ai.channel(con, chat)
-            finally:
-                con.close()
+            cfg, ai_chat = ai.open_channel(chat, connect_factory)    # W15：开通道单点
             t0 = time.time()
             lines = [digest.scene_line_terse(sc), "", "【组内镜头（%d 镜）】" % len(members)]
             lines += digest.shots_lines(members, _MEMBER_SPEC)
@@ -258,7 +261,7 @@ class DraftJobs(jobs.JobBoard):
             for t in blocks:
                 t = " ".join(str(t).split())
                 if t:
-                    lines.append("- " + t[:80])
+                    lines.append("- " + t[:LINE_MAX])
             text = _strip_fence(ai_chat(cfg, [
                 {"role": "system", "content": load_recipe(DRAFT_PROMPT_RECIPE)},
                 {"role": "user", "content": "\n".join(lines)}]))
@@ -267,11 +270,11 @@ class DraftJobs(jobs.JobBoard):
             with self._lock:
                 j = self._jobs.get(job_id)
                 if j:
-                    j["text"] = text[:8000]
+                    j["text"] = text[:DRAFT_TEXT_MAX]
                     j["ms"] = int((time.time() - t0) * 1000)
             self._finish(job_id)
         except Exception as e:      # noqa: BLE001
-            self._finish(job_id, str(e)[:300])
+            self._finish(job_id, str(e)[:ERR_MAX])
 
     # ── 落入（同步；只新增 + 痕迹 source=ai） ──
 
@@ -294,9 +297,7 @@ class DraftJobs(jobs.JobBoard):
             scene_id = job["scene_id"]
         con = connect_factory() if connect_factory else db.connect(rw=True)
         try:
-            sc = con.execute("SELECT * FROM scenes WHERE id=?", (scene_id,)).fetchone()
-            if not sc:
-                raise ValueError("场景不存在（可能已被删除）")
+            db.row(con, "scenes", scene_id, "场景不存在（可能已被删除）")   # W19/W8：取行单点
             beat_ids = ops.append_beats(con, scene_id, [
                 {"name": b["name"], "kind": b["kind"], "outside_action": b["outside_action"],
                  "reaction": b["reaction"], "closed_loop": b["closed_loop"]}

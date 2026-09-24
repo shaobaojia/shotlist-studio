@@ -35,6 +35,14 @@ class TestMeta(unittest.TestCase):
         self.assertIn("blocking", m["ai_fields"])
         self.assertIn("beat_action", m["ai_fields"])
         self.assertEqual(m["ai_max_targets"], 30)
+        # S3-P6②：输入限额随 meta 下发（前端勿手抄）
+        lim = m["limits"]
+        for k in ("script_min", "script_max", "instruction_max", "draft_text_max", "timeout_s"):
+            self.assertIn(k, lim)
+        self.assertGreater(lim["script_max"], lim["script_min"])
+        # S3-P3②：节拍类型 options 随 meta（服务端单源）
+        kinds = [f for f in m["beat_fields"] if f["key"] == "kind"][0]["options"]
+        self.assertEqual(tuple(kinds), ("🔴 戏点", "🟡 空间建立", "⚪ 填充"))
 
 
 class TestAiPreviewGuard(unittest.TestCase):

@@ -2,7 +2,10 @@
 
 安全口径：key 明文永不回传前端（public_config 只有 has_key 布尔）；api_key 留空 = 不改动。
 """
+from api import params
 from core import ai, db, fields, rewrite
+
+REPLY_PREVIEW_MAX = 50     # 连通性小测回包预览截断（P6①）
 
 
 def settings_get(m, q):
@@ -14,14 +17,9 @@ def settings_get(m, q):
 
 
 def settings_set(m, body, q):
-    body = body or {}
     if not any(k in body for k in ("provider", "model", "base_url", "api_key")):
         return {"error": "参数不完整（无可写字段）"}, 400
-    data = {}
-    for src, dst in (("provider", "ai_provider"), ("model", "ai_model"),
-                     ("base_url", "ai_base_url")):
-        if src in body:
-            data[dst] = body[src]
+    data = {dst: body[src] for src, dst in ai.OUTER_FIELDS if src in body}   # P7⑤：映射单表
     if "api_key" in body:
         data["api_key"] = body["api_key"]
     con = db.connect(rw=True)
@@ -41,14 +39,13 @@ def test(m, body, q):
     try:
         res = ai.probe(cfg)
         return {"ok": True, "ms": res["ms"], "model": res["model"],
-                "reply": (res["text"] or "").strip()[:50]}, 200
+                "reply": (res["text"] or "").strip()[:REPLY_PREVIEW_MAX]}, 200
     except ai.AiError as e:
         return {"ok": False, "error": str(e)}, 200
 
 
 def preview(m, body, q):
     """创作预览（M4b）：起后台任务出稿；参数错立即 400。预览零写入。"""
-    body = body or {}
     sid = body.get("scene_id")
     if not fields.is_id(sid):
         return {"error": "参数不完整（scene_id）"}, 400
@@ -72,17 +69,15 @@ def preview(m, body, q):
 
 def job_get(m, q):
     """预览任务快照（前端轮询）。"""
-    v = (q.get("id") or [None])[0]
     try:
-        jid = int(v)
-    except (TypeError, ValueError):
-        return {"error": "参数不完整（id）"}, 400
+        jid = params.req_int_q(q, "id")                 # P7①：query id 单点
+    except ValueError as e:
+        return {"error": str(e)}, 400
     return {"ok": True, "job": rewrite.JOBS.get(jid)}, 200
 
 
 def apply_op(m, body, q):
     """应用预览条目（source=ai 落库；一步事务；前端推撤销栈）。"""
-    body = body or {}
     jid = body.get("job_id")
     if not fields.is_id(jid):
         return {"error": "参数不完整（job_id）"}, 400

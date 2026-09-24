@@ -122,7 +122,7 @@ class TestPreview(Base):
         self.assertEqual(it["after"], "男人的视线钉在手机屏幕上")
         self.assertIsNone(it["error"])
         self.assertEqual(it["label"], "镜01 · 动作调度")
-        self.assertEqual(j["mode"], "action")
+        self.assertNotIn("mode", j)                        # W21：死字段已删
         self.assertGreaterEqual(j["ms"], 0)
         self.assertEqual(j["done"], 1)
         msgs = inbox[0]
@@ -138,7 +138,7 @@ class TestPreview(Base):
         m, j = self.preview([self.tshot("01"), self.tshot("02")],
                             instruction="把这两格都具象化",
                             chat=stub_items({0: "A", 1: "B"}, inbox))
-        self.assertEqual(j["mode"], "cmdbar")
+        self.assertNotIn("mode", j)                        # W21：死字段已删
         self.assertEqual(j["instruction"], "把这两格都具象化")
         self.assertEqual([it["after"] for it in j["items"]], ["A", "B"])
         msgs = inbox[0]
@@ -381,7 +381,7 @@ class TestApply(Base):
             res = rewrite.apply_items(con, m.get(j["id"]))
         finally:
             con.close()
-        self.assertEqual(res["applied"], 2)
+        self.assertEqual(res["applied_n"], 2)
         self.assertEqual(res["submitted"], 2)
         self.assertEqual(res["skipped"], [])
         self.assertEqual(res["results"][0]["i"], 0)
@@ -403,7 +403,7 @@ class TestApply(Base):
             res = rewrite.apply_items(con, m.get(j["id"]))
         finally:
             con.close()
-        self.assertEqual(res["applied"], 1)
+        self.assertEqual(res["applied_n"], 1)
         self.assertEqual(res["submitted"], 1)
         self.assertEqual(self.shot_val("01"), "后到")
         self.assertEqual(len(self.history()), 1)
@@ -416,7 +416,7 @@ class TestApply(Base):
             res = rewrite.apply_items(con, m.get(j["id"]), item_ids=[1])
         finally:
             con.close()
-        self.assertEqual(res["applied"], 1)
+        self.assertEqual(res["applied_n"], 1)
         self.assertEqual(self.shot_val("01"), "男人看着手机")
         self.assertEqual(self.shot_val("02"), "新乙")
 
@@ -430,7 +430,7 @@ class TestApply(Base):
             res = rewrite.apply_items(con, m.get(j["id"]))
         finally:
             con.close()
-        self.assertEqual(res["applied"], 0)
+        self.assertEqual(res["applied_n"], 0)
         self.assertIn("原值已变", res["skipped"][0]["reason"])
         self.assertEqual(self.shot_val("01"), "手工改过了")
 
@@ -442,7 +442,7 @@ class TestApply(Base):
             res = rewrite.apply_items(con, m.get(j["id"]))
         finally:
             con.close()
-        self.assertEqual(res["applied"], 0)
+        self.assertEqual(res["applied_n"], 0)
         self.assertIn("非入库目标", res["skipped"][0]["reason"])
 
     def test_apply_guards(self):

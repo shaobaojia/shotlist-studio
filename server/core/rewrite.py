@@ -18,6 +18,9 @@ ACTIONS = {"rewrite": "rewrite.md", "concretize": "concretize.md",
            "strengthen": "strengthen.md", "expand": "expand.md"}
 CMDBAR_RECIPE = "cmdbar.md"
 MAX_TARGETS = fields.AI_MAX_TARGETS
+ITEM_TEXT_MAX = 2000     # 单条改写结果上限（P6①）
+INSTRUCTION_MAX = fields.INSTRUCTION_MAX
+CONTEXT_MAX = 600
 AI_FIELDS = fields.AI_FIELDS              # 单源：core/fields.py（批4/P8）
 FIELD_LABELS = {f["key"]: f["label"] for f in (fields.SHOT_FIELDS + fields.BEAT_FIELDS)}
 _BRIEF = (("shot_size", 60), ("camera_pos", 60), ("blocking", 60))   # 镜头速览 spec（digest.shots_lines）
@@ -43,9 +46,10 @@ def _load_scene(con, scene_id):
     return ctx
 
 
-def _norm_targets(con, scene_id, targets):
+def _norm_targets(con, scene_id, targets, by_key=None):
     """校验并规范化目标清单（i = 原始序号，前端按它对位）。
-    db 目标 {table,id,field}；text 目标 {kind:'text',text,context?}（不进库，只取稿）。"""
+    db 目标 {table,id,field}；text 目标 {kind:'text',text,context?}（不进库，只取稿）。
+    by_key：{("beats"|"shots", id): 行} 已装载映射（W13：免逐条 SELECT；只含本场行——不在即非本场）。"""
     if not isinstance(targets, list) or not targets:
         raise ValueError("目标为空")
     if len(targets) > MAX_TARGETS:
@@ -58,7 +62,7 @@ def _norm_targets(con, scene_id, targets):
             text = str(t.get("text") or "")
             item = {"i": i, "kind": "text",
                     "label": label or ("文本 %d" % (i + 1)),
-                    "context": str(t.get("context") or "").strip()[:600],
+                    "context": str(t.get("context") or "").strip()[:CONTEXT_MAX],
                     "before": text, "after": None, "error": None, "ms": 0}
             if not text.strip():
                 item["error"] = "原文为空"
@@ -69,9 +73,14 @@ def _norm_targets(con, scene_id, targets):
               and isinstance(fld, str) and fld in AI_FIELDS[table])
         if not ok:
             raise ValueError("第 %d 条目标不受支持（%s.%s）" % (i + 1, table, fld))
-        row = con.execute("SELECT * FROM %s WHERE id=?" % table, (rid,)).fetchone()
-        if not row or row["scene_id"] != scene_id:
-            raise ValueError("第 %d 条目标不存在或不属于本场" % (i + 1))
+        if by_key is not None:
+            row = by_key.get((table, rid))            # W13：内存取行（不在装载集 = 不存在或非本场）
+            if not row:
+                raise ValueError("第 %d 条目标不存在或不属于本场" % (i + 1))
+        else:
+            row = con.execute("SELECT * FROM %s WHERE id=?" % table, (rid,)).fetchone()
+            if not row or row["scene_id"] != scene_id:
+                raise ValueError("第 %d 条目标不存在或不属于本场" % (i + 1))
         no = row["shot_no"] if table == "shots" else row["beat_no"]
         item = {"i": i, "kind": "db", "table": table, "id": rid, "field": fld,
                 "label": label or ("%s%s · %s" % (
@@ -86,10 +95,7 @@ def _norm_targets(con, scene_id, targets):
 def build_user(sc, beats, shots, items):
     """拼 user 消息：场线 + 节拍线 + 镜头速览 + 待改写清单（序号对位）。"""
     lines = [digest.scene_line(sc)]
-    bl = "；".join("节拍%s%s%s" % (b["beat_no"],
-                                  ("[%s]" % b["kind"]) if b["kind"] else "",
-                                  (" " + b["name"]) if b["name"] else "")
-                   for b in beats)
+    bl = "；".join(digest.beat_line(b, b["beat_no"]) for b in beats)   # W18：节拍行单点
     if bl:
         lines.append("节拍：" + bl)
     lines.append("镜头速览：")
@@ -121,7 +127,7 @@ def parse_items(text, want):
             continue
         after = str(x.get("after") or "").strip()
         if i in want and after:
-            out[i] = after[:2000]
+            out[i] = after[:ITEM_TEXT_MAX]
     return out
 
 
@@ -157,7 +163,7 @@ class PreviewJobs(jobs.JobBoard):
             raise ValueError("instruction 必须是文本")
         if action is not None and not isinstance(action, str):
             raise ValueError("action 必须是文本")
-        instruction = (instruction or "").strip()[:500] or None
+        instruction = (instruction or "").strip()[:INSTRUCTION_MAX] or None
         if action is not None and instruction:
             raise ValueError("action 与 instruction 只能给一个")
         if action is None and not instruction:
@@ -167,31 +173,24 @@ class PreviewJobs(jobs.JobBoard):
         con = connect_factory() if connect_factory else db.connect()
         try:
             sc, beats, shots = _load_scene(con, scene_id)
-            items = _norm_targets(con, scene_id, targets)
+            by_key = {("beats", r["id"]): r for r in beats}
+            by_key.update({("shots", r["id"]): r for r in shots})
+            items = _norm_targets(con, scene_id, targets, by_key)     # W13：复用已装载行
         finally:
             con.close()
-        with self._lock:
-            joined = self._find_running(          # 同场去重（M10）：连点/双击不重复外呼
-                lambda j: j.get("scene_id") == scene_id)
-            if joined:
-                return joined
-            if not self._gate_acquire():
-                raise ValueError("生成任务过多（同时最多 %d 个）——请等一个跑完再试"
-                                 % self._gate.limit)
-            job_id = self._seq_id()
+
+        def build(job_id):
             job = {"id": job_id, "scene_id": scene_id,
-                   "mode": "action" if action else "cmdbar",
                    "action": action, "instruction": instruction,
-                   "running": True, "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                    "finished_at": None, "error": None, "ms": 0,
                    "total": len(items), "done": 0, "items": items}
             job["done"] = self._done(job)
-            self._register(job_id, job, gated=True)
-            snap = self._snap(job)
-        threading.Thread(target=self._run,
-                         args=(job_id, sc, beats, shots, items, action, instruction,
-                               chat, connect_factory), daemon=True).start()
-        return snap
+            return job
+
+        return self.start_job(              # P4 启动模板（锁内三步 + 快照 + 起线程）
+            find=lambda j: j.get("scene_id") == scene_id,
+            build=build, run=self._run,
+            run_args=(sc, beats, shots, items, action, instruction, chat, connect_factory))
 
     def _run(self, job_id, sc, beats, shots, items, action, instruction,
              chat, connect_factory):
@@ -200,11 +199,7 @@ class PreviewJobs(jobs.JobBoard):
             self._finish(job_id)
             return
         try:
-            con = connect_factory() if connect_factory else db.connect()
-            try:
-                cfg, ai_chat = ai.channel(con, chat)
-            finally:
-                con.close()
+            cfg, ai_chat = ai.open_channel(chat, connect_factory)    # W15：开通道单点
             recipe = load_recipe(ACTIONS[action] if action else CMDBAR_RECIPE)
             user = build_user(sc, beats, shots, send)
             if instruction:
@@ -277,24 +272,21 @@ def apply_items(con, job, item_ids=None):
         if last.get((table, it["id"], fld)) != it["i"]:
             skipped.append({"i": it["i"], "reason": "重复目标（保留最后一条）"})
             continue
-        row = con.execute("SELECT %s AS v FROM %s WHERE id=?" % (fld, table),
-                          (it["id"],)).fetchone()
-        if not row:
-            skipped.append({"i": it["i"], "reason": "行不存在"})
-            continue
-        cur = row["v"] or ""
-        if cur != it["before"] and cur != it["after"]:
-            skipped.append({"i": it["i"], "reason": "原值已变，跳过（不覆盖手工改动）"})
-            continue
-        items.append({"table": table, "id": it["id"], "field": fld, "value": it["after"]})
+        # W14：不预检——原值期望随条目交 batch_update，与写入同一次原子裁决
+        items.append({"table": table, "id": it["id"], "field": fld,
+                      "value": it["after"], "expect": it["before"]})
         idx.append(it["i"])
     for x in sorted(want - seen):
         skipped.append({"i": x, "reason": "条目不存在"})
     res = ops.batch_update(con, items, source="ai")
     for r, i in zip(res["results"], idx):
         r["i"] = i
+        if r.get("stale"):                        # W14：期望不匹配 → 归 skipped（同历史语义）
+            r.pop("stale")
+            skipped.append({"i": i, "reason": r.pop("error")})
     applied = sum(1 for r in res["results"] if r.get("changed"))
-    return {"applied": applied, "submitted": len(items), "skipped": skipped,
+    skipped.sort(key=lambda s: s["i"])            # W14：统一按 i 序（stale 于批量后归队）
+    return {"applied_n": applied, "submitted": len(items), "skipped": skipped,   # W21：与 draft 的 applied 分家
             "results": res["results"]}
 
 

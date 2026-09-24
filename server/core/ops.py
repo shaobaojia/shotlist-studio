@@ -9,6 +9,8 @@ import threading
 from datetime import date, datetime
 from pathlib import Path
 
+from . import db
+
 from core import db, fields
 
 # 表级差异位（spec 从 fields 派生；skip_types＝不进写白名单的类型，缺省无）——P0·S1-P1②
@@ -180,8 +182,17 @@ def _check_field_value(con, table, row_id, field, value):
     return value
 
 
-def _apply_field(con, table, row_id, field, value, source="manual"):
-    """单字段更新（不 commit）：白名单校验 → 域层值校验 → 写行 → 记痕迹。返回 (row, changed)。"""
+_NO_EXPECT = object()   # expect 缺省哨兵（P0·S3-W14）
+
+
+class _StaleError(ValueError):
+    """期望现值不匹配（内部信号：批量侧转结果不中断，语义同 skipped）。"""
+
+
+def _apply_field(con, table, row_id, field, value, source="manual", expect=_NO_EXPECT):
+    """单字段更新（不 commit）：白名单 → 取行 → 域层值校验 → expect 裁决 → 写行 → 记痕迹。
+    expect（可选）：期望现值——与写入同一次原子裁决（W14：替代「预检 SELECT + 写」两步）。
+    返回 (row, changed)。"""
     if field not in write_keys(table):
         raise ValueError("字段不可写：%s.%s" % (table, field))
     row = con.execute("SELECT * FROM %s WHERE id=?" % table, (row_id,)).fetchone()
@@ -189,6 +200,12 @@ def _apply_field(con, table, row_id, field, value, source="manual"):
         raise ValueError("行不存在：%s #%s" % (table, row_id))
     value = _check_field_value(con, table, row_id, field, value)
     old = row[field]
+    if expect is not _NO_EXPECT:
+        cur = old if old is not None else ""
+        e = expect if expect is not None else ""
+        v = value if value is not None else ""
+        if cur != e and cur != v:     # 等于期望（或已是目标值）才放行——同历史预检语义
+            raise _StaleError("原值已变，跳过（不覆盖手工改动）")
     if (old if old is not None else "") == (value if value is not None else ""):
         return dict(row), False
     if not _guarded_set(con, table, field, row_id, old, value):
@@ -207,6 +224,22 @@ def update_field(con, table, row_id, field, value, source="manual"):
     return row, changed
 
 
+def touch_row(con, table, row_id, **cols):
+    """改列并触碰 updated_at（单点，P0·S3-W1/W10）：不记痕迹、不 commit、无白名单/守卫。
+    ⚠ 与 _apply_field 不同：服务于「一次组操作一条聚合痕迹」的写路径（prompts 域）。
+    row_id 传列表 → 一 条 IN 更新（同批时间戳取一次，免逐行重算）。"""
+    sets = "".join("%s=?, " % c for c in cols) + "updated_at=datetime('now','localtime')"
+    if isinstance(row_id, (list, tuple, set)):
+        ids = list(row_id)
+        if not ids:
+            return
+        con.execute("UPDATE %s SET %s WHERE id IN (%s)" % (table, sets, db.qmarks(len(ids))),
+                    list(cols.values()) + ids)
+    else:
+        con.execute("UPDATE %s SET %s WHERE id=?" % (table, sets),
+                    list(cols.values()) + [row_id])
+
+
 def batch_update(con, items, source="manual"):
     """批量单字段更新（一个连接、最后一次性 commit）：items=[{table,id,field,value}]。
     逐项白名单校验；单项失败只记 error、不中断其余。返回 {changed, results}。"""
@@ -221,10 +254,14 @@ def batch_update(con, items, source="manual"):
         try:
             if not isinstance(rid, int) or not field:
                 raise ValueError("参数不完整")
-            _row, did = _apply_field(con, table, rid, field, "" if value is None else str(value), source)
+            _row, did = _apply_field(con, table, rid, field, "" if value is None else str(value),
+                                     source, expect=it.get("expect", _NO_EXPECT))    # W14：期望随条目
             results.append({"table": table, "id": rid, "field": field, "changed": did})
             if did:
                 changed += 1
+        except _StaleError as e:
+            results.append({"table": table, "id": rid, "field": field,
+                            "stale": True, "error": str(e)})
         except ValueError as e:
             results.append({"table": table, "id": rid, "field": field, "error": str(e)})
     con.commit()
@@ -274,7 +311,7 @@ def reseq(con, table, ids, touch=False):
     touch=True 时同步更新 updated_at（beats 等既有口径）。先读现值、只更真变行——P0·S1-W11。"""
     set_cols = "position=?, updated_at=datetime('now','localtime')" if touch else "position=?"
     cur = {r["id"]: r["position"] for r in con.execute(
-        "SELECT id, position FROM %s WHERE id IN (%s)" % (table, ", ".join("?" * len(ids))), ids)} if ids else {}
+        "SELECT id, position FROM %s WHERE id IN (%s)" % (table, db.qmarks(len(ids))), ids)} if ids else {}
     for i, _id in enumerate(ids):
         if cur.get(_id) != i:
             con.execute("UPDATE %s SET %s WHERE id=?" % (table, set_cols), (i, _id))

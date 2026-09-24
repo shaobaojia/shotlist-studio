@@ -55,10 +55,12 @@ SCENE_FIELDS = [
     {"key": "pov",        "label": "视点角色", "type": "text", "w": 64,  "in_table": True, "batch": True},
 ]
 
+BEAT_KINDS = ["🔴 戏点", "🟡 空间建立", "⚪ 填充"]      # 节拍类型（P3②：随 meta 下发，服务端/前端单源）
+
 BEAT_FIELDS = [
     {"key": "beat_no",        "label": "节拍序号",     "type": "text"},
     {"key": "name",           "label": "节拍名称",     "type": "text", "batch": True},
-    {"key": "kind",           "label": "类型",         "type": "text", "batch": True},
+    {"key": "kind",           "label": "类型",         "type": "text", "batch": True, "options": BEAT_KINDS},
     {"key": "outside_action", "label": "外界动作",     "type": "text", "batch": True},
     {"key": "reaction",       "label": "人物反应",     "type": "text", "batch": True},
     {"key": "closed_loop",    "label": "闭环",         "type": "text", "batch": True},
@@ -85,9 +87,18 @@ AI_MAX_TARGETS = 30
 BATCH_MAX = 400
 DELETE_MAX = 200
 
+# 输入限额（单源，P0·S3-P6②）：各域从此引用——随 /api/meta 下发 limits.input 面向前端
+SCRIPT_MIN, SCRIPT_MAX = 30, 6000      # 台本（草稿两段入口）
+INSTRUCTION_MAX = 500                   # 指挥条指令
+DRAFT_TEXT_MAX = 8000                   # 组级初稿正文
+AI_TIMEOUT_S = 180                      # 通道调用超时（秒）
+
 
 def meta():
     return {"shot_fields": SHOT_FIELDS, "scene_fields": SCENE_FIELDS, "beat_fields": BEAT_FIELDS,
             "ai_fields": [k for v in AI_FIELDS.values() for k in v],
             "ai_max_targets": AI_MAX_TARGETS,
-            "limits": {"batch": BATCH_MAX, "delete": DELETE_MAX}}
+            "limits": {"batch": BATCH_MAX, "delete": DELETE_MAX,
+                       "script_min": SCRIPT_MIN, "script_max": SCRIPT_MAX,
+                       "instruction_max": INSTRUCTION_MAX, "draft_text_max": DRAFT_TEXT_MAX,
+                       "timeout_s": AI_TIMEOUT_S}}

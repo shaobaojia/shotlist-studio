@@ -56,6 +56,18 @@ class TestFileOps(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_backup_no_prune_when_zero(self):
+        """S3-P8②：KEEP_BACKUPS=0 → 不剪枝（原 olds[:-0] 会静默剪光）。"""
+        old = recipes.KEEP_BACKUPS
+        try:
+            recipes.KEEP_BACKUPS = 0
+            for i in range(3):
+                recipes.save("rewrite.md", "v%d 内容" % i, root=self.root)
+        finally:
+            recipes.KEEP_BACKUPS = old
+        baks = list((self.root / "data" / "recipe-backups").glob("ai__rewrite.*.md"))
+        self.assertGreaterEqual(len(baks), 2)
+
     def test_listing(self):
         groups = recipes.listing(root=self.root)
         self.assertEqual([g["group"] for g in groups], ["audit", "ai"])

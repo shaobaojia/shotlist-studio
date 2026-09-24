@@ -28,26 +28,6 @@ def _check_len(value, label, max_len):
     return t
 
 
-def _members(con, group_id):
-    return [dict(r) for r in con.execute(
-        "SELECT id, shot_no, position FROM shots WHERE prompt_group_id=? ORDER BY position, id",
-        (group_id,))]
-
-
-def _members_many(con, group_ids):
-    """一次取多组成员（按组分桶；组内按 position, id）——替代逐组查询。"""
-    out = {gid: [] for gid in group_ids}
-    if not group_ids:
-        return out
-    q = ",".join(["?"] * len(group_ids))
-    for r in con.execute(
-            "SELECT prompt_group_id, id, shot_no, position FROM shots"
-            " WHERE prompt_group_id IN (%s) ORDER BY prompt_group_id, position, id" % q,
-            group_ids):
-        out.setdefault(r["prompt_group_id"], []).append(dict(r))
-    return out
-
-
 def _shot_refs(members):
     return "镜" + " / ".join(str(m["shot_no"]) for m in members)
 
@@ -58,21 +38,27 @@ def _new_group(con, scene_id):
     return cur.lastrowid
 
 
-def prompt_state(con, scene_id):
-    """场次提示词分组完整状态（含成员镜号；empty=无成员空组标记），供前端刷新 / 还原对账。"""
+def prompt_state(con, scene_id, shots=None):
+    """场次提示词分组完整状态（含成员镜号；empty=无成员空组标记），供前端刷新 / 还原对账。
+    shots（W5 接口）：本场全部镜头行（须已同步最新 prompt_group_id）——仅在调用方持有完整
+    行集时传；子集会致成员装配不全，勿传。"""
     groups = db.prompt_groups(con, scene_id)
-    shots = db.shots(con, scene_id)
+    if shots is None:
+        shots = db.shots(con, scene_id)
     db.attach_group_members(groups, shots)
     for g in groups:
         g["empty"] = not g["member_ids"]
     return groups
 
 
-def _normalize_positions(con, scene_id):
-    """组顺序落定 = 首个成员镜的位置顺序；无成员组排到最后（空组是撤销链的载体，刻意不剪）。"""
-    shots = con.execute(
-        "SELECT id, position, prompt_group_id FROM shots WHERE scene_id=? ORDER BY position, id",
-        (scene_id,)).fetchall()
+def _normalize_positions(con, scene_id, shots=None):
+    """组顺序落定 = 首个成员镜的位置顺序；无成员组排到最后（空组是撤销链的载体，刻意不剪）。
+    shots（W4 接口）：本场全部镜头行（含 position/prompt_group_id，序同真表）——仅在调用方
+    持有完整行集时传；子集缺组首会致排序错，勿传。"""
+    if shots is None:
+        shots = con.execute(
+            "SELECT id, position, prompt_group_id FROM shots WHERE scene_id=? ORDER BY position, id",
+            (scene_id,)).fetchall()
     rows = con.execute("SELECT id FROM prompt_groups WHERE scene_id=?", (scene_id,)).fetchall()
     first = {}
     for s in shots:
@@ -102,16 +88,12 @@ def _load_shots(con, shot_ids):
 
 def set_group_text(con, group_id, text):
     """改写组正文（空串=清空）。无变化不记痕。"""
-    g = con.execute("SELECT * FROM prompt_groups WHERE id=?", (group_id,)).fetchone()
-    if not g:
-        raise ValueError("提示词组不存在：#%s" % group_id)
+    g = db.row(con, "prompt_groups", group_id, "提示词组不存在：#%s" % group_id)   # W8 取组单点
     text = _check_len(text, "提示词", MAX_GROUP_TEXT)
     old = g["text"]
     if (old if old is not None else "") == text:
         return {"id": group_id, "text": old, "changed": False}
-    con.execute(
-        "UPDATE prompt_groups SET text=?, updated_at=datetime('now','localtime') WHERE id=?",
-        (text, group_id))
+    ops.touch_row(con, "prompt_groups", group_id, text=text)                       # W1/W10
     ops.record_history(con, g["scene_id"], "prompt_groups", group_id, field="text", old_value=old, new_value=text)
     con.commit()
     return {"id": group_id, "text": text, "changed": True}
@@ -126,9 +108,7 @@ def merge_shots(con, shot_ids):
         if s["prompt_group_id"] is not None:
             return prompt_state(con, s["scene_id"])
         nid = _new_group(con, s["scene_id"])
-        con.execute(
-            "UPDATE shots SET prompt_group_id=?, updated_at=datetime('now','localtime') WHERE id=?",
-            (nid, s["id"]))
+        ops.touch_row(con, "shots", s["id"], prompt_group_id=nid)                  # W1/W10
         ops.record_history(con, s["scene_id"], "prompt_groups", nid, field="create", old_value=None,
                            new_value="新建组 · 镜%s" % s["shot_no"])
         _normalize_positions(con, s["scene_id"])
@@ -140,7 +120,7 @@ def merge_shots(con, shot_ids):
         gid = s["prompt_group_id"]
         if gid is not None and gid not in seen:
             seen.append(gid)
-    before = _members_many(con, seen)   # 一次取全部来源组成员（替代逐组查询）
+    before = db.group_members(con, seen)   # W2：组成员单点（一次取全部来源组）
     target = con.execute("SELECT * FROM prompt_groups WHERE id=?", (seen[0],)).fetchone() if seen else None
     made_new = target is None
     target_id = _new_group(con, scene_id) if made_new else target["id"]
@@ -152,12 +132,13 @@ def merge_shots(con, shot_ids):
         src = s["prompt_group_id"]
         if src == target_id:
             continue
-        con.execute(
-            "UPDATE shots SET prompt_group_id=?, updated_at=datetime('now','localtime') WHERE id=?",
-            (target_id, s["id"]))
         moved.append(s)
         if src is not None:
             moved_by[src] = moved_by.get(src, 0) + 1
+    if moved:
+        ops.touch_row(con, "shots", [s["id"] for s in moved], prompt_group_id=target_id)  # W1/W10
+        for s in moved:
+            s["prompt_group_id"] = target_id      # 内存同步（行集合后续复用）
     empties = [gid for gid in seen
                if gid != target_id and moved_by.get(gid, 0) >= len(before.get(gid, []))]
     if empties:
@@ -180,26 +161,27 @@ def detach_shots(con, shot_ids):
     """选中镜头各自独立成组（原组保留其余成员与文本）；已独立 / 未组镜头跳过。"""
     shots = _load_shots(con, shot_ids)
     scene_id = shots[0]["scene_id"]
-    before = {}
+    gids = [gid for gid in {s["prompt_group_id"] for s in shots} if gid is not None]
+    before = db.group_members(con, gids)   # W3：一次取全部来源组成员（原逐组 _members）
     made = []       # [(shot, 原组 id, 新组 id)]
     moved_ids = {}  # 原组 id -> 本组被拆出的 shot id 集合
     for s in shots:
         gid = s["prompt_group_id"]
         if gid is None:
             continue
-        if gid not in before:
-            before[gid] = _members(con, gid)
-        if len(before[gid]) <= 1:
+        if len(before.get(gid, [])) <= 1:
             continue
         nid = _new_group(con, scene_id)
-        con.execute(
-            "UPDATE shots SET prompt_group_id=?, updated_at=datetime('now','localtime') WHERE id=?",
-            (nid, s["id"]))
+        ops.touch_row(con, "shots", s["id"], prompt_group_id=nid)                  # W1/W10
+        s["prompt_group_id"] = nid              # 内存同步
         made.append((s, gid, nid))
         moved_ids.setdefault(gid, set()).add(s["id"])
     if made:
+        by_gid = {}                             # W11①：一次分桶（原逐组重建列表）
+        for x in made:
+            by_gid.setdefault(x[1], []).append(x)
         for gid, mem in before.items():
-            out_made = [x for x in made if x[1] == gid]
+            out_made = by_gid.get(gid)
             if not out_made:
                 continue
             left = [m for m in mem if m["id"] not in moved_ids[gid]]
@@ -209,9 +191,7 @@ def detach_shots(con, shot_ids):
                 heir, heir_new = out_made[0][0], out_made[0][2]
                 g = con.execute("SELECT * FROM prompt_groups WHERE id=?", (gid,)).fetchone()
                 if g and (g["text"] or "").strip():
-                    con.execute(
-                        "UPDATE prompt_groups SET text=?, updated_at=datetime('now','localtime')"
-                        " WHERE id=?", (g["text"], heir_new))
+                    ops.touch_row(con, "prompt_groups", heir_new, text=g["text"])  # W1/W10
                     note += " · 文本随镜%s保留" % heir["shot_no"]
                 if g:
                     con.execute("DELETE FROM prompt_groups WHERE id=?", (gid,))
@@ -223,17 +203,14 @@ def detach_shots(con, shot_ids):
 
 def split_group(con, group_id):
     """整组拆开：每镜各自成组；正文留在首镜的原组上，其余新组为空。"""
-    g = con.execute("SELECT * FROM prompt_groups WHERE id=?", (group_id,)).fetchone()
-    if not g:
-        raise ValueError("提示词组不存在：#%s" % group_id)
-    members = _members(con, group_id)
+    g = db.row(con, "prompt_groups", group_id, "提示词组不存在：#%s" % group_id)   # W8 取组单点
+    members = db.group_members(con, [group_id])[group_id]                           # W2 组员单点
     if len(members) <= 1:
         return prompt_state(con, g["scene_id"])
     for m in members[1:]:
         nid = _new_group(con, g["scene_id"])
-        con.execute(
-            "UPDATE shots SET prompt_group_id=?, updated_at=datetime('now','localtime') WHERE id=?",
-            (nid, m["id"]))
+        ops.touch_row(con, "shots", m["id"], prompt_group_id=nid)                   # W1/W10
+        m["prompt_group_id"] = nid      # 内存同步
     ops.record_history(con, g["scene_id"], "prompt_groups", group_id, field="split",
           old_value=_shot_refs(members),
           new_value="%s（拆出 %s）" % (_shot_refs(members[:1]), " / ".join(str(m["shot_no"]) for m in members[1:])))
@@ -279,9 +256,7 @@ def restore_state(con, scene_id, groups):
             text = _check_len(text, "提示词", MAX_GROUP_TEXT)
         if is_id(gid) and gid in existing:
             keep_ids.add(gid)
-            con.execute(
-                "UPDATE prompt_groups SET text=?, position=?, updated_at=datetime('now','localtime')"
-                " WHERE id=?", (text, i, gid))
+            ops.touch_row(con, "prompt_groups", gid, text=text, position=i)         # W1/W10
         else:
             row = {"scene_id": scene_id, "position": i, "text": text}
             if is_id(gid):
@@ -290,23 +265,17 @@ def restore_state(con, scene_id, groups):
             keep_ids.add(new_id)
             gid = new_id
         resolved.append((gid, g))
-    if all_ids:
-        q = ",".join(["?"] * len(all_ids))
-        con.execute(
-            "UPDATE shots SET prompt_group_id=NULL, updated_at=datetime('now','localtime')"
-            " WHERE scene_id=? AND id NOT IN (%s)" % q, [scene_id] + all_ids)
-    else:
-        con.execute(
-            "UPDATE shots SET prompt_group_id=NULL, updated_at=datetime('now','localtime')"
-            " WHERE scene_id=?", (scene_id,))
+    # W6：全场置空 + 按组回填（每组一 条 IN）——行集合一次取
+    scene_rows = [r["id"] for r in con.execute(
+        "SELECT id FROM shots WHERE scene_id=?", (scene_id,))]
+    if scene_rows:
+        ops.touch_row(con, "shots", scene_rows, prompt_group_id=None)               # W1/W10
     for gid, g in resolved:
-        for sid in (g.get("shot_ids") or []):
-            con.execute(
-                "UPDATE shots SET prompt_group_id=?, updated_at=datetime('now','localtime')"
-                " WHERE id=?", (gid, sid))
-    for g in db.prompt_groups(con, scene_id):
-        if g["id"] not in keep_ids:
-            con.execute("DELETE FROM prompt_groups WHERE id=?", (g["id"],))
+        ids = g.get("shot_ids") or []
+        if ids:
+            ops.touch_row(con, "shots", ids, prompt_group_id=gid)                   # W1/W10
+    for gid in existing - keep_ids:     # W6：删除集 = existing - keep_ids（原重读全表）
+        con.execute("DELETE FROM prompt_groups WHERE id=?", (gid,))
     ops.record_history(con, scene_id, "prompt_groups", None, field="restore", old_value=None,
                        new_value="分组状态还原（%d 组）" % len(groups))
     con.commit()
@@ -428,15 +397,24 @@ def block_delete(con, block_id):
     return dict(b)
 
 
+def _neighbor_swap(con, rows, row_id, direction):
+    """同级相邻换位判定（单点，P0·S3-W9）：方向守卫 → 定位 → 越界。返回 (moved, idx, j)。
+    落位手段由调用方决定（块走 position / 分类走 reseq）。"""
+    if direction not in (-1, 1):
+        raise ValueError("方向参数错误")
+    idx = next(i for i, x in enumerate(rows) if x["id"] == row_id)
+    j = idx + direction
+    if j < 0 or j >= len(rows):
+        return False, idx, j
+    return True, idx, j
+
+
 def block_move(con, block_id, direction):
     """同分类内与相邻块换位（direction = -1 上移 / 1 下移）；到头不抛错，返回 moved: False。"""
     b = _load_block(con, block_id)
-    if direction not in (-1, 1):
-        raise ValueError("方向参数错误")
     sib = _cat_blocks(con, b["category_id"])
-    idx = next(i for i, x in enumerate(sib) if x["id"] == block_id)
-    j = idx + direction
-    if j < 0 or j >= len(sib):
+    moved, idx, j = _neighbor_swap(con, sib, block_id, direction)
+    if not moved:
         return {"moved": False, "id": block_id}
     block_update(con, block_id, {"position": j})
     return {"moved": True, "id": block_id, "index": j, "old_index": idx}
@@ -461,22 +439,23 @@ def cat_update(con, cat_id, name):
 
 
 def cat_delete(con, cat_id):
-    """删分类：其下块落「未分类」（category_id=NULL），不连带删块。"""
+    """删分类：其下块落「未分类」（category_id=NULL），不连带删块。并入后未分类池致密化（W11②）。"""
     _check_cat(con, cat_id)
     con.execute("UPDATE blocks SET category_id=NULL WHERE category_id=?", (cat_id,))
     con.execute("DELETE FROM block_categories WHERE id=?", (cat_id,))
+    pool = [r["id"] for r in con.execute(
+        "SELECT id FROM blocks WHERE category_id IS NULL ORDER BY position, id")]
+    if pool:
+        ops.reseq(con, "blocks", pool)
     con.commit()
 
 
 def cat_move(con, cat_id, direction):
     """分类上下移；到头不抛错，返回 moved: False。"""
-    if direction not in (-1, 1):
-        raise ValueError("方向参数错误")
     _check_cat(con, cat_id)
     cats = [dict(r) for r in con.execute("SELECT * FROM block_categories ORDER BY position, id")]
-    idx = next(i for i, x in enumerate(cats) if x["id"] == cat_id)
-    j = idx + direction
-    if j < 0 or j >= len(cats):
+    moved, idx, j = _neighbor_swap(con, cats, cat_id, direction)   # W9 单点
+    if not moved:
         return {"moved": False, "id": cat_id}
     cats[idx], cats[j] = cats[j], cats[idx]
     ops.reseq(con, "block_categories", [x["id"] for x in cats])
