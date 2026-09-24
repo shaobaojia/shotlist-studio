@@ -1,6 +1,6 @@
 // 场级页——页面组装：头部（可编）/ 工具条（整理镜号·开关·筛选·跳转）/ 分组与平铺；
 // 表格与节拍区在 table.js；编辑引擎在 edit.js；拖动在 drag.js；筛选在 filter.js。
-import { api } from './api.js';
+import { api, exportUrl, downloadUrl } from './api.js';
 import { state, fieldOf, groupsById } from './state.js';
 import { hashOf, isCurrentScene } from './route.js';
 import { el, fmt, toast, once, durTick, flashIntoView } from './ui.js';
@@ -599,12 +599,7 @@ function viewTools() {
 function openExport(fmt) {
   const sc = currentData && currentData.scene;
   if (!sc) { toast('先打开一个场再导出'); return; }
-  const a = document.createElement('a');
-  a.href = '/api/export?scene=' + encodeURIComponent(sc.scene_no) + '&format=' + fmt;
-  a.download = '';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  downloadUrl(exportUrl(sc.scene_no, fmt));
   toast(fmt === 'print' ? '正在导出 A4 打印版…' : '正在导出静态页…');
 }
 

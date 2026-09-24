@@ -2,6 +2,7 @@
 // 单点：场次取 state.scenes；镜头取当前视图 tr.shot（data-id + 格面文本）；
 // 跳镜一律 filter.jumpToShotById（滚行+闪烁单点）；命令复用既有工具栏按钮（有则点，无则提示）。
 import { el, toast } from './ui.js';
+import { exportUrl, downloadUrl } from './api.js';
 import { state } from './state.js';
 import { sceneNo, hashOf } from './route.js';
 import { jumpToShotById } from './filter.js';
@@ -29,11 +30,7 @@ function clickToolbar(text) {
 function exportScene(fmt) {
   const no = sceneNo();
   if (!no) { toast('先进入一个场，再导出'); return; }
-  const a = document.createElement('a');
-  a.href = '/api/export?scene=' + encodeURIComponent(no) + '&format=' + fmt;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  downloadUrl(exportUrl(no, fmt));   // 单点（F1-P7）：与场务菜单同口径
   toast(fmt === 'print' ? '正在导出 A4 打印版…' : '正在导出静态页…');
 }
 

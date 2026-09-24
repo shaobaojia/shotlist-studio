@@ -61,3 +61,17 @@ export const api = {
   draftJob: (id) => get('/api/ai/draft/job?id=' + id),
   draftApply: (jobId) => post('/api/ai/draft/apply', { job_id: jobId }),
 };
+
+// 导出单点（F1-P7）：href 模板与下载触发（场务菜单 / 命令面板共用）
+export function exportUrl(no, fmt) {
+  return '/api/export?scene=' + encodeURIComponent(no) + '&format=' + fmt;
+}
+
+export function downloadUrl(url) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
