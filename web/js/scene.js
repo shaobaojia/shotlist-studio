@@ -93,7 +93,7 @@ export async function renderScene(view, sceneNo) {
   initScriptDrawer({
     getScene: () => (currentData ? currentData.scene : null),
   });
-  initAudit({ getData: () => currentData });   // refresh 注入为死件，批4 删
+  initAudit({ getData: () => currentData });
   initAiWrite({
     getShot: (id) => (currentData ? allShots(currentData).find((s) => s.id === id) : null),
     sceneId: () => (currentData ? currentData.scene.id : null),

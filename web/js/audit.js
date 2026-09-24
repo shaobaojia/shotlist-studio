@@ -5,7 +5,7 @@ import { api } from './api.js';
 import { el, toast } from './ui.js';
 import { refreshHistoryIfOpen } from './history.js';
 
-let ctx = null;        // { getData, refresh }
+let ctx = null;        // { getData }
 let cur = null;        // { sceneId, issues, counts, job }
 let fetchedAt = 0;
 let pollTimer = null;

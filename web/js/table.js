@@ -244,12 +244,12 @@ function shotCell(s, f, groups, data) {
   return td;
 }
 
-export function renderShotField(td, s, f) {
+function renderShotField(td, s, f) {
   td.textContent = '';
   td.appendChild(cellContent(f.type, s[f.key], f.type === 'camera' ? { focal: s.focal } : null));
 }
 
-export function refreshDetailValue(s, key) {
+function refreshDetailValue(s, key) {
   document.querySelectorAll('tr.detail[data-for="' + s.id + '"] .kv-value[data-field="' + key + '"]')
     .forEach((v) => { v.textContent = fmt(s[key]); });
 }
@@ -524,7 +524,7 @@ export function refreshBeatAction(b) {
 }
 
 // 单元格走格（Tab/Enter）：找同表相邻格并直接开编辑（合成点击 → 复用各控件开启路径）
-export function walkCell(td, dir) {
+function walkCell(td, dir) {
   const tr = td.closest('tr.shot');
   if (!tr) return;
   const table = tr.closest('table');

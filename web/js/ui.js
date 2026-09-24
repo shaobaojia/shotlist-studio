@@ -27,16 +27,6 @@ export function toast(msg, kind) {
   }, kind === 'err' ? 3200 : 1800);
 }
 
-export function kindChip(kind) {
-  const s = String(kind).trim();
-  let cls = 'gray';
-  if (s.startsWith('\u{1F534}')) cls = 'red';
-  else if (s.startsWith('\u{1F7E1}')) cls = 'yellow';
-  const text = s.replace(/^[^\u4e00-\u9fa5A-Za-z0-9]+/, '').trim() || s;
-  return el('span', 'chip ' + cls, text);
-}
-
-
 // textarea 自增长（rAF 合并，避免每次按键强制回流）；min = 最小高度 px
 export function growTextarea(ta, min) {
   if (ta.__grow) return;

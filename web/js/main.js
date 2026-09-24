@@ -241,7 +241,7 @@ async function boot() {
     refreshNavBadges();
     syncTopbarVar();
     bindSettingsBtn(document.getElementById('settings-btn'));
-  bindCmdK();
+    bindCmdK();
     if (window.ResizeObserver) { try { new ResizeObserver(syncTopbarVar).observe(document.getElementById('topbar')); } catch (e) { /* ignore */ } }
     window.addEventListener('hashchange', route);
     window.addEventListener('shotlist:film-changed', () => { reloadFilm(); });

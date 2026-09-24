@@ -3,7 +3,7 @@
 import { el, durText } from './ui.js';
 
 // 机位五色 → 单字缩写（原样搬自老库）
-export const JIWEI_SHORT = {
+const JIWEI_SHORT = {
   '\u{1F534} 正打': '\u{1F534}正',
   '\u{1F7E1} 反打': '\u{1F7E1}反',
   '\u{1F7E2} 第三人称': '\u{1F7E2}三',
