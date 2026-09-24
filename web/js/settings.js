@@ -56,14 +56,14 @@ function loadAll() {
 // ── 一区：AI 通道（自审计 ⚙ 搬迁）────────────────────────────
 
 async function loadAI() {
-  const sec = el('div', 'as-sec');
-  sec.appendChild(el('div', 'as-sec-t', 'AI 通道 · 创作与 LLM 审计共用（key 只存本地库、不入 git、不回传浏览器）'));
+  const sec = el('div', 'form-sec');
+  sec.appendChild(el('div', 'form-sec-t', 'AI 通道 · 创作与 LLM 审计共用（key 只存本地库、不入 git、不回传浏览器）'));
   bodyEl.appendChild(sec);
   try {
     const res = await api.aiSettings();
     renderAI(sec, (res && res.config) || {});
   } catch (err) {
-    const d = el('div', 'as-desc');   // F5-W20/W22：错误态统一（stageText + err-note）
+    const d = el('div', 'form-desc');   // F5-W20/W22：错误态统一（stageText + err-note）
     stageText(d, 'error', err);
     sec.appendChild(d);
   }
@@ -82,7 +82,7 @@ function renderAI(sec, cfg) {
   sec.appendChild(fbase.row);
   sec.appendChild(fkey.row);
 
-  const bar = el('div', 'as-bar');
+  const bar = el('div', 'form-bar');
   const save = el('button', 'tool-btn small', '保存配置');
   save.addEventListener('click', () => busy(save, async () => {   // F5-W16：忙碌模板
     const vals = collect(sec);
@@ -98,7 +98,7 @@ function renderAI(sec, cfg) {
     } catch (err) { failToast('保存失败', err); }
   }));
   const testb = el('button', 'tool-btn small', '连通测试');
-  const result = el('span', 'as-test-result', '');
+  const result = el('span', 'form-test-result', '');
   testb.addEventListener('click', () => busy(testb, async () => {   // F5-W16
     result.textContent = '测试中…';
     try {
@@ -126,9 +126,9 @@ function fillAI(sec, cfg) {
 // ── 二区：配方（列表 → 就地编辑）────────────────────────────
 
 async function loadRecipes() {
-  const sec = el('div', 'as-sec');
-  sec.appendChild(el('div', 'as-sec-t', '配方 · 某个功能里 AI 手里那份提示词，一个功能一份，保存即生效；骨架：①身份 → ②检查/改写要求 → ③喂什么数据 → ④输出格式 → ⑤质量口径。'));
-  listBox = el('div', 'sc-recipes');
+  const sec = el('div', 'form-sec');
+  sec.appendChild(el('div', 'form-sec-t', '配方 · 某个功能里 AI 手里那份提示词，一个功能一份，保存即生效；骨架：①身份 → ②检查/改写要求 → ③喂什么数据 → ④输出格式 → ⑤质量口径。'));
+  listBox = el('div', 'pane-recipes');
   sec.appendChild(listBox);
   bodyEl.appendChild(sec);
   await refreshList();
@@ -143,13 +143,13 @@ async function refreshList() {
     const res = await api.recipes();
     listBox.textContent = '';
     for (const g of (res.groups || [])) {
-      listBox.appendChild(el('div', 'sc-g-t', g.label));
+      listBox.appendChild(el('div', 'pane-g-t', g.label));
       for (const it of (g.items || [])) {
-        const row = el('div', 'sc-r' + (it.exists ? '' : ' missing'));
-        row.appendChild(el('span', 'sc-r-t', it.title));
-        row.appendChild(el('span', 'sc-r-m', it.exists ? (fmtSize(it.size) + ' · ' + fmtStamp(it.mtime * 1000, 'md-hm')) : '文件缺失'));   // F5-P8③：时间戳单点
+        const row = el('div', 'pane-r' + (it.exists ? '' : ' missing'));
+        row.appendChild(el('span', 'pane-r-t', it.title));
+        row.appendChild(el('span', 'pane-r-m', it.exists ? (fmtSize(it.size) + ' · ' + fmtStamp(it.mtime * 1000, 'md-hm')) : '文件缺失'));   // F5-P8③：时间戳单点
         if (it.exists) {
-          row.appendChild(el('span', 'sc-r-go', '改 ›'));
+          row.appendChild(el('span', 'pane-r-go', '改 ›'));
           row.addEventListener('click', () => openEdit(it.name));
         } else {
           row.addEventListener('click', () => toast('文件缺失，无法编辑', 'err'));
@@ -172,27 +172,27 @@ async function openEdit(name) {
     return;
   }
   listBox.textContent = '';
-  const head = el('div', 'sc-e-head');
+  const head = el('div', 'pane-e-head');
   const back = el('button', 'tool-btn small', '‹ 返回列表');
   back.addEventListener('click', () => {
     if (!guardLeave('返回列表')) return;   // F5-B1：单点
     refreshList();
   });
   head.appendChild(back);
-  head.appendChild(el('b', 'sc-e-title', r.title + '（' + r.group + '/' + r.name + '）'));
+  head.appendChild(el('b', 'pane-e-title', r.title + '（' + r.group + '/' + r.name + '）'));
   listBox.appendChild(head);
 
   const ta = document.createElement('textarea');
-  ta.className = 'as-input as-area sc-e-area';
+  ta.className = 'form-input form-area pane-e-area';
   ta.spellcheck = false;
   ta.value = r.content;
   viewDirty = () => ta.value !== r.content;    // 脏检查（批4）
   listBox.appendChild(ta);
 
-  const meta = el('div', 'as-desc', fmtSize(r.size) + ' · 改于 ' + fmtStamp(r.mtime * 1000, 'md-hm'));
+  const meta = el('div', 'form-desc', fmtSize(r.size) + ' · 改于 ' + fmtStamp(r.mtime * 1000, 'md-hm'));
   listBox.appendChild(meta);
 
-  const bar = el('div', 'as-bar');
+  const bar = el('div', 'form-bar');
   const save = el('button', 'tool-btn small', '保存');
   save.addEventListener('click', () => busy(save, async () => {   // F5-W16
     try {

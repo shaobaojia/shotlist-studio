@@ -1,16 +1,16 @@
 // 表单件单点（L9）：设置卡（settings.js）与审计设置卡（auditset.js）共用。
-// 行骨架保持既有类名（.as-p / .as-p-k / .as-input）——纯结构复用，视觉零变化。
+// 行骨架保持既有类名（.form-p / .form-p-k / .form-input）——纯结构复用，视觉零变化。
 import { el } from './ui.js';
 
-// 表单行：<label class="as-p"><span class="as-p-k">label</span><控件/></label>
+// 表单行：<label class="form-p"><span class="form-p-k">label</span><控件/></label>
 // spec: {tag:'input'|'textarea', type?, cls?, value?, checked?, placeholder?, rows?, min?, key?(data-k)}
 // 返回 { row, inp }（事件由调用方挂）。
 export function fieldRow(label, spec) {
   spec = spec || {};
-  const row = el('label', 'as-p');
-  row.appendChild(el('span', 'as-p-k', label));
+  const row = el('label', 'form-p');
+  row.appendChild(el('span', 'form-p-k', label));
   const inp = document.createElement(spec.tag || 'input');
-  const cls = spec.cls === undefined ? 'as-input' : spec.cls;
+  const cls = spec.cls === undefined ? 'form-input' : spec.cls;
   if (cls) inp.className = cls;
   if (spec.type) inp.type = spec.type;
   if (spec.rows) inp.rows = spec.rows;

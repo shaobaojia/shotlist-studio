@@ -49,15 +49,15 @@ function buildCard() {
 function showForm() {
   const b = D.body;
   b.textContent = '';
-  b.appendChild(el('div', 'as-sec-t', '把这一场的台本段贴进来（几百字～两千字）。生成的是初稿——结构对、细节你来过手；只新增、不覆盖，落入后一步可撤。'));
+  b.appendChild(el('div', 'form-sec-t', '把这一场的台本段贴进来（几百字～两千字）。生成的是初稿——结构对、细节你来过手；只新增、不覆盖，落入后一步可撤。'));
   const ta = document.createElement('textarea');
-  ta.className = 'as-input as-area dz-script';
+  ta.className = 'form-input form-area dz-script';
   ta.placeholder = '例：\n内景 旧公寓客厅 深夜\n男人坐在沙发上反复解锁手机……';
   ta.spellcheck = false;
   if (D.lastScript) ta.value = D.lastScript;
   else if (D.prescript) ta.value = D.prescript;
   b.appendChild(ta);
-  const bar = el('div', 'as-bar');
+  const bar = el('div', 'form-bar');
   const go = el('button', 'tool-btn small dz-violet', '生成草稿');
   go.addEventListener('click', () => startRun(ta.value));
   const cancel = el('button', 'tool-btn small', '取消');
@@ -95,7 +95,7 @@ async function startRun(script) {
 function showRun() {
   const b = D.body;
   b.textContent = '';
-  b.appendChild(el('div', 'as-sec-t', '两段生成中：① 节拍骨架 → ② 镜头行。约 20～60 秒，请稍候……'));
+  b.appendChild(el('div', 'form-sec-t', '两段生成中：① 节拍骨架 → ② 镜头行。约 20～60 秒，请稍候……'));
   D.stage = el('div', 'dz-stage', '① 分析节拍骨架…');
   b.appendChild(D.stage);
 }
@@ -126,7 +126,7 @@ function showPreview(j) {
   const b = D.body;
   b.textContent = '';
   const dropped = j.dropped ? '（另有 ' + j.dropped + ' 条未通过校验，已忽略）' : '';   // S3-W16
-  b.appendChild(el('div', 'as-sec-t', countText(j.beats.length, j.shots.length) + dropped + '（初稿——落入后每行可改）。'));
+  b.appendChild(el('div', 'form-sec-t', countText(j.beats.length, j.shots.length) + dropped + '（初稿——落入后每行可改）。'));
   const list = el('div', 'dz-list');
   const byBeat = new Map();                       // F4-W34：一次分桶（原每拍 j.shots.filter 一趟 O(beats×shots)）
   for (const s of j.shots) {
@@ -153,7 +153,7 @@ function showPreview(j) {
     }
   }
   b.appendChild(list);
-  const bar = el('div', 'as-bar');
+  const bar = el('div', 'form-bar');
   const ok = el('button', 'tool-btn small dz-violet', '落入草稿（' + countText(j.beats.length, j.shots.length) + '）');
   ok.addEventListener('click', async () => {
     ok.disabled = true;
@@ -211,7 +211,7 @@ export function openPromptDraft(opts) {
   const renderText = (text) => {
     body.textContent = '';
     body.appendChild(el('pre', 'dz-draft-text', text));
-    const bar = el('div', 'as-bar');
+    const bar = el('div', 'form-bar');
     const ins = el('button', 'tool-btn small dz-violet', '插入编辑面（未保存）');
     ins.title = '替换当前编辑面内容；保存后才落库——编辑面内 Ctrl+Z 可撤';
     ins.addEventListener('click', () => {

@@ -31,7 +31,7 @@ export function floatClose(layer) {
 export function panelShell(spec) {
   const card = el('div', 'float-card' + (spec.cls ? ' ' + spec.cls : ''));
   if (spec.id) card.id = spec.id;
-  const head = el('div', spec.headCls || 'sc-head');
+  const head = el('div', spec.headCls || 'pane-head');
   head.appendChild(el('b', null, spec.title));
   if (spec.fillHead) spec.fillHead(head);
   if (!spec.noX) {
@@ -42,7 +42,7 @@ export function panelShell(spec) {
   card.appendChild(head);
   let body = null;
   if (!spec.noBody) {
-    body = el('div', spec.bodyCls == null ? 'sc-body' : spec.bodyCls);
+    body = el('div', spec.bodyCls == null ? 'pane-body' : spec.bodyCls);
     card.appendChild(body);
   }
   let foot = null;

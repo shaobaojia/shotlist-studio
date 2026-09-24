@@ -228,15 +228,15 @@ function closeImport() {
 function showImportForm() {
   const b = IMP.card._body;
   b.textContent = '';
-  b.appendChild(el('div', 'as-sec-t', '整本剧本贴进来——按场号行首自动切分（「s010 …」或「10、…」）。解析后逐场勾选，只覆盖勾选的场；已有台本的场默认不勾（防误覆盖），导入可一步撤销。'));
+  b.appendChild(el('div', 'form-sec-t', '整本剧本贴进来——按场号行首自动切分（「s010 …」或「10、…」）。解析后逐场勾选，只覆盖勾选的场；已有台本的场默认不勾（防误覆盖），导入可一步撤销。'));
   const ta = document.createElement('textarea');
-  ta.className = 'as-input as-area';
+  ta.className = 'form-input form-area';
   ta.spellcheck = false;
   ta.style.minHeight = '120px';
   ta.placeholder = 's010 商场过道\n内景 商场 白天\n……\n\ns020 电玩城门口\n……';
   ta.value = IMP.lastText || '';
   b.appendChild(ta);
-  const bar = el('div', 'as-bar');
+  const bar = el('div', 'form-bar');
   const parseBtn = el('button', 'tool-btn small dz-violet', '解析');
   bar.appendChild(parseBtn);
   b.appendChild(bar);
@@ -314,7 +314,7 @@ function renderPickRows(scenes, out, list, refreshStat) {
 // 底部条（F4-W30 拆分：常驻卡底，不随列表滚动）
 function renderApplyBar(list, ui, refreshStat, onApply) {
   if (IMP.applyBar && IMP.applyBar.parentNode) IMP.applyBar.parentNode.removeChild(IMP.applyBar);
-  const applyBar = el('div', 'as-bar sd-imp-applybar');
+  const applyBar = el('div', 'form-bar sd-imp-applybar');
   const apply = el('button', 'tool-btn small dz-violet', '导入勾选的场');
   const stat = el('span', 'sd-imp-stat', '');
   applyBar.appendChild(apply);

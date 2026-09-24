@@ -21,7 +21,7 @@ export function openAuditSettings() {
 }
 
 function build() {
-  const sh = panelShell({ id: 'audit-set', headCls: 'as-head', bodyCls: 'as-body', title: '审计设置', onClose: closeAuditSet });
+  const sh = panelShell({ id: 'audit-set', headCls: 'form-head', bodyCls: 'form-body', title: '审计设置', onClose: closeAuditSet });
   panel = sh.card;
   bodyEl = sh.body;
   panel.hidden = true;
@@ -37,7 +37,7 @@ async function load() {
     const res = await api.auditRulesGet();
     bodyEl.textContent = '';
     renderRules(res.rules || []);
-    bodyEl.appendChild(el('div', 'as-desc', 'AI 通道与配方 → 顶栏「设置」。'));
+    bodyEl.appendChild(el('div', 'form-desc', 'AI 通道与配方 → 顶栏「设置」。'));
   } catch (err) {
     stageText(bodyEl, 'error', err);
   } finally {
@@ -46,16 +46,16 @@ async function load() {
 }
 
 function renderRules(rules) {
-  const sec = el('div', 'as-sec');
-  sec.appendChild(el('div', 'as-sec-t', '规则 · 每次「跑审计」严格按开关执行；单条「重检」不受开关限制。'));
+  const sec = el('div', 'form-sec');
+  sec.appendChild(el('div', 'form-sec-t', '规则 · 每次「跑审计」严格按开关执行；单条「重检」不受开关限制。'));
   for (const r of rules) sec.appendChild(ruleRow(r));
   bodyEl.appendChild(sec);
 }
 
 function ruleRow(r) {
-  const row = el('div', 'as-rule' + (r.enabled ? '' : ' off'));
-  const line = el('div', 'as-line');
-  const sw = el('label', 'as-switch');
+  const row = el('div', 'form-rule' + (r.enabled ? '' : ' off'));
+  const line = el('div', 'form-line');
+  const sw = el('label', 'form-switch');
   sw.title = r.enabled ? '点击停用' : '点击启用';
   const cb = document.createElement('input');
   cb.type = 'checkbox';
@@ -72,17 +72,17 @@ function ruleRow(r) {
     }
   }));
   sw.appendChild(cb);
-  sw.appendChild(el('span', 'as-slider'));
+  sw.appendChild(el('span', 'form-slider'));
   line.appendChild(sw);
-  line.appendChild(el('span', 'as-title', r.title));
+  line.appendChild(el('span', 'form-title', r.title));
   line.appendChild(el('span', 'eng ' + (r.kind === 'llm' ? 'l' : 'p'), kindLabel(r.kind)));   // F5-W19：种类文案单点
   row.appendChild(line);
-  if (r.desc) row.appendChild(el('div', 'as-desc', r.desc));
+  if (r.desc) row.appendChild(el('div', 'form-desc', r.desc));
   const params = r.params || {};
   const keys = Object.keys(params);
   if (keys.length) {
     const schema = r.params_schema || {};       // 控件由后端 schema 派生（L9：RULES 单点）
-    const pbox = el('div', 'as-params');
+    const pbox = el('div', 'form-params');
     for (const k of keys) pbox.appendChild(paramField(r.id, params, k, schema[k]));
     row.appendChild(pbox);
   }
@@ -99,12 +99,12 @@ function paramField(rid, params, k, meta) {
   if (type === 'bool') {
     spec = { cls: '', type: 'checkbox', checked: !!val };
   } else if (type === 'int') {
-    spec = { type: 'number', cls: 'as-input as-num', value: val,
+    spec = { type: 'number', cls: 'form-input form-num', value: val,
              min: lo };
   } else if (type === 'list') {
     const multiline = (val || []).length > 6;
     spec = { tag: multiline ? 'textarea' : 'input', rows: multiline ? 3 : 0,
-             cls: 'as-input' + (multiline ? ' as-area' : ''), value: (val || []).join('，') };
+             cls: 'form-input' + (multiline ? ' form-area' : ''), value: (val || []).join('，') };
   } else {
     spec = { value: String(val) };
   }
