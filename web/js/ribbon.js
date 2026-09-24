@@ -1,7 +1,7 @@
 // 挂件带 v2.1（M5k-2）——底部冻结通栏 + 向上浮层。
 // 一条条带三种读法：①竖向高/色＝景别 ②横向宽＝时长（横轴＝时间刻度尺）③情绪曲线叠加（平滑曲线+数据点）。
 // 交互：上沿拖拽＝面板高矮（窗口式）；滚轮＝横向缩放（时间轴式，光标锚定）；中键拖拽＝平移；shift+滚轮＝横滚。
-import { el, toast } from './ui.js';
+import { el, toast, durTick } from './ui.js';
 import { jumpToShotById } from './filter.js';
 
 const KEY = 'studio.dock';
@@ -66,14 +66,9 @@ function tierOf(str) {
   for (const t of TIER_MATCH) if (v.indexOf(t) === 0) return t;
   return null;
 }
-function numOf(v) {
+export function numOf(v) {
   const m = String(v == null ? '' : v).match(/-?\d+(\.\d+)?/);
   return m ? parseFloat(m[0]) : null;
-}
-function fmtTick(t) {
-  t = Math.round(t);
-  if (t < 60) return t + '″';
-  return Math.floor(t / 60) + '′' + String(t % 60).padStart(2, '0') + '″';
 }
 function jump(id) {
   if (!jumpToShotById(id)) toast('该镜不在当前视图（可能被筛选隐藏）');
@@ -271,7 +266,7 @@ export function buildRibbon(data, shots) {
         for (let t = 0; t <= totalSec + 0.001; t += step) {
           const tk = el('span', 'dk-tick');
           tk.style.left = Math.round(t * pps) + 'px';
-          tk.textContent = fmtTick(t);
+          tk.textContent = durTick(t, { compact: true });
           axis.appendChild(tk);
         }
       } else {

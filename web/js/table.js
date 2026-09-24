@@ -1,7 +1,7 @@
 // 表格模块：列构建 / 单元格渲染 / 就地编辑绑定 / 节拍区 / 详情区。
 // 显示规格 = cells.js（老库移植）；编辑引擎 = edit.js；页面组装在 scene.js。
 import { state, fieldOf } from './state.js';
-import { el, fmt, toast } from './ui.js';
+import { el, fmt, toast, flashIntoView } from './ui.js';
 import { cellContent } from './cells.js';
 import { attachEditable, attachCamEditor, parseCam, recordUndo } from './edit.js';
 import { api } from './api.js';
@@ -457,11 +457,7 @@ function addShotBar(b, data, opts) {
       });
       if (opts.refresh) await opts.refresh();
       const ntr = document.querySelector('tr.shot[data-id="' + ns.id + '"]');
-      if (ntr) {
-        ntr.scrollIntoView({ block: 'nearest' });
-        ntr.classList.add('flash');
-        setTimeout(() => ntr.classList.remove('flash'), 1600);
-      }
+      if (ntr) flashIntoView(ntr);
     } catch (err) {
       toast('添加失败：' + err.message, 'err');
     }

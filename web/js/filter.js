@@ -1,6 +1,6 @@
 // 筛选与镜号跳转（DOM 级：不重建表格、输入不丢焦）。
 import { state } from './state.js';
-import { el, toast } from './ui.js';
+import { el, toast, flashIntoView } from './ui.js';
 
 let filterState = { q: '', noPrompt: false };
 
@@ -144,8 +144,5 @@ export function jumpToShot(raw, ctx) {
 export function jumpToShotById(id) {
   const tr = document.querySelector('tr.shot[data-id="' + id + '"]');
   if (!tr) return false;
-  tr.scrollIntoView({ block: 'center' });
-  tr.classList.add('flash');
-  setTimeout(() => tr.classList.remove('flash'), 1600);
-  return true;
+  return flashIntoView(tr, { block: 'center' });
 }

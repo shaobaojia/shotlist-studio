@@ -3,7 +3,7 @@
 import { api } from './api.js';
 import { state, fieldOf } from './state.js';
 import { hashOf, isCurrentScene } from './route.js';
-import { el, fmt, toast, once } from './ui.js';
+import { el, fmt, toast, once, durTick, flashIntoView } from './ui.js';
 import { JIWEI_LEGEND } from './cells.js';
 import { buildTable, beatSection } from './table.js';
 import { bindCellMenu } from './cellmenu.js';
@@ -20,7 +20,7 @@ import { bindAuditBtn, toggleAuditPanel, closeAuditPanel } from './auditpanel.js
 import { initAiWrite, closeAiCards } from './aiwrite.js';
 import { openSceneDraft, closeDraftCards } from './draft.js';
 import { initScriptDrawer, openScriptDrawer, openScriptImport, scriptsOnRepaint } from './scriptdrawer.js';
-import { buildRibbon } from './ribbon.js';
+import { buildRibbon, numOf } from './ribbon.js';
 
 const PREFS_KEY = 'shotlist_prefs_v1';
 let prefs = loadPrefs();   // { wrap, hidden:{key:true=隐藏}, widths:{key:px} }
@@ -316,10 +316,7 @@ function applyLive() {
   if (!data || !view) return;
   const shs = allShotsCached();
   const st = view.querySelector('.scene-stats .ss-text');
-  if (st) {
-    const total = shs.reduce((n, s) => n + (parseFloat(s.duration) || 0), 0);
-    st.textContent = shs.length + ' 镜 / ' + data.beats.length + ' 节拍 / 总时长 ' + fmtDur(total);
-  }
+  if (st) st.textContent = sceneStats(data, shs).text;
   const old = view.querySelector('.dock');
   if (old) {
     const fresh = buildRibbon(data, shs);
@@ -328,10 +325,13 @@ function applyLive() {
   }
 }
 
-function fmtDur(sec) {
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return m + '\u2032' + String(s).padStart(2, '0') + '\u2033';
+// 场头统计单点（F1-P6）：规模/节拍/总时长文案（sceneHead 与活体同步共用，天然同值）
+function sceneStats(data, shots) {
+  const list = shots || allShots(data);
+  const totalSec = list.reduce((n, s) => n + (numOf(s.duration) || 0), 0);
+  const beats = (data.beats || []).length;
+  return { shots: list.length, beats: beats, totalSec: totalSec,
+           text: list.length + ' 镜 / ' + beats + ' 节拍 / 总时长 ' + durTick(totalSec) };
 }
 
 // 场次末尾「＋ 添加节拍」（空场也显示：搭骨架入口）
@@ -352,9 +352,7 @@ function addBeatBar(withDraft) {
       await refreshCurrentView();
       const nsec = document.querySelector('section.beat[data-beat-id="' + nb.id + '"]');
       if (nsec) {
-        nsec.scrollIntoView({ block: 'nearest' });
-        nsec.classList.add('flash');
-        setTimeout(() => nsec.classList.remove('flash'), 1600);
+        flashIntoView(nsec);
       }
     } catch (err) {
       toast('添加失败：' + err.message, 'err');
@@ -452,11 +450,9 @@ function sceneHead(sc, data) {
   kvEdit('翻转', 'turn');
   kvEdit('视点', 'pov');
 
-  const shots = allShots(data);
-  const total = shots.reduce((n, s) => n + (parseFloat(s.duration) || 0), 0);
   const s1 = el('span', 'kv scene-stats');
   s1.appendChild(el('b', null, '规模'));
-  s1.appendChild(el('span', 'ss-text', shots.length + ' 镜 / ' + data.beats.length + ' 节拍 / 总时长 ' + fmtDur(total)));
+  s1.appendChild(el('span', 'ss-text', sceneStats(data).text));
   meta.appendChild(s1);
   if (sc.locked) {
     const lk = el('span', 'kv lock');

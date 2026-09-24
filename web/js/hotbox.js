@@ -2,7 +2,7 @@
 // 交互口径：Ctrl+Enter 保存并下一镜 · Esc 编辑→查看（不保存）· 查看态 Esc→关闭 · 未钉住点抽屉外＝保存并关闭 · 钉住＝不关（切镜跟随）。
 // 写作逻辑不变：块库点插（插入即固化）+ 自由手写；{占位符} 在插入瞬间代入当前镜的值。
 import { api } from './api.js';
-import { el, toast, growTextarea, durText, isFloatTarget, isTypingTarget } from './ui.js';
+import { el, toast, growTextarea, durText, isFloatTarget, isTypingTarget, flashIntoView } from './ui.js';
 import { openMenu, menuEl } from './menu.js';
 import { recordUndo, undo as globalUndo } from './edit.js';
 import { storeAsBlock, byPosition } from './blocks.js';
@@ -855,9 +855,7 @@ export async function detachShotsByIds(ids) {
 function jumpToShot(shotId) {
   const tr = document.querySelector('tr.shot[data-id="' + shotId + '"]');
   if (!tr) { toast('该镜不在当前视图（可能被筛选隐藏）'); return; }
-  try { tr.scrollIntoView({ block: 'nearest' }); } catch (e) { /* ignore */ }
-  tr.classList.add('flash');
-  setTimeout(() => tr.classList.remove('flash'), 1600);
+  flashIntoView(tr);
 }
 
 // 组序号（按场序：全部组一起数）

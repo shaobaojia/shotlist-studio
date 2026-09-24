@@ -70,6 +70,22 @@ export function durText(v) {
   return isNaN(n) ? s : Math.round(n) + 's';
 }
 
+// 时长刻度显示单点（F1-P6）：先 floor 再出分秒（与导出/场头总时长同口径）；compact＝不足 60″ 只给秒
+export function durTick(sec, opts) {
+  const t = Math.max(0, Math.floor(sec || 0));
+  if (opts && opts.compact && t < 60) return t + '\u2033';
+  return Math.floor(t / 60) + '\u2032' + String(t % 60).padStart(2, '0') + '\u2033';
+}
+
+// 滚动到位并闪烁（跳镜/定位共用单点；1600ms 单一常量）
+export function flashIntoView(node, opts) {
+  if (!node) return false;
+  try { node.scrollIntoView({ block: (opts && opts.block) || 'nearest' }); } catch (e) { /* ignore */ }
+  node.classList.add('flash');
+  setTimeout(() => node.classList.remove('flash'), 1600);
+  return true;
+}
+
 
 // 浮层豁免单点（批4/L1 + F1-B5）：结构浮层根名单；点外监听一律走这里，勿再手抄。
 // .scene-freeze（吸顶场头）是在流页面元素、不挂 .float-card：天然不算浮层（F1-B5）。
