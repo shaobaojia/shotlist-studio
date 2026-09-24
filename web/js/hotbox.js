@@ -14,7 +14,7 @@ import { openPromptDraft } from './draft.js';
 import { createDrawer } from './drawer.js';
 import {
   EDITOR_MIN_H, editorReset, editorUndo, editorRedo,
-  editorHasUndo, editorOnInput, insertInto, replaceAll, replaceRange,
+  editorHasUndo, editorOnInput, editorOnBeforeInput, editorOnCompositionEnd, insertInto, replaceAll, replaceRange,
 } from './hbedit.js';
 
 // ctx 注入（scene.js）：getData / refresh / allShots（镜头序单点）/ groupsMap（本帧共用组映射）/ reapply（筛选重评）
@@ -406,6 +406,8 @@ function wireEditorEvents(box, s) {
   const selText = () => ta.value.slice(ta.selectionStart, ta.selectionEnd);
 
   ta.addEventListener('input', () => editorOnInput(ta));
+  ta.addEventListener('beforeinput', (e) => editorOnBeforeInput(ta, e));   // F2-W21：按输入事务分段（组合期不切段）
+  ta.addEventListener('compositionend', () => editorOnCompositionEnd(ta));
   // 选区字数：编辑面（textarea 选区）
   const selCount = () => { const v = selText(); setSelCount(v.trim() ? [...v].length : 0); };
   ta.addEventListener('select', selCount);

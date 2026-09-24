@@ -473,7 +473,7 @@ tr.shot.has-lamp .drag-dots { left: 10px; top: 24px; }
 .beat-head > .audit-lamp { left: -11px; }
 .scene-head { position: relative; }
 .scene-freeze .scene-head > .audit-lamp { left: 26px; top: 22px; transform: none; }
-tr.shot.flash td, .beat.flash, .scene-head.flash { animation: rowFlash 1.5s ease-out; }
+tr.shot.flash td, .beat.flash, .scene-head.flash { animation: rowFlash 1.6s ease-out; }   /* 1.6s＝flashIntoView 同源时长（F2-W17） */
 
 /* 问题卡：行下就地展开（tr）/ 节拍头下 / 场头下 */
 tr.audit-card-tr td { background: transparent; border: 0; border-radius: 0; padding: 1px 0 7px; }

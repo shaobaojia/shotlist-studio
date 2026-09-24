@@ -7,7 +7,7 @@ import { openMenu } from './menu.js';
 import { commitField } from './edit.js';
 import { refreshShotCell } from './table.js';
 import { state, fieldOf } from './state.js';
-import { current as selCurrent, rectOf, batchWrite } from './selection.js';
+import { eachSelCell, batchWrite } from './selection.js';
 import { pollJob, cardLife, taskShell, spinHead, cancelBtn, renderFail } from './aicard.js';
 import { floatEnter, floatLeave, floatClose } from './float.js';
 
@@ -44,18 +44,10 @@ export function closeAiCards() {
 
 // 选区 → 目标清单（仅 AI 可改字段；shots 行序 × 列序）
 export function targetsFromSel() {
-  const s = selCurrent();
-  const rc = rectOf();
-  if (!s || !rc) return [];
   const out = [];
-  for (let r = rc.r1; r <= rc.r2; r++) {
-    const tr = s.rows[r];
-    if (!tr) continue;
-    const id = Number(tr.dataset.id);
-    for (let c = rc.c1; c <= rc.c2; c++) {
-      if (isAiField(s.cols[c])) out.push({ table: 'shots', id: id, field: s.cols[c] });
-    }
-  }
+  eachSelCell((shot, key) => {                       // F2-P2：选区遍历原语（行序 × 列序同旧）
+    if (isAiField(key)) out.push({ table: 'shots', id: shot.id, field: key });
+  });
   return out;
 }
 

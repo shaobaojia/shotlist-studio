@@ -1,13 +1,14 @@
 // 拼装台编辑面撤销栈（块插入 / 剪切 / 打字片段都进栈；Ctrl+Z 撤 · Ctrl+Shift+Z / Ctrl+Y 重做）。
 // 独立模块：挂在 textarea.__hb 上（每只编辑面一条栈）。视图与组操作在 hotbox.js。
+// F2-W21：打字分段改挂 beforeinput（按 inputType 切段——连续 insertText 同段，删除/替换等独立成段）；
+// 时间阈值（SEGMENT_MS）退役；IME 组合期不切段，组合结束补标记。
 import { growTextarea } from './ui.js';
 
 export const EDITOR_MIN_H = 130;   // 编辑面最小高度（px）
 const STACK_MAX = 200;             // 栈深上限
-const SEGMENT_MS = 600;            // 打字分段：同段合并，新段（间隔 >600ms）把段前状态入栈
 
 function state(ta) {
-  if (!ta.__hb) ta.__hb = { undo: [], redo: [], last: null, t: 0 };
+  if (!ta.__hb) ta.__hb = { undo: [], redo: [], last: null, kind: '' };
   return ta.__hb;
 }
 
@@ -29,31 +30,53 @@ export function editorReset(ta) {
   hb.undo.length = 0;
   hb.redo.length = 0;
   hb.last = snap(ta);
-  hb.t = Date.now();
+  hb.kind = '';
 }
 
 export function editorHasUndo(ta) {
   return state(ta).undo.length > 0;
 }
 
-// 输入事件：新段开始时把段前状态入栈（打字按段撤销）
+// 分段开新（F2-W21）：把「段前状态」入栈（打字按段撤销）
+function openSegment(ta) {
+  const hb = state(ta);
+  const prev = hb.last || snap(ta);
+  const top = hb.undo[hb.undo.length - 1];
+  if (!same(top, prev)) {
+    hb.undo.push(prev);
+    cap(hb);
+    hb.redo.length = 0;
+  }
+}
+
+// 输入事件：只维护快照与自增长（F2-W21：分段在 beforeinput，这里不再看时间）
 export function editorOnInput(ta) {
   const hb = state(ta);
-  if (Date.now() - hb.t > SEGMENT_MS) {
-    const prev = hb.last || snap(ta);
-    const top = hb.undo[hb.undo.length - 1];
-    if (!same(top, prev)) {
-      hb.undo.push(prev);
-      cap(hb);
-      hb.redo.length = 0;
-    }
-  }
   hb.last = snap(ta);
-  hb.t = Date.now();
   growTextarea(ta, EDITOR_MIN_H);
 }
 
-export function editorPush(ta) {
+// 输入分段（F2-W21）：连续 insertText 并入当前段；删除/替换/粘贴等动作独立成段
+export function editorOnBeforeInput(ta, e) {
+  const hb = state(ta);
+  if (e.isComposing || (e.inputType || '') === 'insertCompositionText') return;   // 组合期：不切段
+  if ((e.inputType || '') === 'insertText') {
+    if (hb.kind === 'insertText') return;   // 连续打字：同段
+    openSegment(ta);
+    hb.kind = 'insertText';
+    return;
+  }
+  openSegment(ta);                          // deleteContentBackward / insertFromPaste / …：独立成段
+  hb.kind = 'other';
+}
+
+// 组合结束（F2-W21）：闭段（下一次 insertText 开新段）
+export function editorOnCompositionEnd(ta) {
+  const hb = state(ta);
+  hb.kind = '';
+}
+
+function editorPush(ta) {
   const hb = state(ta);
   const cur = snap(ta);
   const top = hb.undo[hb.undo.length - 1];
@@ -63,13 +86,11 @@ export function editorPush(ta) {
   }
   hb.redo.length = 0;
   hb.last = cur;
-  hb.t = Date.now();
 }
 
-export function editorMark(ta) {
+function editorMark(ta) {
   const hb = state(ta);
   hb.last = snap(ta);
-  hb.t = Date.now();
 }
 
 function apply(ta, st) {
@@ -98,14 +119,11 @@ export function editorRedo(ta) {
 
 // 范围替换（L7 单点：选段改写 / 剪切 / 插入 / 整文替换共用；进撤销栈）。
 // 返回新光标位（= s0 + text.length）；text 为空串即删除该范围（剪切用）。
+// F2-W20：回写序列复用 apply（原「五步」与 apply 重复一遍）。
 export function replaceRange(ta, s0, s1, text) {
   editorPush(ta);
-  ta.value = ta.value.slice(0, s0) + text + ta.value.slice(s1);
   const pos = s0 + text.length;
-  ta.focus();
-  ta.setSelectionRange(pos, pos);
-  growTextarea(ta, EDITOR_MIN_H);
-  editorMark(ta);
+  apply(ta, { v: ta.value.slice(0, s0) + text + ta.value.slice(s1), s0: pos, s1: pos });
   return pos;
 }
 

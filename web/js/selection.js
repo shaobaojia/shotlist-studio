@@ -374,7 +374,7 @@ export function copySelection() {
 }
 
 // 剪切（M5 批2）：复制成功才清格（防丢数据）；清空走既有批量写（一步撤销）
-export async function cutSelection() {
+async function cutSelection() {
   if (!sel) return;
   const ok = await copySelection();
   if (!ok) return;

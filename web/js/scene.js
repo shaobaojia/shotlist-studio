@@ -7,7 +7,7 @@ import { el, fmt, toast, once, durTick, flashIntoView, silent, lsGet, lsSet, set
 import { JIWEI_LEGEND } from './cells.js';
 import { buildTable, beatSection } from './table.js';
 import { bindCellMenu } from './cellmenu.js';
-import { bindSelection, clearSel, current as selCurrent, rectOf } from './selection.js';
+import { bindSelection, clearSel, current as selCurrent, rectOf, selRowIds } from './selection.js';
 import { initSelBar } from './selbar.js';
 import { attachEditable, recordUndo } from './edit.js';
 import { bindDrag } from './drag.js';
@@ -153,11 +153,7 @@ function bindDragOnce(view) {
       const s = selCurrent();
       const rc = rectOf();
       if (!s || !rc || s.table !== tr.closest('table') || rc.r1 === rc.r2) return null;
-      const ids = [];
-      for (let r = rc.r1; r <= rc.r2; r++) {
-        const row = s.rows[r];
-        if (row) ids.push(Number(row.dataset.id));
-      }
+      const ids = selRowIds();                        // F2-P2：选区遍历原语
       if (ids.length < 2 || ids.indexOf(Number(tr.dataset.id)) === -1) return null;
       return ids;
     },

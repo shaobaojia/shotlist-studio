@@ -9,17 +9,9 @@ import { openMenu, closeMenu, menuOpen, optItems } from './menu.js';
 const undoStack = [];
 const UNDO_MAX = 100;
 
-export function peekUndo() {
-  return undoStack.length ? undoStack[undoStack.length - 1] : null;
-}
-
 export function recordUndo(op) {
   undoStack.push(op);
   if (undoStack.length > UNDO_MAX) undoStack.shift();
-}
-
-export function canUndo() {
-  return undoStack.length > 0;
 }
 
 // 批量写单点（F2-W12）：一次请求、逐项结果；任一项被拒 → 抛出（撤销路径可感知失败）

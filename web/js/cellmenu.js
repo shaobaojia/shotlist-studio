@@ -1,14 +1,15 @@
 // 右键菜单（M2-3；M2-5 行副本；M2-6 结构操作）：镜头行（插入/删除/副本/清空）+ 节拍头（副本/删除）+ 选区变体。
-// 挂在 #view 上（事件委托）；复制走 clipboard.js（navigator.clipboard 优先，execCommand 兜底）。
+// 挂在 #view 上（事件委托）；复制/粘贴走 clipboard.js（navigator.clipboard 优先，execCommand 兜底）；删除/新建收尾走各自单点（F2-W16/W17）。
 import { api } from './api.js';
-import { toast, isTypingTarget } from './ui.js';
+import { toast, isTypingTarget, flashIntoView } from './ui.js';
 import { openMenu, menuOpen } from './menu.js';
 import { recordUndo, commitField } from './edit.js';
 import { copyText, pasteBlock, toTSV } from './clipboard.js';
 import { refreshShotCell, refreshBeatAction, writableFieldKeys } from './table.js';
+import { jumpToShotById } from './filter.js';
 import { isAiField, aiMenu, aiMenuForBeat, targetsFromSel } from './aiwrite.js';
 import { joinPrevGroup, canJoinPrev } from './hotbox.js';
-import { current as selCurrent, inCell, copySelection, clearSelectionCells, tlCell, rectOf, selectCell } from './selection.js';
+import { current as selCurrent, inCell, copySelection, clearSelectionCells, tlCell, rectOf, selRowIds, selectCell } from './selection.js';
 
 let shotsOf = null;
 let beatsOf = null;
@@ -165,6 +166,14 @@ async function onCellMenuPick(k, td, tr, s, key, table, e) {
   }
 }
 
+// 创建后收尾单点（F2-W16/W17）：撤销入栈 → 刷新视图 → 闪烁定位（镜头行走 jumpToShotById；节拍走 flashIntoView）
+async function afterCreate(o) {
+  recordUndo({ type: 'custom', label: o.label, undo: o.undo });
+  if (refreshView) await refreshView();
+  if (o.shotId != null) jumpToShotById(o.shotId);
+  else if (o.selector) flashIntoView(document.querySelector(o.selector));
+}
+
 // 创建行副本：服务端插入 → 刷新视图 → 新行闪烁定位；撤销 = 删除新行
 async function duplicateRow(s) {
   if (!s) return;
@@ -172,12 +181,11 @@ async function duplicateRow(s) {
     const res = await api.duplicate('shots', s.id);
     const ns = res.shot || {};
     toast('已创建副本' + (ns.shot_no ? '：' + ns.shot_no : ''));
-    recordUndo({
-      type: 'custom', label: '创建行副本',
+    await afterCreate({
+      label: '创建行副本',
       undo: async () => { await api.del({ table: 'shots', ids: [ns.id] }); },
+      shotId: ns.id,
     });
-    if (refreshView) await refreshView();
-    flashEl('tr.shot[data-id="' + ns.id + '"]');
   } catch (err) {
     toast('创建副本失败：' + err.message, 'err');
   }
@@ -188,14 +196,6 @@ async function duplicateRow(s) {
 const pasteCtx = { getShot: findShot };
 
 // ── M2-6 结构操作 ──
-
-function flashEl(sel) {
-  const n = document.querySelector(sel);
-  if (!n) return;
-  n.scrollIntoView({ block: 'nearest' });
-  n.classList.add('flash');
-  setTimeout(() => n.classList.remove('flash'), 1600);
-}
 
 // 上方/下方插入空行（编号规则在服务端：中插=前邻字母后缀；追尾=数字顺延）
 async function insertBlank(s, dir) {
@@ -210,57 +210,44 @@ async function insertBlank(s, dir) {
     });
     const ns = res.shot || {};
     toast('已插入空行' + (ns.shot_no ? '：' + ns.shot_no : ''));
-    recordUndo({
-      type: 'custom', label: '插入空行',
+    await afterCreate({
+      label: '插入空行',
       undo: async () => { await api.del({ table: 'shots', ids: [ns.id] }); },
+      shotId: ns.id,
     });
-    if (refreshView) await refreshView();
-    flashEl('tr.shot[data-id="' + ns.id + '"]');
   } catch (err) {
     toast('插入失败：' + err.message, 'err');
+  }
+}
+
+// 删除行单点（F2-W16）：单行 / 选区批删共用（文案按行数分档）
+async function removeRows(ids, single) {
+  if (!ids || !ids.length) return;
+  try {
+    const res = await api.del({ table: 'shots', ids: ids });
+    const rows = (res.deleted && res.deleted.rows) || [];
+    toast(ids.length === 1 && single
+      ? ('已删除' + (single.shot_no ? ' ' + single.shot_no : '') + '（Ctrl+Z 可撤销）')
+      : ('已删除 ' + rows.length + ' 行（Ctrl+Z 可撤销）'));
+    recordUndo({
+      type: 'custom', label: '删除行',
+      undo: async () => { await api.restore({ kind: 'shots', rows: rows }); },
+    });
+    if (refreshView) await refreshView();
+  } catch (err) {
+    toast('删除失败：' + err.message, 'err');
   }
 }
 
 // 删除本行（即时删 + Ctrl+Z 完整还原）
 async function removeRow(s) {
   if (!s) return;
-  try {
-    const res = await api.del({ table: 'shots', ids: [s.id] });
-    const rows = (res.deleted && res.deleted.rows) || [];
-    toast('已删除' + (s.shot_no ? ' ' + s.shot_no : '') + '（Ctrl+Z 可撤销）');
-    recordUndo({
-      type: 'custom', label: '删除行',
-      undo: async () => { await api.restore({ kind: 'shots', rows: rows }); },
-    });
-    if (refreshView) await refreshView();
-  } catch (err) {
-    toast('删除失败：' + err.message, 'err');
-  }
+  await removeRows([s.id], s);
 }
 
 // 删除选中行（N 行一次删；撤销=整组回插）
 export async function deleteSelectedRows() {
-  const s = selCurrent();
-  const rc = rectOf();
-  if (!s || !rc) return;
-  const ids = [];
-  for (let r = rc.r1; r <= rc.r2; r++) {
-    const tr = s.rows[r];
-    if (tr) ids.push(Number(tr.dataset.id));
-  }
-  if (!ids.length) return;
-  try {
-    const res = await api.del({ table: 'shots', ids: ids });
-    const rows = (res.deleted && res.deleted.rows) || [];
-    toast('已删除 ' + rows.length + ' 行（Ctrl+Z 可撤销）');
-    recordUndo({
-      type: 'custom', label: '删除行',
-      undo: async () => { await api.restore({ kind: 'shots', rows: rows }); },
-    });
-    if (refreshView) await refreshView();
-  } catch (err) {
-    toast('删除失败：' + err.message, 'err');
-  }
+  await removeRows(selRowIds(), null);
 }
 
 // 节拍头右键：副本（连镜头深拷）/ 删除（镜头落未归节拍）
@@ -286,12 +273,11 @@ async function onBeatMenuPick(k, b, e) {
       const res = await api.duplicate('beats', b.id);
       const nb = res.beat || {};
       toast('已创建节拍副本：beat ' + (nb.beat_no || ''));
-      recordUndo({
-        type: 'custom', label: '创建节拍副本',
+      await afterCreate({
+        label: '创建节拍副本',
         undo: async () => { await api.del({ table: 'beats', id: nb.id, with_shots: true }); },
+        selector: 'section.beat[data-beat-id="' + nb.id + '"]',
       });
-      if (refreshView) await refreshView();
-      flashEl('section.beat[data-beat-id="' + nb.id + '"]');
     } else if (k === 'delBeat') {
       const res = await api.del({ table: 'beats', id: b.id });
       const d = res.deleted || {};

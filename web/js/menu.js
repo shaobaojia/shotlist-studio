@@ -37,15 +37,15 @@ export function optItems(list, curKey, opts) {
 export function openMenu(anchor, items, onPick, opts) {
   closeMenu();
   const o = opts || {};
-  const el = document.createElement('div');
-  el.className = 'menu';
-  el.style.visibility = 'hidden';
+  const root = document.createElement('div');   // 本函数内命名 root（F2-P6：与 ui.el 去歧义）
+  root.className = 'menu';
+  root.style.visibility = 'hidden';
   const entries = [];
   for (const it of items) {
     if (it.sep) {
       const sp = document.createElement('div');
       sp.className = 'menu-sep';
-      el.appendChild(sp);
+      root.appendChild(sp);
       continue;
     }
     const d = document.createElement('div');
@@ -61,9 +61,9 @@ export function openMenu(anchor, items, onPick, opts) {
     d._key = it.key;
     d._item = it;
     entries.push(d);
-    el.appendChild(d);
+    root.appendChild(d);
   }
-  document.body.appendChild(el);
+  document.body.appendChild(root);
 
   const nav = entries.filter((d) => !d.classList.contains('disabled'));
   let hi = -1;
@@ -76,8 +76,8 @@ export function openMenu(anchor, items, onPick, opts) {
   if (curIdx !== -1) setHl(curIdx);
 
   // 定位（F2-P5 单点）：锚点下方，越界翻转 / 夹取在视口内
-  const mw = el.offsetWidth;
-  const mh = el.offsetHeight;
+  const mw = root.offsetWidth;
+  const mh = root.offsetHeight;
   let pos;
   if (anchor && anchor.nodeType === 1) {
     pos = placeFlip(anchor.getBoundingClientRect(), mw, mh);
@@ -86,9 +86,9 @@ export function openMenu(anchor, items, onPick, opts) {
     const py = (anchor && anchor.y) || 0;
     pos = placeFlip({ left: px, right: px, top: py, bottom: py }, mw, mh, { gapBelow: 0, gapAbove: 6 });
   }
-  el.style.left = pos.x + 'px';
-  el.style.top = pos.y + 'px';
-  el.style.visibility = '';
+  root.style.left = pos.x + 'px';
+  root.style.top = pos.y + 'px';
+  root.style.visibility = '';
 
   const pick = (d) => {
     const cb = onPick;
@@ -118,7 +118,7 @@ export function openMenu(anchor, items, onPick, opts) {
       pick(nav[hi]);
     }
   };
-  const cleanup = onOutsideClose(el, closeMenu, { keepFocus: true, closeOnScroll: true, closeOnResize: true });
+  const cleanup = onOutsideClose(root, closeMenu, { keepFocus: true, closeOnScroll: true, closeOnResize: true });
   document.addEventListener('keydown', onKey, true);
-  cur = { el, onKey, cleanup, onClosed: o.onClosed };
+  cur = { el: root, onKey, cleanup, onClosed: o.onClosed };
 }
