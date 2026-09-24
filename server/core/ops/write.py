@@ -5,10 +5,15 @@ from core import db, fields
 
 
 # 表级差异位（spec 从 fields 派生；skip_types＝不进写白名单的类型，缺省无）——P0·S1-P1②
+# S4-A1：虚拟列（fields.virtual=True）从字段表驱动，不再手抄类型名
+def _virtual_types(spec):
+    return tuple(f["type"] for f in spec if f.get("virtual"))
+
+
 TABLES = {
-    "shots":  {"skip_types": ("prompt",)},
-    "beats":  {},
-    "scenes": {"extra": ["script"]},   # 表级例外（台本：可写，但不进字段面/表头）
+    "shots":  {"skip_types": _virtual_types(fields.SHOT_FIELDS)},
+    "beats":  {"skip_types": _virtual_types(fields.BEAT_FIELDS)},
+    "scenes": {"skip_types": _virtual_types(fields.SCENE_FIELDS), "extra": ["script"]},   # 表级例外（台本：可写，但不进字段面/表头）
 }
 SPECS = {"shots": fields.SHOT_FIELDS, "beats": fields.BEAT_FIELDS, "scenes": fields.SCENE_FIELDS}
 TABLES_ALLOWED = tuple(TABLES)   # 接口层表名校验单点（handlers 引用）——P0·S1-P1③

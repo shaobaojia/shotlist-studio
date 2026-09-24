@@ -8,7 +8,7 @@ options = 类型化控件的预设清单（下拉）：
   - shot_size：景别档位（★ 与档位一一对应，属编码非手填；前端摄影机列 = 两段景别 + 焦段复合控件）
   - focal：焦段档位；camera_pos：机位五色（单选）；shot_fn：镜头职能
   运镜（camera_move）不设 options（下拉锁创作）；配 presets 常用档——一键落值，仍可自由手写（自定义）。
-写白名单由 core/ops.py 从各表清单派生（prompt 为虚拟列不进写白名单；position/id/时间戳不直改）。
+写白名单由 core/ops.py 从各表清单派生（virtual=True 的虚拟列不进写白名单、不进导出；position/id/时间戳不直改）。
 multiline = 前端多行编辑判据（F1-P5：原前端白名单 Set 收进字典单源）；w / in_table = 列宽与全片表列（L3 派生用）。
 """
 CAM_TIERS = ["全景 ★", "中全 ★★", "中景 ★★★", "中近 ★★★", "近景 ★★★★", "特写 ★★★★★", "极特 ★★★★★"]
@@ -38,7 +38,7 @@ SHOT_FIELDS = [
     {"key": "duration",      "label": "时长",     "type": "duration", "w": 44,  "in_table": True, "batch": True},
     {"key": "audio",         "label": "音频",     "type": "audio",    "w": 120, "in_table": True, "multiline": True, "batch": True},
     {"key": "director_note", "label": "导演备注", "type": "notes",    "w": 180, "in_table": True, "multiline": True, "batch": True},
-    {"key": "prompt",        "label": "提示词",   "type": "prompt",   "w": 160, "in_table": True},
+    {"key": "prompt",        "label": "提示词",   "type": "prompt",   "w": 160, "in_table": True, "virtual": True},   # 虚拟列（S4-A1）：不进导出、不进写白名单
     {"key": "shot_fn",       "label": "职能",     "type": "text",     "w": 56,  "in_table": False, "batch": True, "options": ["建立", "动作镜", "反应镜", "触发", "插入"]},
     {"key": "focal",         "label": "焦段",     "type": "text",     "w": 58,  "in_table": False, "batch": True, "options": CAM_FOCALS},
     {"key": "dof",           "label": "景深",     "type": "text",     "w": 44,  "in_table": False},

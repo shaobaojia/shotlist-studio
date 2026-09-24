@@ -14,8 +14,8 @@ from collections import namedtuple
 
 from core import db, digest, fields
 
-# 导出列（顺序 = fields.py 声明序，prompt 虚拟列除外——组文本非逐镜，暂不进表）
-EXPORT_COLS = [c for c in fields.SHOT_FIELDS if c["in_table"] and c["key"] != "prompt"]
+# 导出列（顺序 = fields.py 声明序；virtual=True 的虚拟列不进表——组文本非逐镜）——S4-A1：判据从 fields 驱动
+EXPORT_COLS = [c for c in fields.SHOT_FIELDS if c["in_table"] and not c.get("virtual")]
 
 _BASE_CSS = """
 * { box-sizing: border-box; }
