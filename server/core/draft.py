@@ -173,6 +173,8 @@ class DraftJobs(jobs.JobBoard):
                     j["beats"] = beats
                     j["dropped"] = dropped          # W16：丢弃有数（前端可提示）
                     j["stage"] = "shots"
+            if self._cancelled(job_id):                     # S3-L4：段间检查点
+                raise RuntimeError("任务已取消")
             lines = [scene_line, "", "【台本】", script, "", "【节拍骨架】"]
             lines += [digest.beat_line(b, i + 1, style="labeled")   # W18：节拍行单点
                       for i, b in enumerate(beats)]

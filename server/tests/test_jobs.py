@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """任务簿基类单测（L1）：闸门计数 / 登记与并入 / 剪枝护 running / 轻载与收尾 / 释放恰一次。"""
+import threading
+import time
 import unittest
 
 import _boot  # noqa: F401 — 直跑引导（pytest 下由 conftest 等价注入）
@@ -105,6 +107,87 @@ class TestBoard(unittest.TestCase):
                 b._jobs[i] = {"running": False}
             b._prune()
             self.assertEqual(len(b._jobs), 10)
+
+
+class RunBoard(jobs.JobBoard):
+    """带真实 run 的最小子类（S3-L4 用例）：run 等待信号，收尾显式或听看门。"""
+
+    def __init__(self, gate=None, keep=None):
+        super().__init__(keep=keep, gate=gate)
+        self.gate_ev = threading.Event()
+        self.started = threading.Event()
+        self.done = threading.Event()
+
+    def _run(self, job_id, *a):
+        self.started.set()
+        self.gate_ev.wait(3)
+        self._finish(job_id)
+        self.done.set()          # 线程收尾完成信号（测试等待用）
+
+
+class TestStartTemplate(unittest.TestCase):
+    """P4 模板（S3-L4）：key / deadline / joined。"""
+
+    def test_key_and_joined(self):
+        b = RunBoard()
+        snap = b.start_job(find=lambda j: False, build=lambda i: {"x": 1},
+                           run=lambda jid, *a: None, key=7)
+        self.assertFalse(snap["joined"])
+        self.assertIsNotNone(b.get(7))          # key=7 登记（而非序号）
+
+    def test_deadline_field_exposed(self):
+        b = RunBoard()
+        snap = b.start_job(find=lambda j: False, build=lambda i: {"x": 1},
+                           run=lambda jid, *a: None, deadline=60)
+        self.assertGreater(snap["deadline"], time.time())
+        snap2 = b.start_job(find=lambda j: j.get("x") == 2, build=lambda i: {"x": 2},
+                            run=lambda jid, *a: None, deadline=None)
+        self.assertIsNone(snap2.get("deadline"))
+
+    def test_join_running(self):
+        b = RunBoard()
+        b.start_job(find=lambda j: False, build=lambda i: {"x": 1},
+                    run=lambda jid, *a: None, key=1)
+        snap = b.start_job(find=lambda j: j.get("x") == 1, build=lambda i: {"x": 1},
+                           run=lambda jid, *a: None, key=2)
+        self.assertTrue(snap.get("joined"))
+
+
+class TestDeadlineWatch(unittest.TestCase):
+    """S3-L4 超时看门：到点置终态 + 归还闸门 + 晚到 _finish 不覆盖。"""
+
+    def test_expire_and_gate_release(self):
+        g = jobs.Gate(2)
+        b = RunBoard(gate=g)
+        b.start_job(find=lambda j: False, build=lambda i: {"x": 1},
+                    run=b._run, deadline=0.1, key=1)
+        self.assertTrue(b.started.wait(2))
+        self.assertEqual(g._active, 1)               # 已占闸
+        time.sleep(0.25)
+        snap = b.get(1)                              # 惰性看门
+        self.assertFalse(snap["running"])
+        self.assertEqual(snap["error"], "任务超时")
+        self.assertEqual(g._active, 0)               # 闸门已归还
+        b.gate_ev.set()
+        self.assertTrue(b.done.wait(2))              # 线程晚到 _finish 已跑完
+        self.assertEqual(b._jobs[1]["error"], "任务超时")   # 内部终态未被覆盖（绕完成态缓存）
+        snap = b.get(1)
+        self.assertEqual(snap["error"], "任务超时")
+
+
+class TestCancel(unittest.TestCase):
+    """S3-L4 协作式取消。"""
+
+    def test_cancel_cooperative(self):
+        b = RunBoard()
+        b.start_job(find=lambda j: False, build=lambda i: {"x": 1}, run=b._run)
+        self.assertTrue(b.cancel(1))
+        self.assertTrue(b._cancelled(1))
+        b.gate_ev.set()
+        self.assertTrue(b.done.wait(2))              # 等线程收尾（防时序抖动）
+        self.assertFalse(b.cancel(1))                # 已完成：不受理
+        self.assertFalse(b.cancel(999))              # 不存在：不受理
+        self.assertFalse(b._cancelled(999))
 
 
 if __name__ == "__main__":

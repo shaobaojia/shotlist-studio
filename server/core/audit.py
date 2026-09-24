@@ -756,13 +756,11 @@ class JobManager(jobs.JobBoard):
     def start(self, scene_id, only=None, ai_chat=None, connect_factory=None):
         """启动（或加入进行中的）任务，立即返回任务快照。
         joined=True = 并入既有任务（此时 only 不生效，前端应如实提示）；
-        规则读取与登记同临界区——并发 start 只放行一份，不双跑。
+        规则读取与登记同临界区（P4 模板：build 锁内跑）——并发 start 只放行一份，不双跑。
         connect_factory：仅供测试注入（规则读取连接）；_run 恒用 rw 连接——
-        查询/命令分离属有意设计（P0·S2-W15）。过滤后无规则 → ValueError（§11，api 转 400）。"""
-        with self._lock:
-            joined = self._find_running(lambda j: j.get("scene_id") == scene_id)
-            if joined:
-                return joined
+        查询/命令分离属有意设计（P0·S2-W15）。过滤后无规则 → ValueError（§11，api 转 400）。
+        审计不在并发闸内（gate=None，P0·S1-B6）——模板自动成立。"""
+        def build(job_id):
             con = connect_factory() if connect_factory else db.open_ro()
             try:
                 rules = _select_rules(con, only)
@@ -770,23 +768,23 @@ class JobManager(jobs.JobBoard):
                 con.close()
             if not rules:
                 raise ValueError("没有可运行的规则（检查启用状态或 only）")
-            job = {
-                "scene_id": scene_id, "running": True,
-                "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            return {
+                "scene_id": scene_id,
                 "finished_at": None, "found_total": 0, "error": None,
                 "rules": [{"id": r["id"], "title": r["title"], "kind": r["kind"],
                            "state": STATE_PENDING, "found": 0, "error": None, "ms": 0} for r in rules],
             }
-            self._register(scene_id, job, gated=False)   # 审计不在闸内（P0·S1-B6）
-            snap = self._snap(job)
-            snap["joined"] = False
-        threading.Thread(target=self._run, args=(scene_id, only, ai_chat, connect_factory),
-                         daemon=True).start()
-        return snap
+
+        return self.start_job(                 # P4 启动模板（锁内三步 + 快照 + 起线程）
+            find=lambda j: j.get("scene_id") == scene_id,
+            build=build, run=self._run,
+            run_args=(only, ai_chat, connect_factory), key=scene_id)
 
     def _run(self, scene_id, only, ai_chat, connect_factory):
         def updater(rule, state, found, error, ms):
             with self._lock:
+                if (self._jobs.get(scene_id) or {}).get("cancel_requested"):
+                    raise RuntimeError("任务已取消")          # S3-L4：检查点（每规则后）
                 job = self._jobs.get(scene_id)
                 if not job:
                     return

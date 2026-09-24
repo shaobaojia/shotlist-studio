@@ -58,6 +58,7 @@ CONTRACT_POST = [
     ("/api/ai/test", ai_api.test),
     ("/api/ai/preview", ai_api.preview),
     ("/api/ai/apply", ai_api.apply_op),
+    ("/api/ai/job/cancel", ai_api.job_cancel),
     ("/api/recipes/save", recipes_api.save_post),
     ("/api/recipes/default", recipes_api.default_post),
     ("/api/ai/draft", draft_api.start),
@@ -105,6 +106,7 @@ class TestFrontendAlignment(unittest.TestCase):
         """反向：除白名单（health）外，每条服务端路由都有前端使用点。"""
         front = _frontend_paths()
         front.add("/api/health")            # 白名单：服务自检端点
+        front.add("/api/ai/job/cancel")     # 白名单：S3-L4 取消端点（前端按钮待 F 批）
         missing = []
         for routes in (app_mod.ROUTES, app_mod.POST_ROUTES):
             for rx, _fn in routes:
@@ -130,7 +132,7 @@ class TestRouteContract(unittest.TestCase):
 
     def test_table_sizes(self):
         self.assertEqual(len(app_mod.ROUTES), 15)
-        self.assertEqual(len(app_mod.POST_ROUTES), 23)
+        self.assertEqual(len(app_mod.POST_ROUTES), 24)
 
 
 class _FakeHandler:

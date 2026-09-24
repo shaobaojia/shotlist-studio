@@ -43,7 +43,8 @@ def dump_db(con, mask_keys=False):
 def prune_exports(outdir, keep=20):
     """导出件保留最近 keep 份（P2·S4-C3；失败静默）——与 snapshots 留底思路对齐。"""
     try:
-        files = sorted(outdir.glob("studio-*.json"), key=lambda p: p.stat().st_mtime)
+        files = sorted(outdir.glob("studio-*.json"),
+                       key=lambda p: (p.stat().st_mtime, p.name))   # 同 mtime 以名定序（FS 粒度兜底）
         for f in files[:-keep]:
             f.unlink()
     except OSError:

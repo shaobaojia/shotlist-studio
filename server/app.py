@@ -60,6 +60,7 @@ POST_ROUTES = [
     (re.compile(r"^/api/ai/test$"), ai_api.test),
     (re.compile(r"^/api/ai/preview$"), ai_api.preview),
     (re.compile(r"^/api/ai/apply$"), ai_api.apply_op),
+    (re.compile(r"^/api/ai/job/cancel$"), ai_api.job_cancel),      # S3-L4：协作式取消
     (re.compile(r"^/api/recipes/save$"), recipes_api.save_post),
     (re.compile(r"^/api/recipes/default$"), recipes_api.default_post),
     (re.compile(r"^/api/ai/draft$"), draft_api.start),

@@ -3,8 +3,9 @@
 安全口径：key 明文永不回传前端（public_config 只有 has_key 布尔）；api_key 留空 = 不改动。
 """
 from api import _guard as guard
+from api import draft as draft_api
 from api import params
-from core import ai, db, fields, rewrite
+from core import ai, audit, db, fields, rewrite
 
 REPLY_PREVIEW_MAX = 50     # 连通性小测回包预览截断（P6①）
 
@@ -86,3 +87,14 @@ def apply_op(m, body, q):
         return {"ok": True, **res}, 200
 
     return guard.write(run)
+
+
+def job_cancel(m, body, q):
+    """取消任务（S3-L4 协作式）：domain ∈ rewrite/draft/audit；外呼中的单次调用不可中断，
+    任务在检查点收尾。返回受理与否。"""
+    domain = body.get("domain")
+    jid = body.get("id")
+    if domain not in ("rewrite", "draft", "audit") or not fields.is_id(jid):
+        return guard.err("参数不完整（domain / id）")
+    board = {"rewrite": rewrite.JOBS, "draft": draft_api.JOBS, "audit": audit.JOBS}[domain]
+    return {"ok": True, "cancelled": bool(board.cancel(jid))}, 200

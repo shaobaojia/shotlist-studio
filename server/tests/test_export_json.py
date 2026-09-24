@@ -3,6 +3,7 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -62,8 +63,11 @@ class TestExportJson(unittest.TestCase):
             make_base_db(dbp).close()
             out = Path(d) / "exports"
             out.mkdir()
-            for i in range(25):                  # 预置 25 份旧导出，超过保留 20
-                (out / ("studio-20260101-0000%02d-000.json" % i)).write_text("{}")
+            old_ts = time.time() - 3600
+            for i in range(25):                  # 预置 25 份旧导出（mtime 拨旧——剪枝确定性），超过保留 20
+                f = out / ("studio-20260101-0000%02d-000.json" % i)
+                f.write_text("{}")
+                os.utime(f, (old_ts + i, old_ts + i))
             fname, data = backup.dump_to(out, db_path=dbp)
             self.assertTrue(fname.exists())
             self.assertEqual(data["meta"]["app"], "shotlist-studio")
