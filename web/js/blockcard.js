@@ -17,8 +17,6 @@ const INSET = 10;                      // 「小一圈」内缩：左模式＝�
 const MIN_W = 180, MAX_W = 360, DEF_W = 236;
 const MIN_H = 130, MAX_H = 380, DEF_H = 190;
 const LS_KEY = 'studio.blockcard';
-// 分类色带调色板（按分类顺序取色；未分类走中性色）——块行左缘的小色条＝它是「一块」
-const PALETTE = ['#b8563e', '#c08a2e', '#7a8b3f', '#4e7f6a', '#5d7fa3', '#8a6aa8', '#a05f74', '#8b6b4a'];
 
 let dr = null;
 let root = null;
@@ -66,13 +64,6 @@ function frameRect() {
   }
   if (!Number.isFinite(left) || !Number.isFinite(top)) return fe.getBoundingClientRect();
   return { left: left, top: top, width: w, height: h };
-}
-
-function catColor(cid) {
-  if (cid == null) return '#9a9182';
-  const d = blocksData();
-  const idx = d ? d.categories.findIndex((c) => c.id === cid) : -1;
-  return PALETTE[(idx < 0 ? PALETTE.length - 1 : idx) % PALETTE.length];
 }
 
 // ── 内容：块库列表（A3 分段标题 + 搜索 + 行点插；含全部收起/展开）──

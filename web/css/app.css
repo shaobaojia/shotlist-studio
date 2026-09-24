@@ -904,6 +904,7 @@ table.shots tr.shot.cover-off:hover td { opacity: 1; }
   border-radius: 6px 0 0 6px; background: var(--bc-cat, var(--rule)); }
 .bco-grip { color: var(--dim); cursor: grab; user-select: none; letter-spacing: -1px; font-size: 11px; flex: none; }
 .bco-grip:active { cursor: grabbing; }
+.bco-grip.off { cursor: default; opacity: .35; }
 .bco-star { cursor: pointer; color: #b3aa97; font-size: 12px; flex: none; }
 .bco-star.on { color: #c99a2e; }
 .bco-text { flex: 1; min-width: 0; font-size: 11px; color: var(--ink2); line-height: 1.5; overflow-wrap: anywhere;

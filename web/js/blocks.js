@@ -47,6 +47,22 @@ export function catOf(catId) {
   return (cache ? cache.categories : []).find((x) => x.id === catId) || null;
 }
 
+// 分类色单点（F3-P4③/W17）：调色板按分类序取色；未分类＝中性色；悬空 id＝末位色；缓存换代即重建 Map
+const PALETTE = ['#b8563e', '#c08a2e', '#7a8b3f', '#4e7f6a', '#5d7fa3', '#8a6aa8', '#a05f74', '#8b6b4a'];
+export const UNCAT_COLOR = '#9a9182';
+let colorMap = null;
+let colorSrc = null;
+export function catColorOf(cid) {
+  if (cid == null) return UNCAT_COLOR;
+  if (!cache) return PALETTE[PALETTE.length - 1];
+  if (colorSrc !== cache) {
+    colorSrc = cache;
+    colorMap = new Map();
+    cache.categories.forEach((c, i) => colorMap.set(c.id, PALETTE[i % PALETTE.length]));
+  }
+  return colorMap.get(cid) || PALETTE[PALETTE.length - 1];
+}
+
 // 搜索口径单点（正文 + 分类名；管理器 / 热盒条共用）
 export function blockMatch(b2, q) {
   if (!q) return true;
