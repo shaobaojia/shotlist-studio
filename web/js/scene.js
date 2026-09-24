@@ -3,7 +3,7 @@
 import { api, exportUrl, downloadUrl } from './api.js';
 import { state, fieldOf, groupsById, fieldsOf } from './state.js';
 import { hashOf, isCurrentScene } from './route.js';
-import { el, fmt, toast, once, durTick, flashIntoView } from './ui.js';
+import { el, fmt, toast, once, durTick, flashIntoView, silent, lsGet, lsSet, setVarPx, filmChanged } from './ui.js';
 import { JIWEI_LEGEND } from './cells.js';
 import { buildTable, beatSection } from './table.js';
 import { bindCellMenu } from './cellmenu.js';
@@ -53,16 +53,17 @@ initSelBar();
 
 function loadPrefs() {
   try {
-    const p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
+    const p = lsGet(PREFS_KEY, {});
     const hidden = Object.assign({}, p.hidden || {});
     if (p.prompt === false && hidden.prompt == null) hidden.prompt = true; // 旧「显示提示词」开关迁移
     return { wrap: p.wrap !== false, hidden: hidden, widths: p.widths || {}, viewMode: p.viewMode === 'flat' ? 'flat' : 'group' };
   } catch (e) {
+    silent(e, 'prefs');
     return { wrap: true, hidden: {}, widths: {}, viewMode: 'group' };
   }
 }
 function savePrefs() {
-  try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (e) { /* ignore */ }
+  lsSet(PREFS_KEY, prefs);
 }
 
 export async function renderScene(view, sceneNo) {
@@ -127,7 +128,7 @@ export function refreshSceneSoon() {
 // 在飞刷新序号：陈旧回包守卫（P0·F1-B1）
 let _refreshSeq = 0;
 export async function refreshCurrentView() {
-  const view = document.getElementById('view');
+  const view = fctx.getView();
   if (!currentData || !view) return;
   const no = currentData.scene.scene_no;
   const seq = ++_refreshSeq;
@@ -138,7 +139,7 @@ export async function refreshCurrentView() {
     if (!currentData || currentData.scene.scene_no !== no) return;   // 已切场：不回写
     currentData = next;
     paintScene(view);
-  } catch (e) { /* 保留现状 */ }
+  } catch (e) { silent(e, 'refresh'); }
 }
 
 // ── 拖动接线（事件委托，绑定一次） ──
@@ -176,6 +177,8 @@ function bindDragOnce(view) {
                 else await api.move('shots', shotId, { beat_id: info.beatId, index: info.index });
               },
             });
+          } else {
+            toast('已移动，但无法登记撤销', 'err');   // F1-W23：info 为空不再静默
           }
           await refreshCurrentView();
         }
@@ -224,7 +227,7 @@ function groupDragInfo(ids) {
 function syncFreezeH() {
   const f = document.querySelector('.scene-freeze');
   if (!f) return;
-  document.documentElement.style.setProperty('--freeze-h', f.getBoundingClientRect().height + 'px');
+  setVarPx('--freeze-h', f);
 }
 window.addEventListener('resize', () => { if (document.querySelector('.scene-freeze')) syncFreezeH(); });
 
@@ -238,7 +241,7 @@ function paintScene(view) {
   clearSel();
   view.textContent = '';
   view.classList.toggle('wrap-off', !prefs.wrap);
-  document.documentElement.style.setProperty('--dock-h', '0px');
+  setVarPx('--dock-h');
 
   const freeze = el('div', 'scene-freeze');   // 在流吸顶场头≠浮层：不挂 .float-card（F1-B5）
   freeze.appendChild(sceneHead(data.scene, data));
@@ -280,7 +283,7 @@ function paintScene(view) {
   {                                                       // 挂件带 v2（M5k）：底部冻结通栏 + 向上浮层
     const dock = buildRibbon(data, shots);
     if (dock) view.appendChild(dock);
-    document.documentElement.style.setProperty('--dock-h', dock ? dock.offsetHeight + 'px' : '0px');
+    setVarPx('--dock-h', dock);
   }
   applyFilter(fctx);
   refreshHistoryIfOpen();
@@ -311,7 +314,7 @@ function syncLive() {
 }
 function applyLive() {
   const data = currentData;
-  const view = document.getElementById('view');
+  const view = fctx.getView();
   if (!data || !view) return;
   const shs = allShotsCached();
   const st = view.querySelector('.scene-stats .ss-text');
@@ -320,7 +323,7 @@ function applyLive() {
   if (old) {
     const fresh = buildRibbon(data, shs);
     if (fresh) old.replaceWith(fresh); else old.remove();
-    document.documentElement.style.setProperty('--dock-h', fresh ? fresh.offsetHeight + 'px' : '0px');
+    setVarPx('--dock-h', fresh);
   }
 }
 
@@ -334,6 +337,29 @@ function sceneStats(data, shots) {
 }
 
 // 场次末尾「＋ 添加节拍」（空场也显示：搭骨架入口）
+// 台本三按钮工厂（F1-W6）：常驻「台本」；空场条另加「从台本出草稿…」与「导入台本…」
+function scriptTools(bar, flags) {
+  flags = flags || {};
+  if (flags.draft) {
+    const d = el('button', 'tool-btn add-beat dz-violet', '✦ 从台本出草稿…');
+    d.title = '贴一段台本，AI 搭出节拍骨架 + 镜头行草稿（仅空场可用）';
+    d.addEventListener('click', () => {
+      if (currentData) openSceneDraft(currentData.scene.id, refreshCurrentView, currentData.scene.script || '');
+    });
+    bar.appendChild(d);
+  }
+  const sb = el('button', 'tool-btn', '台本');
+  sb.title = '本场台本（浮动抽屉：查看 / 修订 / 复制）';
+  sb.addEventListener('click', () => openScriptDrawer());
+  bar.appendChild(sb);
+  if (flags.import) {
+    const imp = el('button', 'tool-btn', '导入台本…');
+    imp.title = '整本剧本切分导入（逐场勾选覆盖）';
+    imp.addEventListener('click', () => openScriptImport());
+    bar.appendChild(imp);
+  }
+}
+
 function addBeatBar(withDraft) {
   const bar = el('div', 'add-beat-bar');
   const btn = el('button', 'tool-btn add-beat', '＋ 添加节拍');
@@ -358,23 +384,33 @@ function addBeatBar(withDraft) {
     }
   });
   bar.appendChild(btn);
-  if (withDraft) {
-    const d = el('button', 'tool-btn add-beat dz-violet', '✦ 从台本出草稿…');
-    d.title = '贴一段台本，AI 搭出节拍骨架 + 镜头行草稿（仅空场可用）';
-    d.addEventListener('click', () => {
-      if (currentData) openSceneDraft(currentData.scene.id, refreshCurrentView, currentData.scene.script || '');
-    });
-    bar.appendChild(d);
-    const sb2 = el('button', 'tool-btn', '台本');
-    sb2.title = '本场台本（浮动抽屉：查看 / 修订 / 复制）';
-    sb2.addEventListener('click', () => openScriptDrawer());
-    bar.appendChild(sb2);
-    const imp2 = el('button', 'tool-btn', '导入台本…');
-    imp2.title = '整本剧本切分导入（逐场勾选覆盖）';
-    imp2.addEventListener('click', () => openScriptImport());
-    bar.appendChild(imp2);
-  }
+  if (withDraft) scriptTools(bar, { draft: true, import: true });
   return bar;
+}
+
+// 场号写入与撤销共用（F1-W5）：双对象同步 + 路由跟随 + 广播；返回撤销体（无变化 → null）
+function applySceneNo(sc, v) {
+  sc.scene_no = v;
+  const st = state.scenes.find((x) => x.id === sc.id);
+  if (st) st.scene_no = v;
+}
+async function saveSceneNo(sc, oldV, newV) {
+  const v = String(newV == null ? '' : newV).trim();
+  if (!v) throw new Error('场号不能为空');
+  if (v === oldV) return null;
+  if (state.scenes.some((x) => x.id !== sc.id && x.scene_no === v)) {
+    throw new Error('场号已存在：' + v);
+  }
+  await api.update('scenes', sc.id, 'scene_no', v);
+  applySceneNo(sc, v);
+  if (isCurrentScene(oldV)) location.hash = hashOf(v);
+  filmChanged();
+  return async () => {
+    await api.update('scenes', sc.id, 'scene_no', oldV);
+    applySceneNo(sc, oldV);
+    if (isCurrentScene(v)) location.hash = hashOf(oldV);
+    filmChanged();
+  };
 }
 
 function sceneHead(sc, data) {
@@ -387,29 +423,8 @@ function sceneHead(sc, data) {
     onLocal: (v) => { sc.scene_no = v; },
     renderCell: () => { noSpan.textContent = sc.scene_no; },
     save: async (oldV, newV) => {
-      const v = String(newV == null ? '' : newV).trim();
-      if (!v) throw new Error('场号不能为空');
-      if (v === oldV) return;
-      if (state.scenes.some((x) => x.id !== sc.id && x.scene_no === v)) {
-        throw new Error('场号已存在：' + v);
-      }
-      await api.update('scenes', sc.id, 'scene_no', v);
-      sc.scene_no = v;
-      const st = state.scenes.find((x) => x.id === sc.id);
-      if (st) st.scene_no = v;
-      if (isCurrentScene(oldV)) location.hash = hashOf(v);
-      window.dispatchEvent(new CustomEvent('shotlist:film-changed'));
-      recordUndo({
-        type: 'custom', label: '场号',
-        undo: async () => {
-          await api.update('scenes', sc.id, 'scene_no', oldV);
-          sc.scene_no = oldV;
-          const st2 = state.scenes.find((x) => x.id === sc.id);
-          if (st2) st2.scene_no = oldV;
-          if (isCurrentScene(v)) location.hash = hashOf(oldV);
-          window.dispatchEvent(new CustomEvent('shotlist:film-changed'));
-        },
-      });
+      const undoFn = await saveSceneNo(sc, oldV, newV);
+      if (undoFn) recordUndo({ type: 'custom', label: '场号', undo: undoFn });
     },
   });
   h1.appendChild(noSpan);
@@ -482,7 +497,7 @@ function viewTools() {
       if (mode === 'group') sortState = null;
       prefs.viewMode = mode;
       savePrefs();
-      paintScene(document.getElementById('view'));
+      fctx.repaint();
     });
     seg.appendChild(b);
   });
@@ -498,7 +513,7 @@ function viewTools() {
     const btn = el('button', 'tool-btn', '清除排序');
     btn.addEventListener('click', () => {
       sortState = null;
-      paintScene(document.getElementById('view'));
+      fctx.repaint();
     });
     bar.appendChild(btn);
   }
@@ -507,7 +522,7 @@ function viewTools() {
   const setWrap = (v) => {
     prefs.wrap = v;
     savePrefs();
-    document.getElementById('view').classList.toggle('wrap-off', !v);
+    fctx.getView().classList.toggle('wrap-off', !v);
   };
   const doRenumber = async () => {
     try {
@@ -521,7 +536,7 @@ function viewTools() {
         }
         recordUndo({ type: 'renumber', changes: changes });
         toast('已整理 ' + changes.length + ' 个镜号（旧号入痕迹）');
-        paintScene(document.getElementById('view'));
+        fctx.repaint();
       } else {
         toast('镜号已是连续，无需整理');
       }
@@ -536,7 +551,7 @@ function viewTools() {
       currentData.scene.locked = res.scene ? res.scene.locked : (want ? 1 : 0);
       if (want && res.snapshot) toast('已锁定并留底：' + res.snapshot.path);
       else toast(want ? '已锁定本场' : '已解锁本场');
-      paintScene(document.getElementById('view'));
+      fctx.repaint();
     } catch (err) {
       toast((want ? '锁定' : '解锁') + '失败：' + err.message, 'err');
     }
@@ -551,13 +566,10 @@ function viewTools() {
       else if (prefs.hidden[k]) delete prefs.hidden[k];
       else prefs.hidden[k] = true;
       savePrefs();
-      paintScene(document.getElementById('view'));
+      fctx.repaint();
     });
   };
-  const sb = el('button', 'tool-btn', '台本');
-  sb.title = '本场台本（浮动抽屉：查看 / 修订 / 复制）';
-  sb.addEventListener('click', () => openScriptDrawer());
-  bar.appendChild(sb);
+  scriptTools(bar);
   const ab = el('button', 'tool-btn audit-btn', '审计');
   ab.title = '审计问题清单（灯＝待处理；每次按设置跑）';
   ab.addEventListener('click', toggleAuditPanel);
@@ -607,7 +619,7 @@ function cycleSort(key) {
   if (!sortState || sortState.key !== key) sortState = { key: key, dir: 1 };
   else if (sortState.dir === 1) sortState = { key: key, dir: -1 };
   else sortState = null;
-  paintScene(document.getElementById('view'));
+  fctx.repaint();
 }
 
 function sortedShots(shots) {
