@@ -1,7 +1,7 @@
 // 入口：导航（场次标签：切换 / 拖动排序 / 右键副本·删除 / 末尾＋加场）、路由、全局快捷键。
 import { api } from './api.js';
 import { state } from './state.js';
-import { el, toast, once, installWheelGuards, isTypingTarget, filmChanged, silent, setVarPx } from './ui.js';
+import { el, toast, once, installWheelGuards, isTypingTarget, filmChanged, FILM_CHANGED, silent, setVarPx } from './ui.js';
 import { parseHash, sceneNo, hashOf } from './route.js';
 import { renderFilm } from './film.js';
 import { renderScene, refreshCurrentView } from './scene.js';
