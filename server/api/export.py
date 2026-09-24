@@ -24,7 +24,7 @@ def export_get(m, q):
         return {"error": "format 只支持 %s" % " / ".join(sorted(core_export.FORMATS))}, 400
     if not scene_no:
         return {"error": "缺 scene 参数"}, 400
-    con = db.connect()
+    con = db.open_ro()
     try:
         ex = core_export.build_scene_html(con, scene_no, fmt)
     except core_export.SceneNotFound:

@@ -1,24 +1,33 @@
-"""数据层：SQLite 连接与查询（schema v1）。默认只读；写操作经 rw=True（配套 core/ops.py）。"""
+"""数据层：SQLite 连接（schema v1）。连接器只做连接——只读 open_ro / 写入口 open_rw
+（写前每日快照下沉至写边界；S1-L4）。"""
 import sqlite3
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = ROOT / "data" / "studio.db"
+from core import paths
+from core.snapshot import ensure_daily_snapshot
+
+ROOT = paths.ROOT        # 兼容保留（旧引用面）
+DB_PATH = paths.DB_PATH
 
 
-def connect(db_path=None, rw=False):
-    """默认只读（GET 路径）；rw=True 给写路径（M2 编辑），开外键约束。
-    写连接统一先过每日快照（写保护下沉到写边界，脚本/新写者天然覆盖）。"""
+def open_ro(db_path=None):
+    """只读连接（显式入口 · S1-L4）：库缺失 → FileNotFoundError（与 open_rw 同型）。"""
     p = Path(db_path) if db_path else DB_PATH
-    if rw:
-        if not p.exists():
-            raise FileNotFoundError("数据库不存在：%s" % p)
-        from core import ops  # 延迟导入：ops 顶层 import db，避免循环
-        ops.ensure_daily_snapshot(db_path=str(p))
-        con = sqlite3.connect(str(p), timeout=10)
-        con.execute("PRAGMA foreign_keys=ON")
-    else:
-        con = sqlite3.connect("file:%s?mode=ro" % p, uri=True)
+    if not p.exists():
+        raise FileNotFoundError("数据库不存在：%s" % p)
+    con = sqlite3.connect("file:%s?mode=ro" % p, uri=True)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def open_rw(db_path=None):
+    """写连接（显式入口 · S1-L4）：写前每日快照（写边界语义，幂等）+ 外键约束。"""
+    p = Path(db_path) if db_path else DB_PATH
+    if not p.exists():
+        raise FileNotFoundError("数据库不存在：%s" % p)
+    ensure_daily_snapshot(db_path=str(p))
+    con = sqlite3.connect(str(p), timeout=10)
+    con.execute("PRAGMA foreign_keys=ON")
     con.row_factory = sqlite3.Row
     return con
 

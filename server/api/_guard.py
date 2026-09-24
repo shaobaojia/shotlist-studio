@@ -19,7 +19,7 @@ def run_actions(spec, body, precheck=None, action=None):
     ctx, err = precheck(body, action) if precheck else ({}, None)
     if err:
         return err
-    con = db.connect(rw=True)
+    con = db.open_rw()
     try:
         out = spec[action](con, body, ctx)
         return {"ok": True, **(out or {})}, 200

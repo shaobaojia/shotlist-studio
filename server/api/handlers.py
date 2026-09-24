@@ -14,7 +14,7 @@ def health(m, q):
 def meta(m, q):
     obj = fields.meta()
     try:
-        con = db.connect()
+        con = db.open_ro()
         try:
             obj["beat_kinds"] = db.beat_kinds(con)   # 读库单点（P0·S1-W12）
         finally:
@@ -26,7 +26,7 @@ def meta(m, q):
 
 
 def film(m, q):
-    con = db.connect()
+    con = db.open_ro()
     try:
         f = db.film(con)
         if not f:
@@ -39,7 +39,7 @@ def film(m, q):
 
 def scene(m, q):
     scene_no = unquote(m.group(1))
-    con = db.connect()
+    con = db.open_ro()
     try:
         f, sc = db.load_scene(con, scene_no)   # 场装载单点（P1·S4-A8）
         if not f:
@@ -73,7 +73,7 @@ def history(m, q):
         limit = params.as_int(params.q1(q, "limit") or str(ops.HISTORY_LIMIT_DEFAULT), "limit")
     except ValueError:
         limit = ops.HISTORY_LIMIT_DEFAULT
-    con = db.connect()
+    con = db.open_ro()
     try:
         return {"history": ops.history_of(con, sid, limit)}, 200   # 上限钳制在 ops（P0·S1-P2④）
     finally:
@@ -89,7 +89,7 @@ def update(m, body, q):
     if table not in ops.TABLES_ALLOWED or not isinstance(row_id, int) or not field:
         return {"error": "参数不完整（table/id/field）"}, 400
     # 场号 trim/非空/唯一校验已下沉 ops._apply_field（update / batch 同源；P0·S1-B1）
-    con = db.connect(rw=True)
+    con = db.open_rw()
     try:
         row, changed = ops.update_field(con, table, row_id, field,
                                         "" if value is None else str(value))
@@ -107,7 +107,7 @@ def batch(m, body, q):
         return {"error": "参数不完整（ops）"}, 400
     if len(items) > fields.BATCH_MAX:
         return {"error": "一次最多 %d 项" % fields.BATCH_MAX}, 400
-    con = db.connect(rw=True)
+    con = db.open_rw()
     try:
         res = ops.batch_update(con, items)
         return {"ok": True, "changed": res["changed"], "results": res["results"]}, 200
@@ -124,7 +124,7 @@ def move(m, body, q):
     err_params = {"error": "参数不完整（table/id/index）"}, 400   # 同函数三处同文案（P0·S1-P4④）
     if table not in ops.TABLES_ALLOWED or not (isinstance(rid, int) or ok_ids):
         return err_params
-    con = db.connect(rw=True)
+    con = db.open_rw()
     try:
         if table == "shots":
             bid = body.get("beat_id")
@@ -152,7 +152,7 @@ def move(m, body, q):
 def renumber(m, body, q):
     """M2 整理镜号：按当前顺序整场顺排；旧号入痕迹。"""
     scene_no = unquote(m.group(1))
-    con = db.connect(rw=True)
+    con = db.open_rw()
     try:
         f, sc = db.load_scene(con, scene_no)   # 场装载单点（P1·S4-A8）
         if not f:
@@ -170,7 +170,7 @@ def duplicate(m, body, q):
     rid = body.get("id")
     if table not in ops.TABLES_ALLOWED or not isinstance(rid, int):
         return {"error": "参数不完整（table/id）"}, 400
-    con = db.connect(rw=True)
+    con = db.open_rw()
     try:
         if table == "shots":
             return {"ok": True, "shot": ops.duplicate_shot(con, rid)}, 200
@@ -197,7 +197,7 @@ def delete_row(m, body, q):
         return {"error": "参数不完整（table + id/ids）"}, 400
     if len(ids) > fields.DELETE_MAX:
         return {"error": "一次最多 %d 行" % fields.DELETE_MAX}, 400
-    con = db.connect(rw=True)
+    con = db.open_rw()
     try:
         if table == "shots":
             return {"ok": True, "deleted": {"rows": ops.delete_shots(con, ids)}}, 200
@@ -228,7 +228,7 @@ def create(m, body, q):
     elif kind == "beat":
         if not isinstance(scene_id, int):
             return {"error": "参数不完整（scene_id）"}, 400
-    con = db.connect(rw=True)
+    con = db.open_rw()
     try:
         if kind == "shot":
             return {"ok": True, "shot": ops.create_blank_shot(con, scene_id, beat_id, index)}, 200
@@ -259,7 +259,7 @@ def restore(m, body, q):
     else:
         if not isinstance(payload, dict) or not isinstance(payload.get("scene"), dict):
             return {"error": "参数不完整（payload）"}, 400
-    con = db.connect(rw=True)
+    con = db.open_rw()
     try:
         if kind == "shots":
             return {"ok": True, "shots": ops.restore_shots(con, rows)}, 200
@@ -278,7 +278,7 @@ def lock(m, body, q):
     lock_flag = bool(body.get("lock", True))
     if not isinstance(rid, int):
         return {"error": "参数不完整（id）"}, 400
-    con = db.connect(rw=True)
+    con = db.open_rw()
     try:
         return {"ok": True, **ops.lock_scene(con, rid, lock_flag)}, 200
     except ValueError as e:

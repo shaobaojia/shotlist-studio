@@ -170,7 +170,7 @@ class PreviewJobs(jobs.JobBoard):
             raise ValueError("参数不完整（action 或 instruction）")
         if action is not None and action not in ACTIONS:
             raise ValueError("未知 action：%s" % action)
-        con = connect_factory() if connect_factory else db.connect()
+        con = connect_factory() if connect_factory else db.open_ro()
         try:
             sc, beats, shots = _load_scene(con, scene_id)
             by_key = {("beats", r["id"]): r for r in beats}

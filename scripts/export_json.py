@@ -66,7 +66,7 @@ def main():
     if not core_db.DB_PATH.exists():
         print("✗ 数据库不存在：%s" % core_db.DB_PATH, file=sys.stderr)
         return 1
-    con = core_db.connect()
+    con = core_db.open_ro()
     try:
         data = dump_db(con, mask_keys=True)
     finally:

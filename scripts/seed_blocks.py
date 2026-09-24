@@ -101,7 +101,7 @@ SEED_VERSION = "2026-09-19.1"  # 种子批号（写入 settings.seed_blocks_vers
 
 def load(reset=False):
     """内容级幂等：按正文查重、缺什么补什么（半载可续）；全程一个事务、末尾一次 commit。"""
-    con = db.connect(rw=True)  # 写边界自带每日快照（core/db.connect 下沉）
+    con = db.open_rw()  # 写边界自带每日快照（core/db.open_rw 下沉 · S1-L4）
     try:
         # 域外特权（P2·S4-C8）：整表删除不走 prompts 域层单点；安全网 = rw 连接的每日快照
         if reset:

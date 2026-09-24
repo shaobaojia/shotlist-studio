@@ -75,16 +75,16 @@ class TestExportRoute(unittest.TestCase):
 
     def test_bad_format_400(self):
         """非法 format → 400 且不触连接。"""
-        with mock.patch.object(core_db, "connect",
-                               side_effect=AssertionError("坏请求触达了连接")):
+        with mock.patch.object(core_db, "open_ro", side_effect=AssertionError("坏请求触达了连接")), \
+             mock.patch.object(core_db, "open_rw", side_effect=AssertionError("坏请求触达了连接")):
             obj, code = api_export.export_get(None, {"scene": ["s010"], "format": ["weird"]})
         self.assertEqual(code, 400)
         self.assertIn("format", obj["error"])
 
     def test_missing_scene_400(self):
         """缺 scene → 400 且不触连接。"""
-        with mock.patch.object(core_db, "connect",
-                               side_effect=AssertionError("坏请求触达了连接")):
+        with mock.patch.object(core_db, "open_ro", side_effect=AssertionError("坏请求触达了连接")), \
+             mock.patch.object(core_db, "open_rw", side_effect=AssertionError("坏请求触达了连接")):
             obj, code = api_export.export_get(None, {"format": ["page"]})
         self.assertEqual(code, 400)
         self.assertIn("scene", obj["error"])
@@ -92,7 +92,7 @@ class TestExportRoute(unittest.TestCase):
     def test_scene_not_found_404(self):
         """场不存在 → 404（SceneNotFound 在接口层转译）。"""
         con = make_base_db()
-        with mock.patch.object(core_db, "connect", return_value=con):
+        with mock.patch.object(core_db, "open_ro", return_value=con), mock.patch.object(core_db, "open_rw", return_value=con):
             obj, code = api_export.export_get(None, {"scene": ["s999"], "format": ["page"]})
         self.assertEqual(code, 404)
         self.assertIn("s999", obj["error"])
@@ -100,7 +100,7 @@ class TestExportRoute(unittest.TestCase):
     def test_ok_double_filename(self):
         """成功 → __attachment__；Content-Disposition 双文件名（quote() 与 ASCII 名并存是唯一易回退点）。"""
         con = make_base_db()
-        with mock.patch.object(core_db, "connect", return_value=con):
+        with mock.patch.object(core_db, "open_ro", return_value=con), mock.patch.object(core_db, "open_rw", return_value=con):
             obj, code = api_export.export_get(None, {"scene": ["s010"], "format": ["page"]})
         self.assertEqual(code, 200)
         att = obj["__attachment__"]

@@ -734,7 +734,7 @@ class JobManager(jobs.JobBoard):
             joined = self._find_running(lambda j: j.get("scene_id") == scene_id)
             if joined:
                 return joined
-            con = connect_factory() if connect_factory else db.connect()
+            con = connect_factory() if connect_factory else db.open_ro()
             try:
                 rules = _select_rules(con, only)
             finally:
@@ -767,7 +767,7 @@ class JobManager(jobs.JobBoard):
                         break
 
         try:
-            con = (connect_factory or (lambda: db.connect(rw=True)))()
+            con = (connect_factory or (lambda: db.open_rw()))()
         except Exception as e:
             self._finish(scene_id, "连接失败：%s" % e)
             return

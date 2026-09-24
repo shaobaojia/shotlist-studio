@@ -18,7 +18,7 @@ def _req_int(body, key):
 
 
 def blocks(m, q):
-    con = db.connect()
+    con = db.open_ro()
     try:
         return prompts.blocks_state(con), 200
     finally:

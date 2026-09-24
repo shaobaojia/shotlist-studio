@@ -9,7 +9,7 @@ REPLY_PREVIEW_MAX = 50     # 连通性小测回包预览截断（P6①）
 
 
 def settings_get(m, q):
-    con = db.connect()
+    con = db.open_ro()
     try:
         return {"ok": True, "config": ai.public_config(ai.get_config(con))}, 200
     finally:
@@ -22,7 +22,7 @@ def settings_set(m, body, q):
     data = {dst: body[src] for src, dst in ai.OUTER_FIELDS if src in body}   # P7⑤：映射单表
     if "api_key" in body:
         data["api_key"] = body["api_key"]
-    con = db.connect(rw=True)
+    con = db.open_rw()
     try:
         cfg = ai.save_config(con, data)
         return {"ok": True, "config": ai.public_config(cfg)}, 200
@@ -31,7 +31,7 @@ def settings_set(m, body, q):
 
 
 def test(m, body, q):
-    con = db.connect()
+    con = db.open_ro()
     try:
         cfg = ai.get_config(con)
     finally:
@@ -49,7 +49,7 @@ def preview(m, body, q):
     sid = body.get("scene_id")
     if not fields.is_id(sid):
         return {"error": "参数不完整（scene_id）"}, 400
-    con = db.connect()
+    con = db.open_ro()
     try:
         cfg = ai.get_config(con)
     finally:
@@ -86,7 +86,7 @@ def apply_op(m, body, q):
         return {"error": "预览任务不存在（服务重启会清空，请重新生成）"}, 400
     if job.get("running"):
         return {"error": "预览还没跑完"}, 400
-    con = db.connect(rw=True)
+    con = db.open_rw()
     try:
         res = rewrite.apply_items(con, job, item_ids=body.get("item_ids"))
         return {"ok": True, **res}, 200

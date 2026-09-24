@@ -28,14 +28,14 @@ def main():
     ap.add_argument("--list", action="store_true")
     args = ap.parse_args()
     if args.list:
-        con = db.connect()
+        con = db.open_ro()
         try:
             for r in audit.rules_state(con):
                 _print_rule(r, extra=lambda x: " enabled=%s params=%s" % (x["enabled"], x["params"]))
         finally:
             con.close()
         return
-    con = db.connect(rw=True)
+    con = db.open_rw()
     try:
         added = audit.seed_default_rules(con, reset=args.reset)
         rows = audit.rules_state(con)

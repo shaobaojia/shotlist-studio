@@ -20,8 +20,10 @@ from core import rewrite  # noqa: E402
 
 def _dead():
     """坏请求不应触达连接（R13 收敛：全文件唯一一处）——P0·S1-P3④。"""
-    return mock.patch.object(core_db, "connect",
-                             side_effect=AssertionError("坏请求触达了写连接"))
+    return mock.patch.multiple(
+        core_db,
+        open_ro=mock.Mock(side_effect=AssertionError("坏请求触达了读连接")),
+        open_rw=mock.Mock(side_effect=AssertionError("坏请求触达了写连接")))
 
 
 class TestMeta(unittest.TestCase):
@@ -43,7 +45,11 @@ class TestMeta(unittest.TestCase):
 
 class TestAiPreviewGuard(unittest.TestCase):
     def _no_db(self):
-        return mock.patch.object(core_db, "connect", return_value=mock.MagicMock())
+        m = mock.MagicMock()
+        return mock.patch.multiple(
+            core_db,
+            open_ro=mock.Mock(return_value=m),
+            open_rw=mock.Mock(return_value=m))
 
     def test_bad_scene_id(self):
         res, code = api_ai.preview(None, {"scene_id": "x"}, {})
@@ -126,7 +132,7 @@ class TestAiSettingsLayer(unittest.TestCase):
                     "api_key": "sk-secret", "has_key": True}
 
         with (
-            mock.patch.object(core_db, "connect", return_value=mock.MagicMock()),
+            mock.patch.object(core_db, "open_ro", return_value=mock.MagicMock()), mock.patch.object(core_db, "open_rw", return_value=mock.MagicMock()),
             mock.patch.object(core_ai, "save_config", side_effect=fake_save),
         ):
             res, code = api_ai.settings_set(
@@ -147,7 +153,7 @@ class TestAiSettingsLayer(unittest.TestCase):
         cfg = {"ai_provider": "p", "ai_model": "m", "ai_base_url": "u",
                "api_key": "sk-secret", "has_key": True}
         with (
-            mock.patch.object(core_db, "connect", return_value=mock.MagicMock()),
+            mock.patch.object(core_db, "open_ro", return_value=mock.MagicMock()), mock.patch.object(core_db, "open_rw", return_value=mock.MagicMock()),
             mock.patch.object(core_ai, "get_config", return_value=cfg),
         ):
             res, code = api_ai.settings_get(None, {})
@@ -158,7 +164,7 @@ class TestAiSettingsLayer(unittest.TestCase):
     def test_probe_shapes(self):
         """探活：成功 200 形状（reply 去空白截断）；失败 200 + ok:False（不当网络错误）。"""
         with (
-            mock.patch.object(core_db, "connect", return_value=mock.MagicMock()),
+            mock.patch.object(core_db, "open_ro", return_value=mock.MagicMock()), mock.patch.object(core_db, "open_rw", return_value=mock.MagicMock()),
             mock.patch.object(core_ai, "get_config", return_value={}),
             mock.patch.object(core_ai, "probe",
                               return_value={"ms": 9, "model": "m", "text": " 在的 "}),
@@ -167,7 +173,7 @@ class TestAiSettingsLayer(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertEqual(res["reply"], "在的")
         with (
-            mock.patch.object(core_db, "connect", return_value=mock.MagicMock()),
+            mock.patch.object(core_db, "open_ro", return_value=mock.MagicMock()), mock.patch.object(core_db, "open_rw", return_value=mock.MagicMock()),
             mock.patch.object(core_ai, "get_config", return_value={}),
             mock.patch.object(core_ai, "probe",
                               side_effect=core_ai.AiError("未配置 API Key（先去设置里填）")),
@@ -200,7 +206,7 @@ class TestAiApplyGuards(unittest.TestCase):
     def test_valueerror_maps_400(self):
         with (
             mock.patch.object(rewrite.JOBS, "get", return_value={"id": 1, "running": False}),
-            mock.patch.object(core_db, "connect", return_value=mock.MagicMock()),
+            mock.patch.object(core_db, "open_ro", return_value=mock.MagicMock()), mock.patch.object(core_db, "open_rw", return_value=mock.MagicMock()),
             mock.patch.object(rewrite, "apply_items",
                               side_effect=ValueError("原值已变（手工改过？）")),
         ):
@@ -211,7 +217,7 @@ class TestAiApplyGuards(unittest.TestCase):
     def test_ok_shape(self):
         with (
             mock.patch.object(rewrite.JOBS, "get", return_value={"id": 1, "running": False}),
-            mock.patch.object(core_db, "connect", return_value=mock.MagicMock()),
+            mock.patch.object(core_db, "open_ro", return_value=mock.MagicMock()), mock.patch.object(core_db, "open_rw", return_value=mock.MagicMock()),
             mock.patch.object(rewrite, "apply_items", return_value={"applied": 2}),
         ):
             res, code = api_ai.apply_op(None, {"job_id": 1, "item_ids": [0, 1]}, {})
@@ -269,7 +275,7 @@ class TestPromptsThinLayer(unittest.TestCase):
     def test_blocks_update_projection(self):
         con = mock.MagicMock()
         with (
-            mock.patch.object(core_db, "connect", return_value=con),
+            mock.patch.object(core_db, "open_ro", return_value=con), mock.patch.object(core_db, "open_rw", return_value=con),
             mock.patch.object(api_prompts.prompts, "block_update",
                               return_value={"id": 1, "text": "新"}) as bu,
         ):
@@ -318,7 +324,7 @@ class TestAuditThinLayer(unittest.TestCase):
                          " VALUES (1, 'scene', 'open')")
         self.con.commit()
         with (
-            mock.patch.object(core_db, "connect", return_value=self.con),
+            mock.patch.object(core_db, "open_ro", return_value=self.con), mock.patch.object(core_db, "open_rw", return_value=self.con),
             mock.patch.object(core_audit.JOBS, "start",
                               side_effect=AssertionError("不该启动")),
         ):
@@ -333,7 +339,7 @@ class TestAuditThinLayer(unittest.TestCase):
         self.con.commit()
         iid = self.con.execute("SELECT id FROM audit_issues").fetchone()["id"]
         with (
-            mock.patch.object(core_db, "connect", return_value=self.con),
+            mock.patch.object(core_db, "open_ro", return_value=self.con), mock.patch.object(core_db, "open_rw", return_value=self.con),
             mock.patch.object(core_audit.JOBS, "start",
                               return_value={"id": 9, "joined": True}) as st,
         ):
@@ -346,14 +352,14 @@ class TestAuditThinLayer(unittest.TestCase):
     def test_run_scene_missing_and_ok(self):
         con = mock.MagicMock()
         con.execute.return_value.fetchone.return_value = None
-        with mock.patch.object(core_db, "connect", return_value=con):
+        with mock.patch.object(core_db, "open_ro", return_value=con), mock.patch.object(core_db, "open_rw", return_value=con):
             res, code = api_audit.run(None, {"scene_id": 1}, {})
         self.assertEqual(code, 400)
         self.assertIn("场景不存在", res["error"])
         con2 = mock.MagicMock()
         con2.execute.return_value.fetchone.return_value = {"id": 1}
         with (
-            mock.patch.object(core_db, "connect", return_value=con2),
+            mock.patch.object(core_db, "open_ro", return_value=con2), mock.patch.object(core_db, "open_rw", return_value=con2),
             mock.patch.object(core_audit.JOBS, "start",
                               return_value={"id": 4, "running": True}),
         ):
@@ -363,7 +369,7 @@ class TestAuditThinLayer(unittest.TestCase):
 
     def test_rules_get_contract_matches_registry(self):
         """L10 对账（API 边界）：rules_state 每行与 RULES 逐字段对齐。"""
-        with mock.patch.object(core_db, "connect", return_value=self.con):
+        with mock.patch.object(core_db, "open_ro", return_value=self.con), mock.patch.object(core_db, "open_rw", return_value=self.con):
             res, code = api_audit.rules_get(None, {})
         self.assertEqual(code, 200)
         by_key = {r["key"]: r for r in res["rules"]}
@@ -380,7 +386,7 @@ class TestAuditThinLayer(unittest.TestCase):
             self.con.execute("INSERT INTO audit_issues (scene_id, carrier, status)"
                              " VALUES (1, 'scene', ?)", (st,))
         self.con.commit()
-        with mock.patch.object(core_db, "connect", return_value=self.con):
+        with mock.patch.object(core_db, "open_ro", return_value=self.con), mock.patch.object(core_db, "open_rw", return_value=self.con):
             res, code = api_audit.summary(None, {})
         self.assertEqual(code, 200)
         self.assertEqual(res["open_by_scene"], {"1": 2})
@@ -411,7 +417,7 @@ class TestHistoryParams(unittest.TestCase):
 
     def test_scene_id_zero_passed_through(self):
         con = mock.MagicMock()
-        with mock.patch.object(core_db, "connect", return_value=con):
+        with mock.patch.object(core_db, "open_ro", return_value=con), mock.patch.object(core_db, "open_rw", return_value=con):
             res, code = api_handlers.history(None, {"scene_id": ["0"]})
         self.assertEqual(code, 200)
         q, args = con.execute.call_args[0]
@@ -420,7 +426,7 @@ class TestHistoryParams(unittest.TestCase):
 
     def test_no_scene_id_full_library(self):
         con = mock.MagicMock()
-        with mock.patch.object(core_db, "connect", return_value=con):
+        with mock.patch.object(core_db, "open_ro", return_value=con), mock.patch.object(core_db, "open_rw", return_value=con):
             res, code = api_handlers.history(None, {})
         self.assertEqual(code, 200)
         q, args = con.execute.call_args[0]

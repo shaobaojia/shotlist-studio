@@ -9,7 +9,7 @@ from core import audit, db
 
 def rules_get(m, q):
     """规则清单（设置面板用；与场景无关）。"""
-    con = db.connect()
+    con = db.open_ro()
     try:
         return {"ok": True, "rules": audit.rules_state(con)}, 200
     finally:
@@ -18,7 +18,7 @@ def rules_get(m, q):
 
 def summary(m, q):
     """全片未处理计数（场次导航徽标用）。"""
-    con = db.connect()
+    con = db.open_ro()
     try:
         return {"ok": True, "open_by_scene": audit.open_counts(con)}, 200
     finally:
@@ -30,7 +30,7 @@ def audit_get(m, q):
         sid = params.req_int_q(q or {}, "scene_id")
     except ValueError as e:
         return {"error": str(e)}, 400
-    con = db.connect()
+    con = db.open_ro()
     try:
         if not audit.scene_exists(con, sid):
             return {"error": "场景不存在"}, 400
@@ -47,7 +47,7 @@ def run(m, body, q):
         sid = params.req_int(body, "scene_id")
     except ValueError as e:
         return {"error": str(e)}, 400
-    con = db.connect()
+    con = db.open_ro()
     try:
         if not audit.scene_exists(con, sid):
             return {"error": "场景不存在"}, 400
@@ -72,7 +72,7 @@ def issue_op(m, body, q):
     except ValueError as e:
         return {"error": str(e)}, 400
     if action == "recheck":
-        con = db.connect()
+        con = db.open_ro()
         try:
             row = audit.get_issue(con, iid)
             sid, rid = row["scene_id"], row["rule_id"]
@@ -87,7 +87,7 @@ def issue_op(m, body, q):
         except ValueError as e:                       # 规则行已不存在（§11 同门）
             return {"error": str(e)}, 400
         return {"ok": True, "job": job}, 200
-    con = db.connect(rw=True)
+    con = db.open_rw()
     try:
         if action == "waive":
             sid = audit.waive_issue(con, iid, body.get("note"))
@@ -114,7 +114,7 @@ def rules_op(m, body, q):
         return {"error": "参数格式错误（params）"}, 400
     if enabled is None and pdict is None:
         return {"error": "参数不完整（无可写字段）"}, 400
-    con = db.connect(rw=True)
+    con = db.open_rw()
     try:
         return {"ok": True, "rules": audit.update_rule(con, rid, enabled=enabled,
                                                        params=pdict)}, 200

@@ -174,3 +174,10 @@ def history_of(con, scene_id=None, limit=HISTORY_LIMIT_DEFAULT):
     args.append(int(limit))
     return [dict(r) for r in con.execute(q, args)]
 
+
+def kv_set(con, key, value):
+    """settings KV 写单点（P2·S4-C6）：upsert；调用方负责事务提交。"""
+    con.execute(
+        "INSERT INTO settings (key, value) VALUES (?,?)"
+        " ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, str(value)))
+    return value

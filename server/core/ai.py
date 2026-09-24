@@ -99,7 +99,7 @@ def open_channel(chat_fn=None, connect_factory=None, temperature=TEMPERATURE):
     """任务通道（含连接）：开只读连接 → channel → 关连接；返回 (cfg, talk)——
     P0·S3-W15（rewrite/draft 三处逐字样板收口）。"""
     from . import db
-    con = connect_factory() if connect_factory else db.connect()
+    con = connect_factory() if connect_factory else db.open_ro()
     try:
         return channel(con, chat_fn, temperature=temperature)
     finally:

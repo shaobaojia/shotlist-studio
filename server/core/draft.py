@@ -167,7 +167,7 @@ class DraftJobs(jobs.JobBoard):
             raise ValueError("台本太短（至少 %d 字）" % SCRIPT_MIN)
         if len(script) > SCRIPT_MAX:
             raise ValueError("台本太长（上限 %d 字）" % SCRIPT_MAX)
-        con = connect_factory() if connect_factory else db.connect()
+        con = connect_factory() if connect_factory else db.open_ro()
         try:
             sc = db.row(con, "scenes", scene_id, "场景不存在")     # W19/W8：取行单点
         finally:
@@ -225,7 +225,7 @@ class DraftJobs(jobs.JobBoard):
     def start_prompt(self, scene_id, shot_id, chat=None, connect_factory=None):
         if not fields.is_id(scene_id) or not fields.is_id(shot_id):
             raise ValueError("参数不完整（scene_id / shot_id）")
-        con = connect_factory() if connect_factory else db.connect()
+        con = connect_factory() if connect_factory else db.open_ro()
         try:
             sc = db.row(con, "scenes", scene_id, "场景不存在")            # W19/W8
             sh = db.row(con, "shots", shot_id, "镜头不存在或不属于本场")
@@ -295,7 +295,7 @@ class DraftJobs(jobs.JobBoard):
             beats = [dict(b) for b in job["beats"]]
             shots = [dict(s) for s in job["shots"]]
             scene_id = job["scene_id"]
-        con = connect_factory() if connect_factory else db.connect(rw=True)
+        con = connect_factory() if connect_factory else db.open_rw()
         try:
             db.row(con, "scenes", scene_id, "场景不存在（可能已被删除）")   # W19/W8：取行单点
             beat_ids = ops.append_beats(con, scene_id, [
