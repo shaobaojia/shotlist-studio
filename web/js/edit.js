@@ -3,8 +3,8 @@
 // 摄影机复合控件（景别×2 + 焦段）也在这里：改动即存，含旧格式归一化（内嵌焦段/景深迁入独立字段）。
 // 单选字段与复合控件走自绘浮动菜单（menu.js，非原生 select）：一次点击直达列表，拾取不关表单。
 import { api } from './api.js';
-import { toast, growTextarea, isFloatTarget } from './ui.js';
-import { openMenu, closeMenu, menuOpen } from './menu.js';
+import { toast, growTextarea, placeFlip, onOutsideClose } from './ui.js';
+import { openMenu, closeMenu, menuOpen, optItems } from './menu.js';
 
 const undoStack = [];
 const UNDO_MAX = 100;
@@ -22,6 +22,14 @@ export function canUndo() {
   return undoStack.length > 0;
 }
 
+// 批量写单点（F2-W12）：一次请求、逐项结果；任一项被拒 → 抛出（撤销路径可感知失败）
+export async function batchUpdate(items) {
+  const ret = await api.batch(items);
+  const errs = ((ret && ret.results) || []).filter((r) => r.error);
+  if (errs.length) throw new Error(errs.length + ' 项被拒绝：' + errs[0].error);
+  return ret;
+}
+
 export async function undo() {
   const op = undoStack.pop();
   if (!op) {
@@ -35,9 +43,7 @@ export async function undo() {
       return true;
     }
     if (op.type === 'renumber') {
-      for (const c of op.changes) {
-        await api.update('shots', c.id, 'shot_no', c.old == null ? '' : c.old);
-      }
+      await batchUpdate(op.changes.map((c) => ({ table: 'shots', id: c.id, field: 'shot_no', value: c.old == null ? '' : c.old })));
       toast('已撤销镜号整理');
       return true;
     }
@@ -111,7 +117,7 @@ function openSelectMenu(host, cfg) {
   const original = cfg.getValue() == null ? '' : String(cfg.getValue());
   const opts = cfg.select.slice();
   if (original && opts.indexOf(original) === -1) opts.push(original);
-  const items = opts.map((o) => ({ key: o, label: o, current: o === original }));
+  const items = optItems(opts, original);
   host.classList.add('editing');
   openMenu(host, items, (v) => {
     if (v !== original) save(cfg, original, v);
@@ -128,6 +134,49 @@ function openEditor(host, cfg, seed) {
   host.classList.add('editing');
   host.textContent = '';
   host.appendChild(ed);
+
+  let closed = false;
+  const close = (commit) => {
+    if (closed) return;
+    closed = true;
+    const nv = ed.value;
+    host.classList.remove('editing');
+    // F2-W10：提交路径由 save() 乐观落定重画（先按旧值绘一遍是纯浪费）；取消 / 无变化才就地重画
+    if (commit && nv !== base) save(cfg, base, nv);
+    else cfg.renderCell();
+  };
+
+  decorateEditor(host, ed, cfg, close, base);
+  fitEditorOpen(ed, host);
+  ed.focus();
+  if (ed.tagName === 'INPUT') {
+    if (seed != null) ed.setSelectionRange(ed.value.length, ed.value.length);
+    else ed.select();
+  } else {
+    ed.setSelectionRange(ed.value.length, ed.value.length);
+  }
+
+  ed.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      close(false);
+    } else if (e.key === 'Tab' && cfg.walk) {
+      e.preventDefault();
+      close(true);
+      const dir = e.shiftKey ? -1 : 1;
+      setTimeout(() => { cfg.walk(dir); }, 0);
+    } else if (e.key === 'Enter' && (!cfg.multiline || e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      close(true);
+      if (cfg.walk && !cfg.multiline) setTimeout(() => { cfg.walk('down'); }, 0);
+    }
+  });
+  if (ed.tagName === 'TEXTAREA') ed.addEventListener('input', () => growTextarea(ed, 0));   // W9：fitEditorLive 退役
+  ed.addEventListener('blur', () => close(true));
+}
+
+// 编辑面装饰（F2-W7 外提）：✦ AI 挂件 + 预设条（一键落值）；close/base 由 openEditor 传入
+function decorateEditor(host, ed, cfg, close, base) {
   if (cfg.aiOpen) {
     const wand = document.createElement('span');
     wand.className = 'ai-wand';
@@ -159,50 +208,15 @@ function openEditor(host, cfg, seed) {
       strip.appendChild(b);
     });
     host.appendChild(strip);
-    // 兜底翻转：表底行时条悬出 .table-wrap（overflow 纵裁不可点）→ 翻到格子上方
+    // 兜底翻转（F2-P5 单点）：表底行时条悬出 .table-wrap（overflow 纵裁不可点）→ 翻到格子上方
     const wrapEl = host.closest ? host.closest('.table-wrap') : null;
     if (wrapEl) {
       const wr = wrapEl.getBoundingClientRect();
-      const hr = host.getBoundingClientRect();
-      if (hr.bottom + strip.offsetHeight + 6 > wr.bottom + 1) strip.classList.add('above');
+      const res = placeFlip(host.getBoundingClientRect(), 0, strip.offsetHeight,
+        { gapBelow: 6, pad: 0, maxBottom: wr.bottom + 1 });
+      if (res.flipped) strip.classList.add('above');
     }
   }
-  fitEditorOpen(ed, host);
-  ed.focus();
-  if (ed.tagName === 'INPUT') {
-    if (seed != null) ed.setSelectionRange(ed.value.length, ed.value.length);
-    else ed.select();
-  } else {
-    ed.setSelectionRange(ed.value.length, ed.value.length);
-  }
-
-  let closed = false;
-  const close = (commit) => {
-    if (closed) return;
-    closed = true;
-    const nv = ed.value;
-    host.classList.remove('editing');
-    // F2-W10：提交路径由 save() 乐观落定重画（先按旧值绘一遍是纯浪费）；取消 / 无变化才就地重画
-    if (commit && nv !== base) save(cfg, base, nv);
-    else cfg.renderCell();
-  };
-  ed.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      close(false);
-    } else if (e.key === 'Tab' && cfg.walk) {
-      e.preventDefault();
-      close(true);
-      const dir = e.shiftKey ? -1 : 1;
-      setTimeout(() => { cfg.walk(dir); }, 0);
-    } else if (e.key === 'Enter' && (!cfg.multiline || e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      close(true);
-      if (cfg.walk && !cfg.multiline) setTimeout(() => { cfg.walk('down'); }, 0);
-    }
-  });
-  if (ed.tagName === 'TEXTAREA') ed.addEventListener('input', () => fitEditorLive(ed));
-  ed.addEventListener('blur', () => close(true));
 }
 
 // 保存（F2-P1 收编）：乐观落定 → 写口 → 落定单点；失败整体回滚 + 报错。
@@ -236,7 +250,7 @@ function rollback(cfg, oldV) {
   cfg.renderCell();
 }
 
-// 打开时：贴合格子现有高度（不触发强制回流、不推挤下方行）；下一帧校正防裁切
+// 打开时：贴合格子现有高度（首帧贴格；随后交 growTextarea 统一自增长——W9）
 function fitEditorOpen(ed, host) {
   if (ed.tagName !== 'TEXTAREA') return;
   const cs = getComputedStyle(host);
@@ -245,12 +259,6 @@ function fitEditorOpen(ed, host) {
   requestAnimationFrame(() => {
     if (ed.isConnected && ed.scrollHeight > ed.clientHeight + 1) ed.style.height = ed.scrollHeight + 'px';
   });
-}
-
-// 输入中：按内容自动长高（共享工具；rAF 合并）
-function fitEditorLive(ed) {
-  if (ed.tagName !== 'TEXTAREA') return;
-  growTextarea(ed, 0);
 }
 
 // ── 摄影机复合控件 ──
@@ -274,7 +282,7 @@ export function parseCam(raw) {
 
 const NONE = '（无）';
 
-// cfg: { id, getCam() -> {raw, focal, dof}, setCam(field, v), renderCell(), camOptions() -> {tiers, lens} }
+// cfg: { id, getCam() -> {raw, focal, dof}, setCam(field, v), renderCell(), camOptions() -> {tiers, lens}, dbl?, refreshSiblings? }
 export function attachCamEditor(host, cfg) {
   host.classList.add('editable');
   if (!host.title) host.title = cfg.dbl ? '双击编辑（景别 / 焦段）' : '点击编辑（景别 / 焦段）';
@@ -297,20 +305,22 @@ function openCamForm(host, cfg) {
   const cam = cfg.getCam();
   const opts = cfg.camOptions();
   const p = parseCam(cam.raw);
-  let v1 = p.t1 || (opts.tiers[0] || '');
-  let v2 = p.t2 == null ? NONE : p.t2;
-  let v3 = (p.lens || cam.focal || '') || NONE;
+  const st = {                                       // 槽位状态（F2-W7：提交与回滚共用一份）
+    v1: p.t1 || (opts.tiers[0] || ''),
+    v2: p.t2 == null ? NONE : p.t2,
+    v3: (p.lens || cam.focal || '') || NONE,
+  };
 
   const wrap = document.createElement('div');
   wrap.className = 'cam-editor';
-
+  const slots = [];
   // 槽位：点击 → 浮动菜单（一次点击直达列表；拾取后就地更新并落库，表单保持打开）
-  const mkSlot = (get, set, options) => {
+  const mkSlot = (key, options) => {
     const slot = document.createElement('div');
     slot.className = 'cam-slot';
     const txt = document.createElement('span');
     txt.className = 'cam-slot-text';
-    txt.textContent = get();
+    txt.textContent = st[key];
     const car = document.createElement('span');
     car.className = 'cam-slot-car';
     car.textContent = '▾';
@@ -318,25 +328,34 @@ function openCamForm(host, cfg) {
     slot.appendChild(car);
     slot.addEventListener('click', (e) => {
       e.stopPropagation();
-      const items = options().map((o) => ({ key: o, label: o, current: o === get() }));
+      const items = optItems(options(), st[key]);
       openMenu(slot, items, (v) => {
-        if (v !== get()) {
-          set(v);
-          txt.textContent = v;
-          commit();
-        }
+        if (v !== st[key]) st[key] = v;
+        txt.textContent = v;
+        commit();
       });
     });
+    slots.push({ key: key, txt: txt });
     return slot;
   };
 
-  wrap.appendChild(mkSlot(() => v1, (v) => { v1 = v; }, () => opts.tiers));
-  wrap.appendChild(mkSlot(() => v2, (v) => { v2 = v; }, () => [NONE].concat(opts.tiers)));
-  wrap.appendChild(mkSlot(() => v3, (v) => { v3 = v; }, () => [NONE].concat(opts.lens)));
+  wrap.appendChild(mkSlot('v1', () => opts.tiers));
+  wrap.appendChild(mkSlot('v2', () => [NONE].concat(opts.tiers)));
+  wrap.appendChild(mkSlot('v3', () => [NONE].concat(opts.lens)));
 
   host.classList.add('editing');
   host.textContent = '';
   host.appendChild(wrap);
+
+  // 失败回滚槽文本（F2-B4）：读模型真值 → 回填状态与三个槽位
+  const resetSlots = () => {
+    const c2 = cfg.getCam();
+    const p2 = parseCam(c2.raw);
+    st.v1 = p2.t1 || (opts.tiers[0] || '');
+    st.v2 = p2.t2 == null ? NONE : p2.t2;
+    st.v3 = (p2.lens || c2.focal || '') || NONE;
+    for (const sl of slots) sl.txt.textContent = st[sl.key];
+  };
 
   let closed = false;
   const close = () => {
@@ -345,54 +364,45 @@ function openCamForm(host, cfg) {
     closeMenu();
     host.classList.remove('editing');
     cfg.renderCell();
-    document.removeEventListener('mousedown', onOutside, true);
-    document.removeEventListener('keydown', onEsc, true);
+    cleanup();
   };
-  const onOutside = (e) => {
-    const t = e.target;
-    if (wrap.contains(t)) return;
-    if (isFloatTarget(t)) return;   // 浮卡/菜单内点选不算点外（单点判定，L1）
-    close();
-  };
-  const onEsc = (e) => {
-    if (e.key !== 'Escape') return;
-    if (menuOpen()) return; // 菜单先消费 Esc
-    e.preventDefault();
-    close();
-  };
-  document.addEventListener('mousedown', onOutside, true);
-  document.addEventListener('keydown', onEsc, true);
+  // 点外关闭 + Esc 单点（F2-W23）：菜单优先消费 Esc（优先级规则随单点走）
+  const cleanup = onOutsideClose(wrap, close, { onEsc: () => menuOpen(), floatExempt: true, stopProp: false });
 
-  const commit = async () => {
-    const t1 = v1;
-    const t2 = v2 === NONE ? null : v2;
-    const lens = v3 === NONE ? '' : v3;
-    const newSize = t2 ? (t1 + ' ↓ ' + t2) : t1;
-    const cur = cfg.getCam();
-    const writes = [];
-    if (newSize !== (cur.raw || '')) writes.push(['shot_size', newSize]);
-    if (lens !== (cur.focal || '')) writes.push(['focal', lens]);
-    const pd = parseCam(cur.raw);
-    if (pd.dof && !cur.dof) writes.push(['dof', pd.dof]);
-    if (!writes.length) return;
-    const fields = writes.map((w) => w[0]);
-    const oldVals = {};
-    for (const f of fields) oldVals[f] = f === 'shot_size' ? cur.raw : cur[f];
-    for (const w of writes) cfg.setCam(w[0], w[1]);
+  const commit = () => commitCam(cfg, st, resetSlots);
+}
+
+// 摄影机提交（F2-W7/W8/W12）：比较 → 单次批量写 → 撤销入栈；失败整体回滚（含槽位 B4）
+async function commitCam(cfg, st, resetSlots) {
+  const t1 = st.v1;
+  const t2 = st.v2 === NONE ? null : st.v2;
+  const lens = st.v3 === NONE ? '' : st.v3;
+  const newSize = t2 ? (t1 + ' ↓ ' + t2) : t1;
+  const cur = cfg.getCam();
+  const writes = [];
+  if (newSize !== (cur.raw || '')) writes.push({ field: 'shot_size', value: newSize });
+  if (lens !== (cur.focal || '')) writes.push({ field: 'focal', value: lens });
+  const pd = parseCam(cur.raw);
+  if (pd.dof && !cur.dof) writes.push({ field: 'dof', value: pd.dof });
+  if (!writes.length) return;
+  const oldVals = {};
+  for (const w of writes) oldVals[w.field] = w.field === 'shot_size' ? cur.raw : cur[w.field];
+  for (const w of writes) cfg.setCam(w.field, w.value);
+  if (cfg.refreshSiblings) cfg.refreshSiblings();
+  try {
+    await batchUpdate(writes.map((w) => ({ table: 'shots', id: cfg.id, field: w.field, value: w.value })));
+    recordUndo({
+      type: 'custom', label: '摄影机',
+      undo: async () => {
+        await batchUpdate(writes.map((w) => ({ table: 'shots', id: cfg.id, field: w.field,
+          value: oldVals[w.field] == null ? '' : oldVals[w.field] })));
+      },
+    });
+    if (writes.some((w) => w.field === 'shot_size')) notifyRowsChanged('shots', 'shot_size', cfg.id);
+  } catch (err) {
+    for (const w of writes) cfg.setCam(w.field, oldVals[w.field]);
     if (cfg.refreshSiblings) cfg.refreshSiblings();
-    try {
-      for (const w of writes) await api.update('shots', cfg.id, w[0], w[1]);
-      recordUndo({
-        type: 'custom', label: '摄影机',
-        undo: async () => {
-          for (const f of fields) await api.update('shots', cfg.id, f, oldVals[f] == null ? '' : oldVals[f]);
-        },
-      });
-      if (fields.indexOf('shot_size') !== -1) notifyRowsChanged('shots', 'shot_size', cfg.id);
-    } catch (err) {
-      for (const f of fields) cfg.setCam(f, oldVals[f]);
-      if (cfg.refreshSiblings) cfg.refreshSiblings();
-      toast('保存失败：' + err.message, 'err');
-    }
-  };
+    if (resetSlots) resetSlots();
+    toast('保存失败：' + err.message, 'err');
+  }
 }

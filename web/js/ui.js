@@ -141,6 +141,62 @@ export function isTypingTarget(t, opts) {
   return tag === 'SELECT' && !!(opts && opts.select);
 }
 
+// 浮层翻转定位单点（F2-P5）：优先锚点下方，越界翻上方；返回 {x, y, flipped}。
+// gapBelow/gapAbove＝下/上间距；maxBottom＝夹取下边界（默认视口底）；pad 边缘留白。
+export function placeFlip(anchorRect, boxW, boxH, opts) {
+  const o = opts || {};
+  const gapBelow = o.gapBelow == null ? 4 : o.gapBelow;
+  const gapAbove = o.gapAbove == null ? 4 : o.gapAbove;
+  const pad = o.pad == null ? 8 : o.pad;
+  const vw = o.vw || window.innerWidth;
+  const vh = o.vh || window.innerHeight;
+  const maxBottom = o.maxBottom == null ? vh : o.maxBottom;
+  const padX = o.padX == null ? pad : o.padX;
+  let x = anchorRect.left;
+  let y = anchorRect.bottom + gapBelow;
+  let flipped = false;
+  if (y + boxH > maxBottom - pad) {
+    y = Math.max(pad, anchorRect.top - boxH - gapAbove);
+    flipped = true;
+  }
+  x = Math.max(padX, Math.min(x, vw - boxW - padX));
+  return { x: x, y: y, flipped: flipped };
+}
+
+// 点外关闭 + Esc 单点（F2-W23）：浮层根 el；返回 cleanup。
+// opts：onEsc 返回 true 则让位（如「菜单优先」优先级）；keepFocus＝内部 mousedown preventDefault；
+// closeOnScroll / closeOnResize＝附加收起条件；floatExempt＝浮层内点击不算点外；stopProp 默认 true。
+export function onOutsideClose(el, onClose, opts) {
+  const o = opts || {};
+  const onDown = (e) => {
+    if (el.contains(e.target)) {
+      if (o.keepFocus) e.preventDefault();
+      return;
+    }
+    if (o.floatExempt && isFloatTarget(e.target)) return;
+    onClose('down');
+  };
+  const onKey = (e) => {
+    if (e.key !== 'Escape') return;
+    if (o.onEsc && o.onEsc()) return;      // 让位（菜单优先等规则随单点）
+    e.preventDefault();
+    if (o.stopProp !== false) e.stopPropagation();
+    onClose('esc');
+  };
+  const onScroll = o.closeOnScroll ? ((e) => { if (!el.contains(e.target)) onClose('scroll'); }) : null;
+  const onResize = o.closeOnResize ? (() => onClose('resize')) : null;
+  document.addEventListener('mousedown', onDown, true);
+  document.addEventListener('keydown', onKey, true);
+  if (onScroll) document.addEventListener('scroll', onScroll, true);
+  if (onResize) window.addEventListener('resize', onResize);
+  return function cleanup() {
+    document.removeEventListener('mousedown', onDown, true);
+    document.removeEventListener('keydown', onKey, true);
+    if (onScroll) document.removeEventListener('scroll', onScroll, true);
+    if (onResize) window.removeEventListener('resize', onResize);
+  };
+}
+
 
 // ── M5f：滚轮护栏 —— 面板 / 块库 / 菜单范围内，光标下没有任何「可消费本方向滚轮」的
 //    滚动层时吞掉滚轮事件，防止滚动链穿透到分镜表（实测三种泄漏：非滚动区链滚 /

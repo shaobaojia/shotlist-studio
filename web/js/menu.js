@@ -1,6 +1,7 @@
 // 浮动菜单组件（M2-3）：单选下拉 / 右键菜单共用。
 // 不依赖原生 select：一次点击即出列表；拾取后由回调处理（表单不因弹层交互被误关）。
 // 交互：↑↓ 移动高亮 / Enter 拾取 / Esc 关闭 / 点外关闭 / 滚动或 resize 关闭。
+import { placeFlip, onOutsideClose } from './ui.js';
 let cur = null;
 
 export function menuOpen() {
@@ -15,12 +16,20 @@ export function closeMenu() {
   if (!cur) return;
   const c = cur;
   cur = null;
-  document.removeEventListener('mousedown', c.onDoc, true);
   document.removeEventListener('keydown', c.onKey, true);
-  document.removeEventListener('scroll', c.onScroll, true);
-  window.removeEventListener('resize', c.onResize);
+  c.cleanup();
   c.el.remove();
   if (c.onClosed) c.onClosed();
+}
+
+// 条目适配单点（F2-P5）：string[] 或 {key,label}[] → 菜单条目（current 标记；captions 补标签）
+export function optItems(list, curKey, opts) {
+  const captions = (opts && opts.captions) || null;
+  return list.map((it) => {
+    const o = typeof it === 'string' ? { key: it } : it;
+    const label = o.label != null ? o.label : (captions ? captions(o.key) : o.key);
+    return { key: o.key, label: label, current: o.key === curKey };
+  });
 }
 
 // anchor: Element | {x, y}；items: [{key,label,current?,disabled?} | {sep:true}]
@@ -66,24 +75,19 @@ export function openMenu(anchor, items, onPick, opts) {
   const curIdx = nav.findIndex((d) => d.classList.contains('current'));
   if (curIdx !== -1) setHl(curIdx);
 
-  // 定位：锚点下方，越界翻转 / 夹取在视口内
+  // 定位（F2-P5 单点）：锚点下方，越界翻转 / 夹取在视口内
   const mw = el.offsetWidth;
   const mh = el.offsetHeight;
-  let x;
-  let y;
+  let pos;
   if (anchor && anchor.nodeType === 1) {
-    const r = anchor.getBoundingClientRect();
-    x = r.left;
-    y = r.bottom + 4;
-    if (y + mh > window.innerHeight - 8) y = Math.max(8, r.top - mh - 4);
+    pos = placeFlip(anchor.getBoundingClientRect(), mw, mh);
   } else {
-    x = (anchor && anchor.x) || 0;
-    y = (anchor && anchor.y) || 0;
-    if (y + mh > window.innerHeight - 8) y = Math.max(8, y - mh - 6);
+    const px = (anchor && anchor.x) || 0;
+    const py = (anchor && anchor.y) || 0;
+    pos = placeFlip({ left: px, right: px, top: py, bottom: py }, mw, mh, { gapBelow: 0, gapAbove: 6 });
   }
-  x = Math.max(8, Math.min(x, window.innerWidth - mw - 8));
-  el.style.left = x + 'px';
-  el.style.top = y + 'px';
+  el.style.left = pos.x + 'px';
+  el.style.top = pos.y + 'px';
   el.style.visibility = '';
 
   const pick = (d) => {
@@ -100,19 +104,8 @@ export function openMenu(anchor, items, onPick, opts) {
     });
   }
 
-  const onDoc = (e) => {
-    if (el.contains(e.target)) {
-      e.preventDefault(); // 保住焦点：编辑器不失焦、表单不因焦点变化被关
-      return;
-    }
-    closeMenu();
-  };
+  // 点外关闭 + Esc 由单点托管（F2-W23）；本处仅剩键盘导航
   const onKey = (e) => {
-    if (e.key === 'Escape') {
-      e.stopPropagation();
-      closeMenu();
-      return;
-    }
     if (!nav.length) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
@@ -125,14 +118,7 @@ export function openMenu(anchor, items, onPick, opts) {
       pick(nav[hi]);
     }
   };
-  const onScroll = (e) => {
-    if (!el.contains(e.target)) closeMenu();
-  };
-  const onResize = () => closeMenu();
-
-  document.addEventListener('mousedown', onDoc, true);
+  const cleanup = onOutsideClose(el, closeMenu, { keepFocus: true, closeOnScroll: true, closeOnResize: true });
   document.addEventListener('keydown', onKey, true);
-  document.addEventListener('scroll', onScroll, true);
-  window.addEventListener('resize', onResize);
-  cur = { el, onDoc, onKey, onScroll, onResize, onClosed: o.onClosed };
+  cur = { el, onKey, cleanup, onClosed: o.onClosed };
 }

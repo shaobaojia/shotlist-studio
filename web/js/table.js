@@ -3,7 +3,7 @@
 import { state, fieldOf, groupsById, fieldsOf } from './state.js';
 import { el, fmt, toast, flashIntoView } from './ui.js';
 import { cellContent } from './cells.js';
-import { attachEditable, attachCamEditor, parseCam, recordUndo } from './edit.js';
+import { attachEditable, attachCamEditor, parseCam, recordUndo, batchUpdate } from './edit.js';
 import { api } from './api.js';
 import { buildPromptBox, openPromptDrawer, paintPromptCell } from './hotbox.js';
 import { isAiField, aiOpenFor } from './aiwrite.js';
@@ -232,7 +232,10 @@ function renderShotField(td, s, f) {
 
 function refreshDetailValue(s, key, root) {
   (root || document).querySelectorAll('tr.detail[data-for="' + s.id + '"] .kv-value[data-field="' + key + '"]')
-    .forEach((v) => { v.textContent = fmt(s[key]); });
+    .forEach((v) => {
+      if (v.querySelector('.cell-editor, .cam-editor')) return;   // 编辑面守卫（同 refreshShotCell）
+      v.textContent = fmt(s[key]);
+    });
 }
 
 function camOptions() {
@@ -266,17 +269,19 @@ function lensSave(s, refresh) {
   return async (oldV, newV) => {
     const p = parseCam(s.shot_size);
     const oldValues = { shot_size: s.shot_size, focal: s.focal };
-    const writes = [['focal', newV]];
-    if (p.lens) writes.push(['shot_size', p.t1 + (p.t2 ? ' ↓ ' + p.t2 : '')]);
-    for (const w of writes) s[w[0]] = w[1];
+    const writes = [{ field: 'focal', value: newV }];
+    if (p.lens) writes.push({ field: 'shot_size', value: p.t1 + (p.t2 ? ' ↓ ' + p.t2 : '') });
+    for (const w of writes) s[w.field] = w.value;
     refresh();
     try {
-      for (const w of writes) await api.update('shots', s.id, w[0], w[1]);
+      await batchUpdate(writes.map((w) => ({ table: 'shots', id: s.id, field: w.field, value: w.value })));
       recordUndo({
         type: 'custom', label: '焦段',
         undo: async () => {
-          await api.update('shots', s.id, 'shot_size', oldValues.shot_size == null ? '' : oldValues.shot_size);
-          await api.update('shots', s.id, 'focal', oldValues.focal == null ? '' : oldValues.focal);
+          await batchUpdate([
+            { table: 'shots', id: s.id, field: 'shot_size', value: oldValues.shot_size == null ? '' : oldValues.shot_size },
+            { table: 'shots', id: s.id, field: 'focal', value: oldValues.focal == null ? '' : oldValues.focal },
+          ]);
         },
       });
     } catch (err) {
@@ -530,6 +535,10 @@ export function refreshShotCell(s, key, root) {
   const f = fieldOf(key);
   if (!f) return;
   (root || document).querySelectorAll('tr.shot[data-id="' + s.id + '"] td[data-field="' + key + '"]')
-    .forEach((td) => { renderShotField(td, s, f); });
+    .forEach((td) => {
+      // 编辑面守卫（F2-A4 实测咬出）：正在编辑的格子不拍——否则相机拾取/活体刷新会把表单连同 DOM 重建掉
+      if (td.querySelector('.cell-editor, .cam-editor')) return;
+      renderShotField(td, s, f);
+    });
   refreshDetailValue(s, key, root);
 }
