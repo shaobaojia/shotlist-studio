@@ -6,7 +6,7 @@ import { el, toast, growTextarea, durText, isFloatTarget, isTypingTarget, flashI
 import { groupsById } from './state.js';
 import { openMenu, menuEl } from './menu.js';
 import { recordUndo, undo as globalUndo } from './edit.js';
-import { storeAsBlock, byPosition } from './blocks.js';
+import { storeAsBlock, byPosition, PLACEHOLDERS } from './blocks.js';
 import { initBlockCard, cardLayout, cardSetActive, cardSetInsert } from './blockcard.js';
 import { writeClipboard, copyText } from './clipboard.js';
 import { aiTextMenu } from './aiwrite.js';
@@ -40,7 +40,7 @@ function substitute(text, s, data) {
   if (t.indexOf('{') === -1) return t;
   const clean = (v) => String(v == null ? '' : v).replace(/★+/g, '').replace(/\s+/g, ' ').trim();
   const dur = durText(s.duration);
-  const map = {
+  const values = {
     '镜号': clean(s.shot_no),
     '景别': clean(s.shot_size),
     '焦段': clean(s.focal),
@@ -51,6 +51,8 @@ function substitute(text, s, data) {
     '音频': String(s.audio == null ? '' : s.audio).trim(),
     '场景': data && data.scene ? String(data.scene.title || '') : '',
   };
+  const map = {};
+  for (const k of PLACEHOLDERS) map[k] = Object.prototype.hasOwnProperty.call(values, k) ? values[k] : '';   // 键表单点（F3-W7）：新占位符先入 PLACEHOLDERS
   return t.replace(/\{([^{}]+)\}/g, (m, k) => (Object.prototype.hasOwnProperty.call(map, k) ? map[k] : m));
 }
 

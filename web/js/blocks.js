@@ -1,7 +1,7 @@
 // 块库（M3）：积木块数据缓存 / 热盒（块库条：搜索·分类筛选·chips·套件暂存）。
 // 关键口径「插入即固化」：插入的是文字副本，之后改库不影响已写入的提示词。
 import { api } from './api.js';
-import { el, toast } from './ui.js';
+import { el, toast, silent } from './ui.js';
 import { openMenu } from './menu.js';
 import { recordUndo } from './edit.js';
 
@@ -9,20 +9,26 @@ import { recordUndo } from './edit.js';
 export const PLACEHOLDERS = ['镜号', '景别', '焦段', '运镜', '机位', '时长', '台词', '音频', '场景'];
 
 // 位置序单点（分类 / 块 / 组通用）：先 position 后 id
-export function byPosition(a, b2) {
-  return (a.position || 0) - (b2.position || 0) || a.id - b2.id;
+export function byPosition(a, b) {
+  return (a.position || 0) - (b.position || 0) || a.id - b.id;
 }
 
 let cache = null;              // { categories:[], blocks:[] }
 const listeners = [];
 let shelfDragId = null;        // 热盒条拖拽中的块 id（块↔块换位）
 let inflight = null;           // 载入中的请求（并发去重）
+let needRefresh = false;       // 上笔写后重取失败（F3-B3）：显示留旧，下次读取补拉
 
 export async function ensureBlocks(force) {
-  if (inflight) return inflight;                    // 进行中：复用同一请求（含 force 在途时）
-  if (cache && !force) return cache;
+  if (inflight) {
+    if (!force) return inflight;                    // 非 force：复用同一在途请求（并发去重）
+    await inflight.catch(() => {});                 // force（F3-B4）：先等在途落地——绝不复用可能早于本次写的快照
+    if (inflight) return inflight;                  // 等待期间被并行调用续上了新请求：直接复用它
+  }
+  if (cache && !force && !needRefresh) return cache;
   inflight = api.blocks().then((res) => {
     cache = { categories: res.categories || [], blocks: res.blocks || [] };
+    needRefresh = false;
     return cache;
   }).finally(() => { inflight = null; });
   return inflight;
@@ -31,9 +37,14 @@ export async function ensureBlocks(force) {
 export function blocksData() { return cache; }
 
 export function catName(catId) {
-  if (catId == null) return '未分类';
-  const c = (cache ? cache.categories : []).find((x) => x.id === catId);
+  const c = catOf(catId);
   return c ? c.name : '未分类';
+}
+
+// 分类对象单点（F3-P6①）：id → 分类对象（未分类 / 悬空 id → null）
+export function catOf(catId) {
+  if (catId == null) return null;
+  return (cache ? cache.categories : []).find((x) => x.id === catId) || null;
 }
 
 // 搜索口径单点（正文 + 分类名；管理器 / 热盒条共用）
@@ -91,7 +102,10 @@ export async function deleteBlockWithUndo(b2, onAfter) {
       type: 'custom', label: '删除块',
       undo: async () => {
         const res = await blockOp({ action: 'create', text: b2.text, category_id: b2.category_id });
-        if (b2.pinned && res.block) await blockOp({ action: 'pin', id: res.block.id, pinned: true });
+        if (!res || !res.block) return;
+        if (b2.pinned) await blockOp({ action: 'pin', id: res.block.id, pinned: true });
+        // 还原原位置（F3-B2）：create 落在分类末尾，补一次定位（服务端按去掉自身后的清单夹取）
+        await blockOp({ action: 'update', id: res.block.id, category_id: b2.category_id, position: b2.position == null ? 0 : b2.position });
       },
     });
     if (onAfter) onAfter();
@@ -102,13 +116,10 @@ export async function deleteBlockWithUndo(b2, onAfter) {
 
 // 换分类菜单（选中即走 moveBlockTo，落目标分类末尾；撤销统一为「块移动」）
 export function moveMenu(anchor, b2) {
-  const d = blocksData() || { categories: [] };
-  const items = d.categories.map((c) => ({ key: String(c.id), label: c.name, current: b2.category_id === c.id }));
-  items.push({ sep: true }, { key: 'none', label: '（未分类）', current: b2.category_id == null });
-  openMenu(anchor, items, (k) => {
+  openMenu(anchor, catMenuItems(b2.category_id), (k) => {
     const cid = k === 'none' ? null : Number(k);
     if (cid === b2.category_id) return;
-    moveBlockTo(b2, cid, siblingList(cid).filter((x) => x.id !== b2.id).length);
+    moveBlockTo(b2, cid, dropIndex(cid, b2.id, null));
   });
 }
 
@@ -122,9 +133,15 @@ export function onBlocksChange(fn) {
 }
 
 export async function blockOp(payload) {
-  const res = await api.blockOp(payload);
-  await ensureBlocks(true);
-  for (const fn of listeners.slice()) { try { fn(); } catch (e) { /* ignore */ } }
+  const res = await api.blockOp(payload);           // 写成功即事实成立（F3-B3）——重取失败不再把写报成失败
+  try {
+    await ensureBlocks(true);
+  } catch (err) {
+    needRefresh = true;                             // 缓存可能过期：显示留旧不空窗，下次读取补拉
+    silent(err, 'blocks-refresh');
+    toast('块库刷新失败（显示可能略旧）');
+  }
+  for (const fn of listeners.slice()) { try { fn(); } catch (e) { silent(e, 'blocks-subscriber'); } }
   return res;
 }
 
@@ -134,12 +151,13 @@ export function sortedBlocks() {
   const order = {};
   cats.forEach((c, i) => { order[c.id] = i; });
   const arr = (cache ? cache.blocks : []).slice();
+  const LAST = Number.MAX_SAFE_INTEGER;               // 殿后哨兵（F3-W5）：悬空分类 id 原先与 id 比较出 NaN
   arr.sort((a, b) => {
     const pa = a.pinned ? 1 : 0;
-    const pb2 = b.pinned ? 1 : 0;
-    if (pa !== pb2) return pb2 - pa;
-    const oa = a.category_id == null ? 9999 : order[a.category_id];
-    const ob = b.category_id == null ? 9999 : order[b.category_id];
+    const pb = b.pinned ? 1 : 0;
+    if (pa !== pb) return pb - pa;
+    const oa = a.category_id == null || order[a.category_id] == null ? LAST : order[a.category_id];
+    const ob = b.category_id == null || order[b.category_id] == null ? LAST : order[b.category_id];
     if (oa !== ob) return oa - ob;
     return byPosition(a, b);
   });
@@ -151,8 +169,59 @@ function chipLabel(text) {
   return t.length > 18 ? t.slice(0, 18) + '…' : (t || '（空）');
 }
 
-function findBlock(id) {
+export function findBlock(id) {
   return (cache ? cache.blocks : []).find((b) => b.id === id) || null;
+}
+
+// 折叠键单点（F3-P6③）：分类 id → 折叠集键（未分类 = 'none'）
+export function foldKeyOf(catId) {
+  return catId == null ? 'none' : 'c' + catId;
+}
+
+// 换分类菜单条目单点（F3-P6②）：由分类结构派生（currentCid 标当前项）
+export function catMenuItems(currentCid) {
+  const items = (cache ? cache.categories : []).map((c) => ({ key: String(c.id), label: c.name, current: c.id === currentCid }));
+  items.push({ sep: true }, { key: 'none', label: '（未分类）', current: currentCid == null });
+  return items;
+}
+
+// 可见块单点（F3-P6⑥）：展示序（置顶最前 → 分类序 → 块序）＋筛选（置顶 / 搜索词）
+export function visibleBlocks(opts) {
+  const o = opts || {};
+  let arr = sortedBlocks();
+  if (o.pinnedOnly) arr = arr.filter((x) => x.pinned);
+  if (o.query) arr = arr.filter((x) => blockMatch(x, o.query));
+  return arr;
+}
+
+// 分段单点（F3-P6⑤）：展示序 arr → [{key, cat, cid, name, items}]；showEmpty＝含空分类（含「未分类」）
+export function sectionsOf(arr, opts) {
+  const o = opts || {};
+  const d = cache || { categories: [] };
+  const buckets = new Map();
+  for (const b of arr) {
+    const k = b.category_id == null ? 'none' : String(b.category_id);
+    if (!buckets.has(k)) buckets.set(k, []);
+    buckets.get(k).push(b);
+  }
+  const secs = [];
+  for (const c of d.categories) {
+    const items = buckets.get(String(c.id)) || [];
+    if (!items.length && !o.showEmpty) continue;
+    secs.push({ key: foldKeyOf(c.id), cat: c, cid: c.id, name: c.name, items: items });
+  }
+  const none = buckets.get('none') || [];
+  if (none.length || o.showEmpty) secs.push({ key: 'none', cat: null, cid: null, name: '未分类', items: none });
+  return secs;
+}
+
+// 落点索引单点（F3-W6④）：去掉拖拽源后的目标清单里，插到 target 前/后（target 缺省或不在列＝末尾）
+export function dropIndex(catId, srcId, targetId, below) {
+  const list = siblingList(catId).filter((x) => x.id !== srcId);
+  if (targetId == null) return list.length;
+  const i = list.findIndex((x) => x.id === targetId);
+  if (i === -1) return list.length;
+  return below ? i + 1 : i;
 }
 
 // ── 热盒（块库条）：host 里渲染 [搜索 | 分类筛选 | 管理] + [套件条] + [块 chips] ──
