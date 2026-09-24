@@ -1,9 +1,23 @@
 // 浮层抽屉基件（M5 批3「右缘抽屉体系」）
 // 形态基准 = 旧版提示词面板：浮动卡片 + 标题栏拖拽 + 八向缩放 + 贴附（右/下）+ 钉住 + 位置尺寸记忆。
 // 按钮行由使用方按序装配（panel-btn 统一样式：红底白字 11px 中文全词）。
-import { el, lsGet, lsSet, clamp, readVarPx } from './ui.js';
+import { el, lsGet, lsSet, clamp, readVarPx, trackDrag, onResizeCoalesced, flashClass } from './ui.js';
 
 const MIN_W = 320, MIN_H = 200;
+// 屏内夹取与停靠常量单点（F3-W23：原先六处手抄同一组数）
+const EDGE = { left: 120, top: 0, bottom: 60, defGap: 18, defTop: 44 };
+const MAX_RATIO = 0.9, DEF_H_RATIO = 0.72;
+const DOCK = {
+  right: { w: 500, gap: 8, bottomGap: 12 },
+  bottom: { inset: 40, gap: 8, vhRatio: 0.45 },
+};
+function clampToScreen(left, top, w, h) {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  return {
+    left: clamp(left, EDGE.left - w, vw - EDGE.left),
+    top: clamp(top, EDGE.top, Math.max(0, vh - EDGE.bottom)),
+  };
+}
 const LS = (id) => 'studio.drawer.' + id;
 
 // 吸顶区上界：顶栏高度读 CSS 变量（F1-B6：与顶栏实测同一来源；旧 .topbar 选择器已不存在）
@@ -39,9 +53,17 @@ export function createDrawer(opts) {
   }
   document.body.appendChild(frame);
 
+  // 浮动落点四连写（F3-W23）：左/上 + 右/底解锁
+  function freeRect(left, top) {
+    frame.style.left = Math.round(left) + 'px';
+    frame.style.top = Math.round(top) + 'px';
+    frame.style.right = 'auto';
+    frame.style.bottom = 'auto';
+  }
+
   // ── 记忆 ──
   function saveState() {
-    if (frame.hidden) return;
+    if (!st.open) return;                        // 落盘意图显式挂开合态（F3-W24②：原先藏在 frame.hidden 里）
     const r = frame.getBoundingClientRect();
     lsSet(LS(id), {
       dock: st.dock,
@@ -53,56 +75,51 @@ export function createDrawer(opts) {
   function applyRect() {
     const m = lsGet(LS(id), null) || {};
     const vw = window.innerWidth, vh = window.innerHeight;
-    const w = clamp(Number(m.width) || opts.width || 500, MIN_W, Math.round(vw * 0.9));
-    const h = clamp(Number(m.height) || opts.height || Math.round(vh * 0.72), MIN_H, Math.round(vh * 0.9));
-    if (m.dock === 'right' || m.dock === 'bottom') { st.dock = m.dock; applyDock(m.dock, true); return; }
+    const w = clamp(Number(m.width) || opts.width || 500, MIN_W, Math.round(vw * MAX_RATIO));
+    const h = clamp(Number(m.height) || Math.round(vh * DEF_H_RATIO), MIN_H, Math.round(vh * MAX_RATIO));
+    if (m.dock === 'right' || m.dock === 'bottom') { st.dock = m.dock; applyDockGeom(m.dock); return; }
     st.dock = null;
-    let left = Number.isFinite(m.left) ? m.left : (vw - w - 18);
-    let top = Number.isFinite(m.top) ? m.top : headTop() + 44;
-    left = clamp(left, 120 - w, vw - 120);
-    top = clamp(top, 0, Math.max(0, vh - 60));
+    const left = Number.isFinite(m.left) ? m.left : (vw - w - EDGE.defGap);
+    const top = Number.isFinite(m.top) ? m.top : headTop() + EDGE.defTop;
+    const p = clampToScreen(left, top, w, h);
     frame.style.width = w + 'px';
     frame.style.height = h + 'px';
-    frame.style.left = Math.round(left) + 'px';
-    frame.style.top = Math.round(top) + 'px';
-    frame.style.right = 'auto';
-    frame.style.bottom = 'auto';
+    freeRect(p.left, p.top);
   }
 
-  // side: 'right' 全高贴右缘（宽 500）· 'bottom' 全宽贴底（高 45vh）
-  function applyDock(side, silent) {
+  // side: 'right' 全高贴右缘 · 'bottom' 全宽贴底（数值见 DOCK 单点）
+  function applyDockGeom(side) {                 // 纯几何（F3-W24①：副作用走 dockTo）
     const vh = window.innerHeight;
-    st.dock = side;
     if (side === 'right') {
       const top = headTop();
-      frame.style.left = 'auto'; frame.style.right = '8px';
+      frame.style.left = 'auto'; frame.style.right = DOCK.right.gap + 'px';
       frame.style.top = top + 'px'; frame.style.bottom = 'auto';
-      frame.style.width = '500px';
-      frame.style.height = Math.max(MIN_H, vh - top - 12) + 'px';
+      frame.style.width = DOCK.right.w + 'px';
+      frame.style.height = Math.max(MIN_H, vh - top - DOCK.right.bottomGap) + 'px';
     } else {
-      frame.style.left = '40px'; frame.style.right = '40px';
-      frame.style.top = 'auto'; frame.style.bottom = '8px';
+      frame.style.left = DOCK.bottom.inset + 'px'; frame.style.right = DOCK.bottom.inset + 'px';
+      frame.style.top = 'auto'; frame.style.bottom = DOCK.bottom.gap + 'px';
       frame.style.width = 'auto';
-      frame.style.height = Math.round(vh * 0.45) + 'px';
+      frame.style.height = Math.round(vh * DOCK.bottom.vhRatio) + 'px';
     }
-    if (!silent) { saveState(); bounce(); }
+  }
+  function dockTo(side) {                        // 几何 + 落盘 + 回弹（按钮通道）
+    st.dock = side;
+    applyDockGeom(side);
+    saveState();
+    bounce();
   }
 
   // 入场动画：一次性 .enter（播完即摘——常驻会导致回弹类摘除时动画重播=「多闪一次」）
   function playIn() {
-    frame.classList.remove('enter', 'snap-bounce');
-    void frame.offsetWidth;
-    frame.classList.add('enter');
     clearTimeout(tIn);
-    tIn = setTimeout(() => frame.classList.remove('enter'), 400);
+    tIn = flashClass(frame, 'enter', 400, { clear: ['snap-bounce'] });   // F3-W25 单点
   }
 
   function bounce() {
-    frame.classList.remove('enter', 'snap-bounce');   // 先清入场类：回弹结束摘类时无动画可回退，防重播
-    void frame.offsetWidth;
-    frame.classList.add('snap-bounce');
+    // 先清入场类（flashClass 内）：回弹结束摘类时无动画可回退，防重播
     clearTimeout(tBn);
-    tBn = setTimeout(() => frame.classList.remove('snap-bounce'), 360);
+    tBn = flashClass(frame, 'snap-bounce', 360, { clear: ['enter'] });
   }
 
   // ── 拖拽（标题栏；按钮不触发）──
@@ -116,23 +133,13 @@ export function createDrawer(opts) {
     frame.style.height = Math.round(r.height) + 'px';
     st.dock = null;
     frame.classList.add('dragging');
-    const move = (ev) => {
-      const vw = window.innerWidth, vh = window.innerHeight;
-      const left = clamp(ev.clientX - ox, 120 - r.width, vw - 120);
-      const top = clamp(ev.clientY - oy, 0, vh - 60);
-      frame.style.left = Math.round(left) + 'px';
-      frame.style.top = Math.round(top) + 'px';
-      frame.style.right = 'auto';
-      frame.style.bottom = 'auto';
-    };
-    const up = () => {
-      document.removeEventListener('mousemove', move, true);
-      document.removeEventListener('mouseup', up, true);
+    trackDrag((ev) => {                            // F3-W27①：三件套单点
+      const p = clampToScreen(ev.clientX - ox, ev.clientY - oy, r.width, r.height);
+      freeRect(p.left, p.top);
+    }, () => {
       frame.classList.remove('dragging');
       saveState();
-    };
-    document.addEventListener('mousemove', move, true);
-    document.addEventListener('mouseup', up, true);
+    });
   });
 
   // ── 缩放 ──
@@ -144,28 +151,19 @@ export function createDrawer(opts) {
     const sx = e.clientX, sy = e.clientY;
     st.dock = null;
     frame.classList.add('dragging');
-    const move = (ev) => {
-      const vw = window.innerWidth, vh = window.innerHeight;
-      const w = clamp(r.width + dx * (ev.clientX - sx), MIN_W, Math.round(vw * 0.9));
-      const h = clamp(r.height + dy * (ev.clientY - sy), MIN_H, Math.round(vh * 0.9));
+    trackDrag((ev) => {                            // F3-W27①
+      const w = clamp(r.width + dx * (ev.clientX - sx), MIN_W, Math.round(window.innerWidth * MAX_RATIO));
+      const h = clamp(r.height + dy * (ev.clientY - sy), MIN_H, Math.round(window.innerHeight * MAX_RATIO));
       let left = r.left, top = r.top;
       if (dx < 0) left = r.left + (r.width - w);
       if (dy < 0) top = r.top + (r.height - h);
       frame.style.width = Math.round(w) + 'px';
       frame.style.height = Math.round(h) + 'px';
-      frame.style.left = Math.round(left) + 'px';
-      frame.style.top = Math.round(top) + 'px';
-      frame.style.right = 'auto';
-      frame.style.bottom = 'auto';
-    };
-    const up = () => {
-      document.removeEventListener('mousemove', move, true);
-      document.removeEventListener('mouseup', up, true);
+      freeRect(left, top);
+    }, () => {
       frame.classList.remove('dragging');
       saveState();
-    };
-    document.addEventListener('mousemove', move, true);
-    document.addEventListener('mouseup', up, true);
+    });
   }
 
   // ── 按钮装配 ──
@@ -197,7 +195,7 @@ export function createDrawer(opts) {
   function addDockButton(side) {
     return addButton(side === 'right' ? '右贴附' : '下贴附', {
       title: side === 'right' ? '贴靠页面右缘（全高）' : '贴靠页面底部（全宽）',
-      onClick: () => applyDock(side),
+      onClick: () => dockTo(side),
     });
   }
 
@@ -224,7 +222,6 @@ export function createDrawer(opts) {
     frame.classList.add('open');
     playIn();
     document.addEventListener('mousedown', onDoc, true);
-    if (opts.onOpen) opts.onOpen();
   }
 
   function close() {
@@ -235,18 +232,19 @@ export function createDrawer(opts) {
     if (pinBtn) pinBtn.classList.remove('pinned');
     frame.classList.remove('open', 'enter', 'snap-bounce');
     frame.hidden = true;
+    clearTimeout(tIn);                               // F3-W25：关掉入场/回弹计时器（原先悬挂，当前无害）
+    clearTimeout(tBn);
     document.removeEventListener('mousedown', onDoc, true);
     if (opts.onClose) opts.onClose();
   }
 
-  // 视口变化：贴附的重新贴，浮动的拉回屏内
-  window.addEventListener('resize', () => {
+  // 视口变化：贴附的重新贴，浮动的拉回屏内（rAF 合并单点：F3-W27③）
+  onResizeCoalesced(() => {
     if (!st.open) return;
-    if (st.dock) { applyDock(st.dock, true); return; }
+    if (st.dock) { applyDockGeom(st.dock); return; }
     const r = frame.getBoundingClientRect();
-    const vw = window.innerWidth, vh = window.innerHeight;
-    frame.style.left = Math.round(clamp(r.left, 120 - r.width, vw - 120)) + 'px';
-    frame.style.top = Math.round(clamp(r.top, 0, Math.max(0, vh - 60))) + 'px';
+    const p = clampToScreen(r.left, r.top, r.width, r.height);
+    freeRect(p.left, p.top);
   });
 
   return {
@@ -256,9 +254,6 @@ export function createDrawer(opts) {
     isPinned: () => st.pinned,
     setTitle: (t) => { title.textContent = t; title.title = t; },
     addButton, addPinButton, addDockButton, addCloseButton,
-    dockRight: () => applyDock('right'),
-    dockBottom: () => applyDock('bottom'),
     getDock: () => st.dock,
-    saveState,
   };
 }

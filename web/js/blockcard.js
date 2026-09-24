@@ -4,7 +4,7 @@
 // 方向随贴附：浮窗、右贴附＝从左边抽（标签在左缘）；下贴附＝从上边抽（标签在上缘）。
 // 只在编辑态出现；宽度 / 高度沿卡缘拖拽可调并记忆；内容＝块库（分类筛选 + 搜索 + 点击插入）。
 // M5d-4：随面板入场后再浮现（防「块库先于面板」）；贴紧时面板去左/上投影（bc-under）。
-import { el, lsGet, lsSet, clamp, silent } from './ui.js';
+import { el, lsGet, lsSet, clamp, silent, trackDrag, flashClass, onResizeCoalesced } from './ui.js';
 import {
   ensureBlocks, blocksData, onBlocksChange, visibleBlocks, sectionsOf,
 } from './blocks.js';
@@ -223,11 +223,8 @@ function layout() {
   applyUnder(up ? 'up' : 'left');
   if (pendShow) {
     pendShow = false;
-    root.classList.remove('bc-appear');
-    void root.offsetWidth;
-    root.classList.add('bc-appear');
     clearTimeout(tAppear);
-    tAppear = setTimeout(() => root.classList.remove('bc-appear'), 280);
+    tAppear = flashClass(root, 'bc-appear', 280);   // F3-W25 单点
   }
   if (switched) root.classList.add('bc-noanim');
   if (!up) {
@@ -261,19 +258,14 @@ function startResize(e) {
   const sx = e.clientX, sy = e.clientY;
   const sw = mem.w, sh = mem.h;
   root.classList.add('bc-noanim');
-  const move = (ev) => {
+  trackDrag((ev) => {                              // F3-W27①：三件套单点
     if (!up) mem.w = clamp(Math.round(sw + (sx - ev.clientX)), MIN_W, MAX_W);
     else mem.h = clamp(Math.round(sh + (sy - ev.clientY)), MIN_H, MAX_H);
     layout();
-  };
-  const done = () => {
-    document.removeEventListener('mousemove', move, true);
-    document.removeEventListener('mouseup', done, true);
+  }, () => {
     root.classList.remove('bc-noanim');
     lsSave();
-  };
-  document.addEventListener('mousemove', move, true);
-  document.addEventListener('mouseup', done, true);
+  });
 }
 
 // ── 对外 ──
@@ -313,7 +305,7 @@ export function initBlockCard(drawer) {
   // 观察者回调 rAF 合并（F3-W20）：每帧至多一次重排
   obs = new MutationObserver(() => scheduleLayout());
   obs.observe(dr.el, { attributes: true });
-  window.addEventListener('resize', scheduleLayout);
+  onResizeCoalesced(layout);                       // F3-W27③：与抽屉共用一帧一次
   layout();
 }
 

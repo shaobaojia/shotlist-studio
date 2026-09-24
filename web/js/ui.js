@@ -42,6 +42,50 @@ export function lsSet(key, v) {
 // 数值夹取单点（F1-W19）
 export function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
+// 一次性动画类单点（F3-W25）：默认「摘类 → 强制回流 → 挂类 → 定时摘」重启动画（防叠加/防重播）；
+// opts.clear＝先清旁类；opts.keepOn＝已在树上时只续定时器（连发不重启、不强制回流）
+export function flashClass(el0, cls, ms, opts) {
+  const o = opts || {};
+  if (o.clear) for (const c of o.clear) el0.classList.remove(c);
+  if (!(o.keepOn && el0.classList.contains(cls))) {
+    el0.classList.remove(cls);
+    void el0.offsetWidth;
+    el0.classList.add(cls);
+  }
+  return setTimeout(() => el0.classList.remove(cls), ms);
+}
+
+// 指针拖拽三件套单点（F3-W27①）：capture 绑定 + 收尾卸绑 + 松键护栏（窗口外松开后裸移自动收工）
+export function trackDrag(onMove, onEnd) {
+  const done = () => {
+    document.removeEventListener('mousemove', move, true);
+    document.removeEventListener('mouseup', done, true);
+    if (onEnd) onEnd();
+  };
+  const move = (ev) => {
+    if (!ev.buttons) { done(); return; }
+    onMove(ev);
+  };
+  document.addEventListener('mousemove', move, true);
+  document.addEventListener('mouseup', done, true);
+}
+
+// 视口 resize rAF 合并单点（F3-W27③）：多个监听者共用，一帧至多一次
+const __resizeCbs = [];
+export function onResizeCoalesced(fn) {
+  __resizeCbs.push(fn);
+  once('resize-coalesced', () => {
+    let raf = 0;
+    window.addEventListener('resize', () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        for (const f of __resizeCbs.slice()) { try { f(); } catch (e) { silent(e, 'resize'); } }
+      });
+    });
+  });
+}
+
 // CSS 变量像素单点（F1-W20）：写＝实测高度回写；读＝取计算值（无则 null）
 export function setVarPx(name, elem) {
   document.documentElement.style.setProperty(name, elem ? Math.round(elem.getBoundingClientRect().height) + 'px' : '0px');

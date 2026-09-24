@@ -1,7 +1,7 @@
 // 挂件带 v2.1（M5k-2）——底部冻结通栏 + 向上浮层。
 // 一条条带三种读法：①竖向高/色＝景别 ②横向宽＝时长（横轴＝时间刻度尺）③情绪曲线叠加（平滑曲线+数据点）。
 // 交互：上沿拖拽＝面板高矮（窗口式）；滚轮＝横向缩放（时间轴式，光标锚定）；中键拖拽＝平移；shift+滚轮＝横滚。
-import { el, toast, durTick, lsGet, lsSet, clamp } from './ui.js';
+import { el, toast, durTick, lsGet, lsSet, clamp, flashClass } from './ui.js';
 import { jumpToShotById } from './filter.js';
 
 const KEY = 'studio.dock';
@@ -283,9 +283,8 @@ export function buildRibbon(data, shots) {
   }
 
   function noanimBurst() {
-    root.classList.add('dk-noanim');
     clearTimeout(_bt);
-    _bt = setTimeout(() => root.classList.remove('dk-noanim'), 240);
+    _bt = flashClass(root, 'dk-noanim', 240, { keepOn: true });   // F3-W25：连发只续时（不重启、不强制回流）
   }
 
   // ── 缩放（滚轮，光标锚定）／平移（中键）／窗口拖拽（上沿）──
