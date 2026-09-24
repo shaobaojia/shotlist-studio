@@ -59,9 +59,21 @@ def block_create(con, text, category_id=None, commit=True):
 
 
 def _place_block(con, b, cid, pos):
-    """把块放进 cid 分类的第 pos 位（None=末尾，越界夹取）；跨类时源分类同步致密。"""
-    tgt = [x["id"] for x in _cat_blocks(con, cid) if x["id"] != b["id"]]
+    """把块放进 cid 分类的第 pos 位（None=末尾，越界夹取）——段感知（F3-L2 (a)）：
+
+    置顶段恒在普通段之前（显示序 ≡ position 序的保证）：① 非置顶块不进置顶段（夹到普通段首）；
+    ② 置顶块被放到普通段＝自动取消置顶。b 以最新行参与判定（pinned 可能刚在本次事务里改过）。
+    跨类时源分类同步致密。"""
+    b = dict(_load_block(con, b["id"]))          # 重读：pin 拨位/复合更新刚改过 pinned
+    rows = [x for x in _cat_blocks(con, cid) if x["id"] != b["id"]]
+    tgt = [x["id"] for x in rows]
+    pin_n = sum(1 for x in rows if x["pinned"])
     idx = len(tgt) if pos is None else max(0, min(pos, len(tgt)))
+    if b["pinned"]:
+        if idx > pin_n:                          # 落到普通段＝自动取消置顶
+            con.execute("UPDATE blocks SET pinned=0 WHERE id=?", (b["id"],))
+    else:
+        idx = max(idx, pin_n)                    # 非置顶不进置顶段（夹到普通段首）
     tgt.insert(idx, b["id"])
     con.execute("UPDATE blocks SET category_id=? WHERE id=?", (cid, b["id"]))
     ops.reseq(con, "blocks", tgt)
@@ -83,7 +95,14 @@ def block_update(con, block_id, data):
     if "text" in data:
         con.execute("UPDATE blocks SET text=? WHERE id=?", (_check_text(data["text"]), block_id))
     if "pinned" in data:
-        con.execute("UPDATE blocks SET pinned=? WHERE id=?", (1 if data["pinned"] else 0, block_id))
+        want = 1 if data["pinned"] else 0
+        con.execute("UPDATE blocks SET pinned=? WHERE id=?", (want, block_id))
+        # 置顶拨位（F3-L2 (a)）：单独置顶＝拨到置顶段尾（显示即刻到位）；
+        # 带 position/category_id 的复合更新（撤销重放形状）由位置分支定夺，不二次拨位
+        if want and not b["pinned"] and "position" not in data and "category_id" not in data:
+            sib = _cat_blocks(con, b["category_id"])
+            pin_n = sum(1 for x in sib if x["pinned"] and x["id"] != block_id)
+            _place_block(con, b, b["category_id"], pin_n)
     if "category_id" in data or "position" in data:
         cid = data.get("category_id", b["category_id"])
         _check_cat(con, cid)
@@ -116,11 +135,16 @@ def _neighbor_swap(con, rows, row_id, direction):
 
 
 def block_move(con, block_id, direction):
-    """同分类内与相邻块换位（direction = -1 上移 / 1 下移）；到头不抛错，返回 moved: False。"""
+    """同分类内与相邻块换位（direction = -1 上移 / 1 下移）；到头不抛错，返回 moved: False。
+
+    段守卫（F3-L2 (a)）：非置顶块不跨进置顶段、置顶块不落进普通段（各在边界停住）。"""
     b = _load_block(con, block_id)
     sib = _cat_blocks(con, b["category_id"])
     moved, idx, j = _neighbor_swap(con, sib, block_id, direction)
     if not moved:
+        return {"moved": False, "id": block_id}
+    pin_n = sum(1 for x in sib if x["pinned"] and x["id"] != block_id)
+    if (b["pinned"] and j > pin_n) or (not b["pinned"] and j < pin_n):
         return {"moved": False, "id": block_id}
     block_update(con, block_id, {"position": j})
     return {"moved": True, "id": block_id, "index": j, "old_index": idx}

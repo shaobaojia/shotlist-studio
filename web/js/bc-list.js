@@ -1,7 +1,8 @@
 // 块库卡·列表（M5f 直操版）：一个视图装下所有事——
 // 段头：大三角折叠 · 右键（＋块 / 改名 / 上移 / 下移 / 删类）· 拖块到头上＝进该组末尾；
 // 块行：⋮⋮ 拖拽（排序 / 换类）· ☆ 置顶 · 点击插入 · ✕ 删除 · 右键「编辑块…」就地编辑；
-// 置顶块不参与拖序（F3-B1/B7）：不可拖起、也不作落点——拖序在 position 空间算，置顶只在显示层。
+// 段语义（F3-L2 (a)）：置顶段恒在普通段之前（服务端 pin 拨位固化进 position）；拖放全放开——
+// 落点由服务端段感知归位（非置顶不进置顶段＝夹取；置顶落到普通段＝自动取消置顶，可 Ctrl+Z）。
 // 底栏：＋新建块 / ＋新分类。「整理模式」已拆除——编辑与拖拽全部发生在平时这一屏里。
 // 操作族在 bc-ops.js（单向依赖：本模块 -> bc-ops，反向不引）。
 import { el } from './ui.js';
@@ -24,12 +25,9 @@ function draggedBlock() {
 
 function gripOf(row, b) {
   const grip = el('span', 'bco-grip', '⋮⋮');
-  grip.title = b.pinned ? '置顶块不可拖动（先取消置顶）' : '拖动：排序 / 换类（也可放到别组头上；松手即生效，可 Ctrl+Z）';
-  grip.draggable = !b.pinned;                      // F3-B1：置顶块不参与拖序
-  if (b.pinned) grip.classList.add('off');
+  grip.title = '拖动：排序 / 换类（也可放到别组头上；松手即生效，可 Ctrl+Z）';
   grip.addEventListener('click', (e) => e.stopPropagation());     // 点抓手下坠不触发「插入」
   grip.addEventListener('dragstart', (ev) => {
-    if (b.pinned) { ev.preventDefault(); return; }
     ev.dataTransfer.setData('text/plain', 'bco:' + b.id);
     ev.dataTransfer.effectAllowed = 'move';
     try { ev.dataTransfer.setDragImage(row, 14, 14); } catch (err) { /* ignore */ }
@@ -46,7 +44,7 @@ function gripOf(row, b) {
 
 function bindRowDrop(row, b, catId) {
   row.addEventListener('dragover', (ev) => {
-    if (!dragging || dragging.id === b.id || b.pinned) return;
+    if (!dragging || dragging.id === b.id) return;
     ev.preventDefault();
     ev.stopPropagation();
     const r = row.getBoundingClientRect();
@@ -56,7 +54,7 @@ function bindRowDrop(row, b, catId) {
     if (markedEl === row) { row.classList.remove('drop-above', 'drop-below'); markedEl = null; }
   });
   row.addEventListener('drop', (ev) => {
-    if (!dragging || dragging.id === b.id || b.pinned) return;
+    if (!dragging || dragging.id === b.id) return;
     ev.preventDefault();
     ev.stopPropagation();
     const r = row.getBoundingClientRect();

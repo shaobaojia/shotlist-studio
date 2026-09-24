@@ -326,6 +326,63 @@ class TestBlocks(unittest.TestCase):
         with self.assertRaises(ValueError):
             prompts.block_update(con, True, {"pinned": True})
 
+    def test_pin_place_and_segment_order(self):
+        """F3-L2 (a)：pin 拨位到置顶段尾；unpin 留守；段感知归位（夹取 / 自动取消置顶）。"""
+        con = make_db()
+        c1 = prompts.cat_create(con, "A")
+        a = prompts.block_create(con, "a", c1["id"])
+        bb = prompts.block_create(con, "b", c1["id"])
+        cc = prompts.block_create(con, "c", c1["id"])
+
+        def order():
+            return [x["text"] for x in prompts.blocks_state(con)["blocks"] if x["category_id"] == c1["id"]]
+
+        # pin c（非首位）：拨到置顶段（段空→最前）
+        prompts.block_update(con, cc["id"], {"pinned": True})
+        self.assertEqual(order(), ["c", "a", "b"])
+        # pin b：拨到置顶段尾（c 之后）
+        prompts.block_update(con, bb["id"], {"pinned": True})
+        self.assertEqual(order(), ["c", "b", "a"])
+        # unpin c：留守（位置不动，仅清标记）
+        prompts.block_update(con, cc["id"], {"pinned": False})
+        self.assertEqual(order(), ["c", "b", "a"])
+        # 非置顶 c 拖到最前（pos 0）：夹到置顶段后（b 是唯一置顶）
+        prompts.block_update(con, cc["id"], {"position": 0})
+        self.assertEqual(order(), ["b", "c", "a"])
+        # 置顶 b 拖到普通段（pos 99＝末）：自动取消置顶
+        prompts.block_update(con, bb["id"], {"position": 99})
+        self.assertEqual(order(), ["c", "a", "b"])
+        self.assertEqual(con.execute("SELECT pinned FROM blocks WHERE id=?", (bb["id"],)).fetchone()["pinned"], 0)
+
+    def test_pin_undo_composite_and_move_guard(self):
+        """F3-L2 (a)：复合更新（撤销重放形状）不二次拨位；block_move 段守卫。"""
+        con = make_db()
+        c1 = prompts.cat_create(con, "A")
+        a = prompts.block_create(con, "a", c1["id"])
+        bb = prompts.block_create(con, "b", c1["id"])
+        cc = prompts.block_create(con, "c", c1["id"])
+
+        def order():
+            return [x["text"] for x in prompts.blocks_state(con)["blocks"] if x["category_id"] == c1["id"]]
+
+        # [a, b, c] —— pin a、b（拨位后仍 [a, b, c]）
+        prompts.block_update(con, a["id"], {"pinned": True})
+        prompts.block_update(con, bb["id"], {"pinned": True})
+        self.assertEqual(order(), ["a", "b", "c"])
+        # a 拖到末尾：落普通段 → 自动取消置顶 → [b, c, a]
+        prompts.block_update(con, a["id"], {"position": 99})
+        self.assertEqual(order(), ["b", "c", "a"])
+        self.assertEqual(con.execute("SELECT pinned FROM blocks WHERE id=?", (a["id"],)).fetchone()["pinned"], 0)
+        # 撤销形状（前端 moveBlockTo 负载）：category_id + position(0) + pinned(1) 复合 → 精确回位、不二次拨位
+        prompts.block_update(con, a["id"], {"category_id": c1["id"], "position": 0, "pinned": True})
+        self.assertEqual(order(), ["a", "b", "c"])
+        self.assertEqual(con.execute("SELECT pinned FROM blocks WHERE id=?", (a["id"],)).fetchone()["pinned"], 1)
+        # block_move 段守卫：c 上移（目标是置顶段）→ 拦；b 下移（目标是普通段）→ 拦；b 上移（段内）→ 行
+        self.assertFalse(prompts.block_move(con, cc["id"], -1)["moved"])
+        self.assertFalse(prompts.block_move(con, bb["id"], 1)["moved"])
+        self.assertTrue(prompts.block_move(con, bb["id"], -1)["moved"])
+        self.assertEqual(order(), ["b", "a", "c"])
+
 
 class TestInvariants(unittest.TestCase):
     """位置不变量（审计 F11）：组 / 镜的 position 恒为 0..n-1 致密。"""

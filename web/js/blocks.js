@@ -88,19 +88,24 @@ export async function moveBlockTo(target, catId, idx) {
   const b = findBlock(target.id) || target;
   const oldCid = b.category_id;
   const oldPos = b.position || 0;
+  const oldPin = b.pinned ? 1 : 0;                 // F3-L2：置顶块拖落普通段＝服务端自动取消置顶——撤销一并还原标记
   const res = await blockOpToast({ action: 'update', id: b.id, category_id: catId, position: idx }, '移动');
   if (!res) return;
   toast('已移到「' + (catId == null ? '未分类' : catName(catId)) + '」（Ctrl+Z 可撤）');
-  blockUndo('块移动', () => ({ action: 'update', id: b.id, category_id: oldCid, position: oldPos }));
+  blockUndo('块移动', () => ({ action: 'update', id: b.id, category_id: oldCid, position: oldPos, pinned: oldPin }));
 }
 
 // ── 块写操作族（管理器 / 热盒条共用；撤销与提示一处定义） ──
 export async function togglePin(b2) {
   const next = !b2.pinned;
+  const oldCid = b2.category_id;
+  const oldPos = b2.position || 0;
   const res = await blockOpToast({ action: 'pin', id: b2.id, pinned: next }, next ? '置顶' : '取消置顶');
   if (!res) return;
   toast(next ? '已置顶（Ctrl+Z 可撤）' : '已取消置顶（Ctrl+Z 可撤）');
-  blockUndo(next ? '置顶' : '取消置顶', () => ({ action: 'pin', id: b2.id, pinned: !next }));
+  // 撤销＝标记 + 位置一并还原（F3-L2：置顶会拨位到置顶段尾；复合负载避免重放二次拨位）
+  blockUndo(next ? '置顶' : '取消置顶',
+    () => ({ action: 'update', id: b2.id, category_id: oldCid, position: oldPos, pinned: next ? 0 : 1 }));
 }
 
 export async function deleteBlockWithUndo(b2, onAfter) {
@@ -162,7 +167,8 @@ export async function blockOpToast(payload, label) {
   catch (err) { toast(label + '失败：' + err.message, 'err'); return null; }
 }
 
-// 展示序：置顶最前 → 分类序 → 块序
+// 展示序（F3-L2 (a) 单源）：分类序 → position 序——置顶的「前置」由服务端 pin 拨位固化进
+// position（显示序 ≡ position 序），本地不再叠 pinned 比较键
 export function sortedBlocks() {
   const cats = cache ? cache.categories : [];
   const order = {};
@@ -170,9 +176,6 @@ export function sortedBlocks() {
   const arr = (cache ? cache.blocks : []).slice();
   const LAST = Number.MAX_SAFE_INTEGER;               // 殿后哨兵（F3-W5）：悬空分类 id 原先与 id 比较出 NaN
   arr.sort((a, b) => {
-    const pa = a.pinned ? 1 : 0;
-    const pb = b.pinned ? 1 : 0;
-    if (pa !== pb) return pb - pa;
     const oa = a.category_id == null || order[a.category_id] == null ? LAST : order[a.category_id];
     const ob = b.category_id == null || order[b.category_id] == null ? LAST : order[b.category_id];
     if (oa !== ob) return oa - ob;
