@@ -19,6 +19,40 @@ export function once(key, fn) {
   return true;
 }
 
+// 吞错单点（F1-W23）：后台刷新失败留痕不改现状（勿再空 catch 全静音）
+export function silent(e, tag) {
+  try { console.warn('[shotlist]' + (tag ? ' ' + tag : ''), e); } catch (err) { /* ignore */ }
+}
+
+// localStorage 存取单点（F1-W19）：解析失败 / 存量 null 一律回落 fallback
+export function lsGet(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return fallback;
+    const v = JSON.parse(raw);
+    return v == null ? fallback : v;
+  } catch (e) { return fallback; }
+}
+export function lsSet(key, v) {
+  try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* ignore */ }
+}
+
+// 数值夹取单点（F1-W19）
+export function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// CSS 变量像素单点（F1-W20）：写＝实测高度回写；读＝取计算值（无则 null）
+export function setVarPx(name, elem) {
+  document.documentElement.style.setProperty(name, elem ? Math.round(elem.getBoundingClientRect().height) + 'px' : '0px');
+}
+export function readVarPx(name) {
+  const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+  return Number.isFinite(v) ? v : null;
+}
+
+// 场级数据变更广播单点（F1-W1）：导航重载等订阅方只听这一个事件
+export const FILM_CHANGED = 'shotlist:film-changed';
+export function filmChanged() { window.dispatchEvent(new CustomEvent(FILM_CHANGED)); }
+
 let _toastTimer = null;
 
 export function toast(msg, kind) {
