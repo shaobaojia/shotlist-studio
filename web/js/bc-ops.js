@@ -1,6 +1,6 @@
 // 块库卡·操作族 + 三处右键菜单（M5e）：「管理面板」退役后，一切整理动作收进卡片。
 // 写操作一律走 blocks.js（blockOp / moveBlockTo / togglePin / deleteBlockWithUndo），撤销与提示统一在那里。
-// 单向依赖：bc-org.js（整理态渲染）从本模块引操作；本模块不依赖 bc-org。
+// 单向依赖（F3-W15②更新）：bc-list.js（列表渲染）从本模块引操作；本模块不依赖 bc-list。
 import { el, toast } from './ui.js';
 import { recordUndo } from './edit.js';
 import { openMenu } from './menu.js';
@@ -18,7 +18,7 @@ export function inlineCommit(el0, opts) {
     if (done) return;
     if (!ok) { done = true; if (opts.onCancel) opts.onCancel(); return; }
     const v = el0.value.trim();
-    if (!v && opts.emptyAsCancel !== false) { done = true; if (opts.onCancel) opts.onCancel(); return; }
+    if (!v) { done = true; if (opts.onCancel) opts.onCancel(); return; }   // 空＝取消（F3-W12：旗标全库从无他值，退役）
     done = true;
     opts.onCommit(v, () => { done = false; });
   };
@@ -27,19 +27,54 @@ export function inlineCommit(el0, opts) {
     if (enter) { e.preventDefault(); commit(true); }
     else if (e.key === 'Escape') { e.preventDefault(); commit(false); }
   });
-  el0.addEventListener('blur', () => commit(true));
+  el0.addEventListener('blur', () => {
+    if (!el0.isConnected) return;                  // 已脱离：直接不提交
+    // 被动失焦（F3-B6）：实测 .remove() 触发 blur 时 isConnected 仍为 true（派发早于落地）——
+    // 延迟一个 tick 复核连接性：真·点外（仍在树上）才提交；被重绘拆走则不写。
+    setTimeout(() => { if (el0.isConnected) commit(true); }, 0);
+  });
+}
+
+// 行内输入面单点（F3-W9②）：建面（input/textarea）→ 挂载（replace / prepend+wrap / append+wrap）→ 聚焦（可选选词）→ 接统一提交协议
+export function openInline(opts) {
+  const o = opts || {};
+  const el0 = document.createElement(o.tag || 'input');
+  if (o.cls) el0.className = o.cls;
+  if (o.value != null) el0.value = o.value;
+  if (o.placeholder) el0.placeholder = o.placeholder;
+  if (o.rows) el0.rows = o.rows;
+  let wrap = el0;
+  if (o.wrapClass) { wrap = el('div', o.wrapClass); wrap.appendChild(el0); }
+  const m = o.mount || {};
+  if (m.kind === 'replace') m.target.replaceWith(el0);
+  else if (m.kind === 'prepend') m.host.insertBefore(wrap, m.host.firstChild);
+  else m.host.appendChild(wrap);
+  el0.focus();
+  if (o.select) el0.select();
+  inlineCommit(el0, {
+    multiline: o.multiline,
+    onCancel: () => { if (o.onCancel) o.onCancel(el0, wrap); },
+    onCommit: (v, unlock) => o.onCommit(v, unlock, el0, wrap),
+  });
+  return { el0: el0, wrap: wrap };
+}
+
+// 提交失败收尾单点（F3-W9④）：解锁 + 归还焦点 + 提示（内容还在可重试）
+export function failRestore(err, unlock, el0, label) {
+  unlock();
+  try { el0.focus(); } catch (e) { /* ignore */ }
+  toast(label + '失败：' + err.message + '（内容还在，可重试）', 'err');
 }
 
 // ── 分类操作 ──
-export function deleteCat(ctx, cat) {
+export function deleteCat(cat) {
   blockOp({ action: 'cat_delete', id: cat.id })
-    .then((res) => { if (res) toast('分类已删（块落「未分类」）'); })
+    .then(() => toast('分类已删（块落「未分类」）'))
     .catch((err) => toast(err.message, 'err'));
 }
 
-export function catMove(ctx, cat, dir) {
+export function catMove(cat, dir) {
   blockOp({ action: 'cat_move', id: cat.id, dir }).then((res) => {
-    if (!res) return;
     if (res.moved === false) { toast(dir === -1 ? '已经在最上面了' : '已经在最下面了'); return; }
     recordUndo({ type: 'custom', label: dir === -1 ? '分类上移' : '分类下移',
       undo: async () => { await blockOp({ action: 'cat_move', id: cat.id, dir: -dir }); } });
@@ -48,77 +83,59 @@ export function catMove(ctx, cat, dir) {
 
 export function renameCatInline(ctx, nameEl, cat) {
   if (!nameEl || !cat) return;
-  const inp = document.createElement('input');
-  inp.className = 'bco-input';
-  inp.value = cat.name;
-  nameEl.replaceWith(inp);
-  inp.focus();
-  inp.select();
-  inlineCommit(inp, {
+  openInline({
+    cls: 'bco-input', value: cat.name, select: true,
+    mount: { kind: 'replace', target: nameEl },
     onCancel: () => ctx.refresh(),
-    onCommit: (v, unlock) => {
+    onCommit: (v, unlock, el0) => {
       if (v === cat.name) { ctx.refresh(); return; }
       const oldName = cat.name;
-      blockOp({ action: 'cat_update', id: cat.id, name: v }).then((res) => {
-        if (res) {
-          recordUndo({ type: 'custom', label: '改分类名',
-            undo: async () => { await blockOp({ action: 'cat_update', id: cat.id, name: oldName }); } });
-        } else { unlock(); inp.focus(); }
-      }).catch((err) => { unlock(); inp.focus(); toast('改名失败：' + err.message + '（可重试）', 'err'); });
+      blockOp({ action: 'cat_update', id: cat.id, name: v }).then(() => {
+        recordUndo({ type: 'custom', label: '改分类名',
+          undo: async () => { await blockOp({ action: 'cat_update', id: cat.id, name: oldName }); } });
+      }).catch((err) => failRestore(err, unlock, el0, '改名'));
     },
   });
 }
 
-export function newCatInline(ctx, listEl) {
+export function newCatInline(listEl) {
   const ex = listEl.querySelector('.bco-newcat input');
   if (ex) { ex.focus(); return; }
-  const wrap = el('div', 'bco-newcat');
-  const inp = document.createElement('input');
-  inp.placeholder = '新分类名…（Enter 建 · Esc 弃）';
-  wrap.appendChild(inp);
-  listEl.insertBefore(wrap, listEl.firstChild);
-  inp.focus();
-  inlineCommit(inp, {
-    onCancel: () => wrap.remove(),
-    onCommit: (v, unlock) => {
+  openInline({
+    placeholder: '新分类名…（Enter 建 · Esc 弃）',
+    wrapClass: 'bco-newcat', mount: { kind: 'prepend', host: listEl },
+    onCancel: (el0, wrap) => { wrap.remove(); },
+    onCommit: (v, unlock, el0, wrap) => {
       blockOp({ action: 'cat_create', name: v }).then((res) => {
-        if (res && res.category) {
-          wrap.remove();
-          const cid = res.category.id;
-          recordUndo({ type: 'custom', label: '新分类',
-            undo: async () => { await blockOp({ action: 'cat_delete', id: cid }); } });
-        } else { unlock(); inp.focus(); }
-      }).catch((err) => { unlock(); inp.focus(); toast('建分类失败：' + err.message + '（可重试）', 'err'); });
+        if (!res || !res.category) { failRestore({ message: '响应异常' }, unlock, el0, '建分类'); return; }
+        wrap.remove();
+        const cid = res.category.id;
+        recordUndo({ type: 'custom', label: '新分类',
+          undo: async () => { await blockOp({ action: 'cat_delete', id: cid }); } });
+      }).catch((err) => failRestore(err, unlock, el0, '建分类'));
     },
   });
 }
 
 // ── 块草稿行：保存后才入库（空＝弃；失败留字可重试）──
-export function draftBlockInline(ctx, sec, cat) {
+export function draftBlockInline(sec, cat) {
   const rows = sec.querySelector('.bco-rows');
   if (!rows) return;
   const ex = rows.querySelector('.bco-draft textarea');
   if (ex) { ex.focus(); return; }
-  const row = el('div', 'bco-row bco-draft');
-  const ta = document.createElement('textarea');
-  ta.className = 'bco-edit';
-  ta.placeholder = '新块内容…（Ctrl+Enter 存 · Esc 弃）';
-  ta.rows = 2;
-  row.appendChild(ta);
-  rows.appendChild(row);
-  ta.focus();
-  inlineCommit(ta, {
-    multiline: true,
-    onCancel: () => { row.remove(); },
-    onCommit: (v, unlock) => {
+  openInline({
+    tag: 'textarea', cls: 'bco-edit', placeholder: '新块内容…（Ctrl+Enter 存 · Esc 弃）', rows: 2,
+    wrapClass: 'bco-row bco-draft', multiline: true, mount: { kind: 'append', host: rows },
+    onCancel: (el0, wrap) => { wrap.remove(); },
+    onCommit: (v, unlock, el0, wrap) => {
       blockOp({ action: 'create', text: v, category_id: cat ? cat.id : null }).then((res) => {
-        row.remove();
+        wrap.remove();
         if (res && res.block) {
           const bid = res.block.id;
           recordUndo({ type: 'custom', label: '添加块',
             undo: async () => { await blockOp({ action: 'delete', id: bid }); } });
         }
-      }).catch((err) => { unlock(); ta.focus(); toast('创建失败：' + err.message + '（内容还在）', 'err'); });
+      }).catch((err) => failRestore(err, unlock, el0, '创建'));
     },
   });
 }
@@ -129,7 +146,7 @@ export function newBlockInCat(ctx, cat) {
   if (ctx.folded.has(key)) { ctx.folded.delete(key); ctx.foldSave(); ctx.refresh(); }
   requestAnimationFrame(() => {
     const sec = ctx.list.querySelector('.bco-sec[data-catkey="' + (cat ? cat.id : 'none') + '"]');
-    if (sec) { sec.scrollIntoView({ block: 'nearest' }); draftBlockInline(ctx, sec, cat); }
+    if (sec) { sec.scrollIntoView({ block: 'nearest' }); draftBlockInline(sec, cat); }
   });
 }
 
@@ -145,9 +162,7 @@ export function startEditBlock(ctx, id) {
   }
   requestAnimationFrame(() => {
     const row = ctx.list.querySelector('.bco-row[data-id="' + id + '"]');
-    if (!row) return;
-    row.scrollIntoView({ block: 'center' });
-    if (row._startEdit) row._startEdit();
+    if (row && row._startEdit) row._startEdit();   // 滚动由 _startEdit 一处负责（F3-W15①：原先双份）
   });
 }
 
@@ -197,16 +212,16 @@ export function attachSecMenu(ctx, headEl, cid) {
     openMenu(pt, items, (k) => {
       if (k === 'add') newBlockInCat(ctx, cat);
       else if (k === 'ren') renameCatInline(ctx, headEl.querySelector('.bc-secname'), cat);
-      else if (k === 'up') catMove(ctx, cat, -1);
-      else if (k === 'dn') catMove(ctx, cat, 1);
-      else if (k === 'del') deleteCat(ctx, cat);
+      else if (k === 'up') catMove(cat, -1);
+      else if (k === 'dn') catMove(cat, 1);
+      else if (k === 'del') deleteCat(cat);
     });
   });
 }
 
 export function attachBlankMenu(ctx, listEl) {
   listEl.addEventListener('contextmenu', (e) => {
-    if (e.target.closest('.bc-row, .bco-row, .bc-sechead, .bco-newcat, input, textarea')) return;
+    if (e.target.closest('.bco-sec, .bco-foot, .bco-newcat, input, textarea')) return;   // F3-W13：占位判定收口（.bc-row 死类退役）
     e.preventDefault();
     const pt = { x: e.clientX, y: e.clientY };
     openMenu(pt, [
@@ -217,7 +232,7 @@ export function attachBlankMenu(ctx, listEl) {
       { key: 'expand', label: '全部展开' },
     ], (k) => {
       if (k === 'nb') newBlockUncat(ctx);
-      else if (k === 'nc') newCatInline(ctx, listEl);
+      else if (k === 'nc') newCatInline(listEl);
       else if (k === 'collapse') ctx.foldAll(false);
       else if (k === 'expand') ctx.foldAll(true);
     });

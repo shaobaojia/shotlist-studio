@@ -4,14 +4,14 @@
 // 置顶块不参与拖序（F3-B1/B7）：不可拖起、也不作落点——拖序在 position 空间算，置顶只在显示层。
 // 底栏：＋新建块 / ＋新分类。「整理模式」已拆除——编辑与拖拽全部发生在平时这一屏里。
 // 操作族在 bc-ops.js（单向依赖：本模块 -> bc-ops，反向不引）。
-import { el, toast } from './ui.js';
+import { el } from './ui.js';
 import { recordUndo } from './edit.js';
 import {
   blocksData, blockOp, moveBlockTo, togglePin, deleteBlockWithUndo,
   sectionsOf, dropIndex, catColorOf,
 } from './blocks.js';
 import {
-  inlineCommit, attachSecMenu, attachRowMenu, newBlockUncat, newCatInline,
+  openInline, failRestore, attachSecMenu, attachRowMenu, newBlockUncat, newCatInline,
 } from './bc-ops.js';
 
 // ── 拖拽：排序 / 换类 / 拖到段头＝进该组末尾；指示元素 O(1) 清除 ──
@@ -113,22 +113,17 @@ function bindHeadDrop(sh, catId) {
 // ── 就地编辑（右键「编辑块…」进入）：Ctrl+Enter / 点外存 · Esc 弃 · 失败留字 ──
 function editRowInline(ctx, row, b, txtEl) {
   if (row.querySelector('.bco-edit')) return;
-  const ta = document.createElement('textarea');
-  ta.className = 'bco-edit';
-  ta.value = String(b.text == null ? '' : b.text);
-  ta.rows = 3;
-  txtEl.replaceWith(ta);
-  ta.focus();
-  inlineCommit(ta, {
-    multiline: true,
+  openInline({
+    tag: 'textarea', cls: 'bco-edit', value: String(b.text == null ? '' : b.text), rows: 3,
+    multiline: true, mount: { kind: 'replace', target: txtEl },
     onCancel: () => ctx.refresh(),
-    onCommit: (v, unlock) => {
+    onCommit: (v, unlock, el0) => {
       if (v === String(b.text)) { ctx.refresh(); return; }
       const oldText = String(b.text);
       blockOp({ action: 'update', id: b.id, text: v }).then(() => {
         recordUndo({ type: 'custom', label: '改块',
           undo: async () => { await blockOp({ action: 'update', id: b.id, text: oldText }); } });
-      }).catch((err) => { unlock(); ta.focus(); toast('保存失败：' + err.message + '（内容还在）', 'err'); });
+      }).catch((err) => failRestore(err, unlock, el0, '保存'));
     },
   });
 }
@@ -209,7 +204,7 @@ export function renderList(ctx, listEl, arr, opts) {
   const nc = el('span', 'bco-fbtn', '＋ 新分类');
   nc.title = '建一个新的分类组';
   nc.addEventListener('mousedown', (e) => e.preventDefault());
-  nc.addEventListener('click', () => newCatInline(ctx, listEl));
+  nc.addEventListener('click', () => newCatInline(listEl));
   foot.appendChild(nb);
   foot.appendChild(nc);
   foot.appendChild(el('span', 'bco-hint', '拖 ⋮⋮ 排序 / 换类'));
