@@ -3,7 +3,7 @@
 // 设计对齐：设计稿 §4「Tab / 方向键走格；多选（Shift / 框选）→ 表底选区条批量改」。
 import { api } from './api.js';
 import { toast, isFloatTarget, isTypingTarget } from './ui.js';
-import { recordUndo, notifyRowsChanged } from './edit.js';
+import { recordUndo, notifyRowsChanged, editorHandleAt } from './edit.js';
 import { writeClipboard, toTSV } from './clipboard.js';
 import { refreshShotCell, visibleRows } from './table.js';
 import { menuOpen } from './menu.js';
@@ -22,127 +22,158 @@ export function bindSelection(view, c) {
   ctx = c;
   if (view.dataset.selBound === '1') return;
   view.dataset.selBound = '1';
+  view.addEventListener('mousedown', onSelDown);
+  document.addEventListener('mousemove', onSelMove);
+  document.addEventListener('mouseup', onSelUp);
+  view.addEventListener('click', onSelClick, true);
+  document.addEventListener('mousedown', onSelOutside, true);
+  document.addEventListener('keydown', onSelKey);
+  // B3 兜底：窗口失焦 / 触控取消也要收拖拽态（防 no-select 与 drag 永久滞留）
+  window.addEventListener('blur', onSelBlur);
+  document.addEventListener('pointercancel', onSelBlur, true);
+}
 
-  view.addEventListener('mousedown', (e) => {
-    if (e.button !== 0) return;
-    const t = e.target;
-    if (t.closest && t.closest('.cell-editor, .cam-editor')) return;
-    const td = t.closest ? t.closest('td[data-field]') : null;
-    const tr = td && td.closest('tr.shot');
-    if (!td || !tr) return;
-    const table = tr.closest('table');
-    if (!table) return;
-    if (e.shiftKey) {
-      // Shift 点选：拦掉浏览器原生文字选择（蓝斑），并清掉存量原生选区
-      e.preventDefault();
-      const s0 = window.getSelection && window.getSelection();
-      if (s0 && s0.removeAllRanges && s0.rangeCount) s0.removeAllRanges();
-    }
-    const shift = !!(e.shiftKey && sel && sel.table === table);
-    if (!shift) clearSel();
-    const rc = cellsOf(table);
-    drag = { table: table, ar: rc.rows.indexOf(tr), ac: rc.cols.indexOf(td.dataset.field), shift: shift, moved: false };
-  });
+// 原生选区清除单点（F2-W2）
+function clearNativeSelection() {
+  const s = window.getSelection && window.getSelection();
+  if (s && s.removeAllRanges && s.rangeCount) s.removeAllRanges();
+}
 
-  document.addEventListener('mousemove', (e) => {
-    if (!drag) return;
+function onSelDown(e) {
+  if (e.button !== 0) return;
+  const t = e.target;
+  if (t.closest && t.closest('.cell-editor, .cam-editor')) return;
+  const td = t.closest ? t.closest('td[data-field]') : null;
+  const tr = td && td.closest('tr.shot');
+  if (!td || !tr) return;
+  const table = tr.closest('table');
+  if (!table) return;
+  if (e.shiftKey) {
+    // Shift 点选：拦掉浏览器原生文字选择（蓝斑），并清掉存量原生选区
+    e.preventDefault();
+    clearNativeSelection();
+  }
+  const shift = !!(e.shiftKey && sel && sel.table === table);
+  if (!shift) clearSel();
+  const rc = cellsOf(table);
+  // 坐标系一次取齐（F2-P3/E1）：拖拽期间复用；视图重绘后在 move 里补取一次
+  drag = { table: table, rc: rc, ar: rc.rows.indexOf(tr), ac: rc.cols.indexOf(td.dataset.field), shift: shift, moved: false };
+}
+
+function onSelMove(e) {
+  if (!drag) return;
+  if (e.buttons !== 1) { endDrag(); return; }          // F2-B3：窗口外/系统层松键不补发 mouseup → 按按钮态自愈
+  const td = e.target && e.target.closest ? e.target.closest('td[data-field]') : null;
+  const tr = td && td.closest('tr.shot');
+  if (!td || !tr || tr.closest('table') !== drag.table) return;
+  let fr = drag.rc.rows.indexOf(tr);
+  let fc = drag.rc.cols.indexOf(td.dataset.field);
+  if (fr === -1 || fc === -1) {
+    drag.rc = cellsOf(drag.table);
+    fr = drag.rc.rows.indexOf(tr);
+    fc = drag.rc.cols.indexOf(td.dataset.field);
+    if (fr === -1 || fc === -1) return;
+  }
+  if (!drag.moved) {
+    if (fr === drag.ar && fc === drag.ac) return; // 还在本格：不算框选（点击即编不受影响）
+    drag.moved = true;
+    suppressClick = true;
+    document.body.classList.add('no-select');
+    clearNativeSelection();
+  }
+  if (!sel || sel.table !== drag.table) {
+    sel = { table: drag.table, rows: drag.rc.rows, cols: drag.rc.cols, ar: drag.ar, ac: drag.ac, fr: fr, fc: fc };
+  } else {
+    sel.fr = fr; sel.fc = fc;
+  }
+  paintSoon();                                          // F2-E2：连发帧合并（每帧最多绘一次）
+  emit();
+}
+
+// 拖拽状态收尾单点（F2-B3）：mouseup / 按钮态自愈 / 窗口失焦共用；幂等
+function endDrag() {
+  if (!drag) return null;
+  const d = drag;
+  drag = null;
+  document.body.classList.remove('no-select');
+  setTimeout(() => { suppressClick = false; }, 0);      // 兜底复位（正常路径由 click 消费，F2-W4）
+  return d;
+}
+
+function onSelUp(e) {
+  const d = endDrag();
+  if (!d) return;
+  if (!d.moved) {
     const td = e.target && e.target.closest ? e.target.closest('td[data-field]') : null;
     const tr = td && td.closest('tr.shot');
-    if (!td || !tr || tr.closest('table') !== drag.table) return;
-    const rc = cellsOf(drag.table);
-    const fr = rc.rows.indexOf(tr);
-    const fc = rc.cols.indexOf(td.dataset.field);
-    if (fr === -1 || fc === -1) return;
-    if (!drag.moved) {
-      if (fr === drag.ar && fc === drag.ac) return; // 还在本格：不算框选（点击即编不受影响）
-      drag.moved = true;
-      suppressClick = true;
-      document.body.classList.add('no-select');
-      const s = window.getSelection && window.getSelection();
-      if (s && s.removeAllRanges) s.removeAllRanges();
-    }
-    if (!sel || sel.table !== drag.table) {
-      sel = { table: drag.table, rows: rc.rows, cols: rc.cols, ar: drag.ar, ac: drag.ac, fr: fr, fc: fc };
-    } else {
-      sel.fr = fr; sel.fc = fc;
-    }
-    paint();
-    emit();
-  });
-
-  document.addEventListener('mouseup', (e) => {
-    if (!drag) return;
-    const d = drag;
-    drag = null;
-    document.body.classList.remove('no-select');
-    if (!d.moved) {
-      const td = e.target && e.target.closest ? e.target.closest('td[data-field]') : null;
-      const tr = td && td.closest('tr.shot');
-      if (td && tr && tr.closest('table') === d.table) {
-        const rc = cellsOf(d.table);
-        const fr = rc.rows.indexOf(tr);
-        const fc = rc.cols.indexOf(td.dataset.field);
-        if (fr !== -1 && fc !== -1) {
-          if (d.shift && sel && sel.table === d.table) {
-            sel.fr = fr; sel.fc = fc;   // Shift 点选：扩到该格（原行为）
-          } else {
-            sel = { table: d.table, rows: rc.rows, cols: rc.cols, ar: fr, ac: fc, fr: fr, fc: fc };  // 单击 = 选格（塌缩为单格选区）
-          }
-          paint(); emit();
+    if (td && tr && tr.closest('table') === d.table) {
+      const rc = cellsOf(d.table);
+      const fr = rc.rows.indexOf(tr);
+      const fc = rc.cols.indexOf(td.dataset.field);
+      if (fr !== -1 && fc !== -1) {
+        if (d.shift && sel && sel.table === d.table) {
+          sel.fr = fr; sel.fc = fc;   // Shift 点选：扩到该格（原行为）
+        } else {
+          sel = { table: d.table, rows: rc.rows, cols: rc.cols, ar: fr, ac: fc, fr: fr, fc: fc };  // 单击 = 选格（塌缩为单格选区）
         }
+        paint(); emit();
       }
-      if (d.shift) suppressClick = true;
     }
-    setTimeout(() => { suppressClick = false; }, 0);
-  });
+    if (d.shift) suppressClick = true;
+  }
+}
 
-  // 框选/扩选收尾那一下的 click 不算「点开编辑」
-  view.addEventListener('click', (e) => {
-    if (!suppressClick) return;
-    e.stopPropagation();
-    e.preventDefault();
-  }, true);
+function onSelBlur() {
+  endDrag();                                            // F2-B3 兜底
+}
 
-  // 点选区外（非单元格区域）→ 取消选区
-  document.addEventListener('mousedown', (e) => {
-    if (!sel) return;
-    const t = e.target;
-    if (!t || !t.closest) return;
-    if (t.closest('td[data-field]') || t.closest('#sel-bar')
-        || t.closest('.cell-editor, .cam-editor') || isFloatTarget(t)) return;
-    clearSel();
-  }, true);
+// 框选/扩选收尾那一下的 click 不算「点开编辑」；在消费点复位（F2-W4）
+function onSelClick(e) {
+  if (!suppressClick) return;
+  suppressClick = false;
+  e.stopPropagation();
+  e.preventDefault();
+}
 
-  // 键盘：方向键走格 / Shift 扩选 / Tab 右移 / Enter·F2 开编 / Esc 取消
-  // + Excel 对齐（M5 批2）：Delete 清格 / Home·End / Ctrl+C·X·A·D / 打字即编
-  document.addEventListener('keydown', (e) => {
-    if (!sel) return;
-    const t = e.target;
-    if (isTypingTarget(t)) return;
-    if (document.querySelector('.cell-editor, .cam-editor')) return;
-    if (menuOpen()) return;
-    if (e.key === 'Escape') { clearSel(); return; }
-    const mod = e.ctrlKey || e.metaKey;
-    if (mod && !e.altKey) {
-      const k = String(e.key).toLowerCase();
-      if (k === 'c') { e.preventDefault(); copySelectionTSV(); return; }
-      if (k === 'x') { e.preventDefault(); cutSelection(); return; }
-      if (k === 'a') { e.preventDefault(); selectAllCells(); return; }
-      if (k === 'd') { e.preventDefault(); fillDown(); return; }
-      // 其余 Ctrl 组合维持原行为（不拦截；Ctrl+V 交给 document 'paste' 直连）
-    }
-    const mv = { ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0], ArrowDown: [1, 0] }[e.key];
-    if (mv) { e.preventDefault(); moveFocus(mv[0], mv[1], e.shiftKey); return; }
-    if (e.key === 'Tab') { e.preventDefault(); moveFocus(0, e.shiftKey ? -1 : 1, false); return; }
-    if (e.key === 'Enter' || e.key === 'F2') { e.preventDefault(); openFocus(); return; }
-    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); clearSelectionCells(); return; }
-    if (e.key === 'Home') { e.preventDefault(); moveFocusAbs(sel.fr, 0, e.shiftKey); return; }
-    if (e.key === 'End') { e.preventDefault(); moveFocusAbs(sel.fr, sel.cols.length - 1, e.shiftKey); return; }
-    if (e.key === 'Process' || e.keyCode === 229) { tryTypeEdit(''); return; }   // IME 首键开编
-    if (!mod && !e.altKey && e.key && e.key.length === 1) {
-      if (tryTypeEdit(e.key)) e.preventDefault();   // 打字即编（可编辑格才吞按键）
-    }
-  });
+// 点选区外（非单元格区域）→ 取消选区
+function onSelOutside(e) {
+  if (!sel) return;
+  const t = e.target;
+  if (!t || !t.closest) return;
+  if (t.closest('td[data-field]') || t.closest('#sel-bar')
+      || t.closest('.cell-editor, .cam-editor') || isFloatTarget(t)) return;
+  clearSel();
+}
+
+// 键盘：方向键走格 / Shift 扩选 / Tab 右移 / Enter·F2 开编 / Esc 取消
+// + Excel 对齐（M5 批2）：Delete 清格 / Home·End / Ctrl+C·X·A·D / 打字即编
+function onSelKey(e) {
+  if (!sel) return;
+  const t = e.target;
+  if (isTypingTarget(t)) return;
+  if (document.querySelector('.cell-editor, .cam-editor')) return;
+  if (menuOpen()) return;
+  if (e.key === 'Escape') { clearSel(); return; }
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && !e.altKey) {
+    const k = String(e.key).toLowerCase();
+    if (k === 'c') { e.preventDefault(); copySelection(); return; }
+    if (k === 'x') { e.preventDefault(); cutSelection(); return; }
+    if (k === 'a') { e.preventDefault(); selectAllCells(); return; }
+    if (k === 'd') { e.preventDefault(); fillDown(); return; }
+    // 其余 Ctrl 组合维持原行为（不拦截；Ctrl+V 交给 document 'paste' 直连）
+  }
+  const mv = { ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0], ArrowDown: [1, 0] }[e.key];
+  if (mv) { e.preventDefault(); moveFocus(mv[0], mv[1], e.shiftKey); return; }
+  if (e.key === 'Tab') { e.preventDefault(); moveFocus(0, e.shiftKey ? -1 : 1, false); return; }
+  if (e.key === 'Enter' || e.key === 'F2') { e.preventDefault(); openFocus(); return; }
+  if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); clearSelectionCells(); return; }
+  if (e.key === 'Home') { e.preventDefault(); moveFocusAbs(sel.fr, 0, e.shiftKey); return; }
+  if (e.key === 'End') { e.preventDefault(); moveFocusAbs(sel.fr, sel.cols.length - 1, e.shiftKey); return; }
+  if (e.key === 'Process' || e.keyCode === 229) { tryTypeEdit(''); return; }   // IME 首键开编（编辑器未开时 IME 无落点，保留）
+  if (!mod && !e.altKey && e.key && e.key.length === 1) {
+    if (tryTypeEdit(e.key)) e.preventDefault();   // 打字即编（可编辑格才吞按键）
+  }
 }
 
 function cellsOf(table) {
@@ -185,6 +216,14 @@ function queueStabilize() {
   });
 }
 
+// 连发帧合并（F2-E2）：拖拽期高频 move 每帧最多绘一次（范式同 ui.growTextarea）
+let paintQueued = false;
+function paintSoon() {
+  if (paintQueued) return;
+  paintQueued = true;
+  requestAnimationFrame(() => { paintQueued = false; paint(); });
+}
+
 function paint(stabilize) {
   if (sel) {
     const wrap = sel.table.closest('.table-wrap');
@@ -198,22 +237,68 @@ function paint(stabilize) {
       const wr = wrap.getBoundingClientRect();
       const a = tl.getBoundingClientRect();
       const b = br.getBoundingClientRect();
-      box.style.left = (a.left - wr.left + wrap.scrollLeft - 1) + 'px';
-      box.style.top = (a.top - wr.top - 1) + 'px';
-      box.style.width = (b.right - a.left + 1) + 'px';
-      box.style.height = (b.bottom - a.top + 1) + 'px';
+      // 边框半宽外扩（F2-W3）：口径取自 .sel-box 实测边框（原硬编码 -1/+1 是 2px 边框的隐式补偿）
+      const bw = parseFloat(getComputedStyle(box).borderTopWidth) || 0;
+      box.style.left = (a.left - wr.left + wrap.scrollLeft - bw / 2) + 'px';
+      box.style.top = (a.top - wr.top - bw / 2) + 'px';
+      box.style.width = (b.right - a.left + bw / 2) + 'px';
+      box.style.height = (b.bottom - a.top + bw / 2) + 'px';
     }
   }
   if (stabilize !== false) queueStabilize();
 }
 
 function emit() {
-  for (const f of subs) { try { f(sel); } catch (err) { /* ignore */ } }
+  for (const f of subs) { try { f(sel); } catch (err) { console.warn('[sel] subscriber failed', err); } }
 }
 
 export function clearSel() {
   if (box) { box.remove(); box = null; }
   if (sel) { sel = null; emit(); }
+}
+
+// ── 选区遍历原语（F2-P2）──
+// 空行跳过 / id 解析 / 行序单点；r1/r2 可收窄（默认整区）。
+
+export function eachSelRow(cb, r1, r2) {
+  if (!sel) return;
+  const rc = rectOf();
+  const a = Math.max(rc.r1, r1 == null ? rc.r1 : r1);
+  const b = Math.min(rc.r2, r2 == null ? rc.r2 : r2);
+  for (let r = a; r <= b; r++) {
+    const tr = sel.rows[r];
+    const s = tr ? shotById(Number(tr.dataset.id)) : null;
+    if (!s) continue;
+    cb(s, tr, r);
+  }
+}
+
+export function eachSelCell(cb) {
+  if (!sel) return;
+  const rc = rectOf();
+  eachSelRow((s, tr, r) => {
+    for (let c = rc.c1; c <= rc.c2; c++) cb(s, sel.cols[c], r, c);
+  });
+}
+
+export function selRowIds() {
+  const ids = [];
+  eachSelRow((s) => ids.push(s.id));
+  return ids;
+}
+
+// 单格塌缩选区（F2-W18 粘贴直连路径）：把选区收缩到该格并重绘
+export function selectCell(td) {
+  const tr = td && td.closest ? td.closest('tr.shot') : null;
+  const table = tr && tr.closest('table');
+  if (!tr || !table) return false;
+  const rc = cellsOf(table);
+  const fr = rc.rows.indexOf(tr);
+  const fc = rc.cols.indexOf(td.dataset.field);
+  if (fr === -1 || fc === -1) return false;
+  sel = { table: table, rows: rc.rows, cols: rc.cols, ar: fr, ac: fc, fr: fr, fc: fc };
+  paint(); emit();
+  return true;
 }
 
 export function inCell(td) {
@@ -254,16 +339,18 @@ function openFocus() {
   td.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
 }
 
-// 打字即编（M5 批2）：可编辑格 → 种子值直进编辑（首字替换态）；编辑引擎经 td._seedText 取用。
+// 打字即编（M5 批2）：可编辑格 → 编辑句柄开编（首字替换态；F2-W11 去 DOM expando）。
+// 死守卫退役（F2-P6）：提示词伪列无 data-field，进不了选区。
 function tryTypeEdit(ch) {
   if (!sel) return false;
   const td = cellTd(sel.fr, sel.fc);
-  if (!td || !td.classList.contains('editable') || td.classList.contains('cell-prompt')) return false;
+  if (!td || !td.classList.contains('editable')) return false;
+  const h = editorHandleAt(td);
+  if (!h) return false;
   sel.ar = sel.fr; sel.ac = sel.fc;
   paint();
   emit();
-  td._seedText = ch;
-  td.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+  h.openSeed(ch);
   return true;
 }
 
@@ -275,15 +362,14 @@ export function copySelection() {
   if (!sel) return Promise.resolve(false);
   const rc = rectOf();
   const vals = [];
-  for (let r = rc.r1; r <= rc.r2; r++) {
-    const s = shotById(Number(sel.rows[r].dataset.id));
+  eachSelRow((s) => {
     const row = [];
     for (let c = rc.c1; c <= rc.c2; c++) {
       const k = sel.cols[c];
-      row.push(s && s[k] != null ? String(s[k]) : '');
+      row.push(s[k] != null ? String(s[k]) : '');
     }
     vals.push(row);
-  }
+  });
   return writeClipboard(toTSV(vals)).then((ok) => {
     toast(ok ? ('已复制 ' + vals.length + ' 行 × ' + (rc.c2 - rc.c1 + 1) + ' 列') : '复制失败：浏览器限制', ok ? '' : 'err');
     return ok;
@@ -364,17 +450,11 @@ export async function batchWrite(ops, label, opts) {
 
 export function clearSelectionCells() {
   if (!sel) return;
-  const rc = rectOf();
   const ops = [];
-  for (let r = rc.r1; r <= rc.r2; r++) {
-    const s = shotById(Number(sel.rows[r].dataset.id));
-    if (!s) continue;
-    for (let c = rc.c1; c <= rc.c2; c++) {
-      const k = sel.cols[c];
-      const cur = s[k] == null ? '' : String(s[k]);
-      if (cur !== '') ops.push({ id: s.id, field: k, value: '' });
-    }
-  }
+  eachSelCell((s, k) => {
+    const cur = s[k] == null ? '' : String(s[k]);
+    if (cur !== '') ops.push({ id: s.id, field: k, value: '' });
+  });
   if (!ops.length) { toast('选中的格子本来就是空的'); return; }
   if (ops.length > 400) { toast('一次最多 400 格（本次 ' + ops.length + '）', 'err'); return; }
   batchWrite(ops, '清空选区');
@@ -400,21 +480,19 @@ function fillDown() {
     src = rc.r1 - 1;
     from = rc.r1;
   }
-  const sSrc = shotById(Number(sel.rows[src].dataset.id));
+  const str = sel.rows[src];
+  const sSrc = str ? shotById(Number(str.dataset.id)) : null;
   if (!sSrc) return;
   const ops = [];
-  for (let r = from; r <= rc.r2; r++) {
-    const s = shotById(Number(sel.rows[r].dataset.id));
-    if (!s) continue;
+  eachSelRow((s) => {
     for (let c = rc.c1; c <= rc.c2; c++) {
-      const k = sel.cols[c];
-      if (k === 'prompt' || k === '__beat') continue;   // 非直写列跳过
+      const k = sel.cols[c];   // 死守卫退役（F2-P6）：伪列无 data-field，进不了选区
       const nv = sSrc[k] == null ? '' : String(sSrc[k]);
       const cur = s[k] == null ? '' : String(s[k]);
       if (nv === cur) continue;
       ops.push({ id: s.id, field: k, value: nv });
     }
-  }
+  }, from, rc.r2);
   if (!ops.length) { toast('没有需要填充的变化'); return; }
   if (ops.length > 400) { toast('一次最多 400 格（本次 ' + ops.length + '）', 'err'); return; }
   batchWrite(ops, '向下填充');
@@ -422,17 +500,12 @@ function fillDown() {
 
 export function applyFieldValue(field, value, label) {
   if (!sel) return;
-  const rc = rectOf();
   const ops = [];
-  for (let r = rc.r1; r <= rc.r2; r++) {
-    const tr = sel.rows[r];
-    const s = tr ? shotById(Number(tr.dataset.id)) : null;
-    if (!s) continue;
+  const nv = value == null ? '' : String(value);
+  eachSelRow((s) => {
     const cur = s[field] == null ? '' : String(s[field]);
-    const nv = value == null ? '' : String(value);
-    if (cur === nv) continue;
-    ops.push({ id: s.id, field: field, value: nv });
-  }
+    if (cur !== nv) ops.push({ id: s.id, field: field, value: nv });
+  });
   if (!ops.length) { toast('选中的镜头本来就是这个值'); return; }
   if (ops.length > 400) { toast('一次最多 400 行', 'err'); return; }
   batchWrite(ops, label || '批量设值');
@@ -440,15 +513,11 @@ export function applyFieldValue(field, value, label) {
 
 // 选区命中的节拍（M5 批2c）：所选行去重后的节拍 id（表序；平铺跨节拍时为多个）
 export function selBeatIds() {
-  if (!sel) return [];
-  const rc = rectOf();
   const ids = [];
-  for (let r = rc.r1; r <= rc.r2; r++) {
-    const tr = sel.rows[r];
-    const s = tr ? shotById(Number(tr.dataset.id)) : null;
-    if (!s || s.beat_id == null) continue;
+  eachSelRow((s) => {
+    if (s.beat_id == null) return;
     if (ids.indexOf(s.beat_id) === -1) ids.push(s.beat_id);
-  }
+  });
   return ids;
 }
 

@@ -1,5 +1,5 @@
 // 右键菜单（M2-3；M2-5 行副本；M2-6 结构操作）：镜头行（插入/删除/副本/清空）+ 节拍头（副本/删除）+ 选区变体。
-// 挂在 #view 上（事件委托）；复制走 execCommand 兜底（局域 http 下无 clipboard API）。
+// 挂在 #view 上（事件委托）；复制走 clipboard.js（navigator.clipboard 优先，execCommand 兜底）。
 import { api } from './api.js';
 import { toast, isTypingTarget } from './ui.js';
 import { openMenu, menuOpen } from './menu.js';
@@ -8,7 +8,7 @@ import { writeClipboard, pasteBlock, toTSV, tableFieldKeys } from './clipboard.j
 import { refreshShotCell, refreshBeatAction } from './table.js';
 import { isAiField, aiMenu, aiMenuForBeat, targetsFromSel } from './aiwrite.js';
 import { joinPrevGroup, canJoinPrev } from './hotbox.js';
-import { current as selCurrent, inCell, copySelectionTSV, clearSelectionCells, tlCell, rectOf } from './selection.js';
+import { current as selCurrent, inCell, copySelectionTSV, clearSelectionCells, tlCell, rectOf, selectCell } from './selection.js';
 
 let shotsOf = null;
 let beatsOf = null;
@@ -40,17 +40,17 @@ export function bindCellMenu(view, ctx) {
     }
   });
 
-  // 直接粘贴（M5 批2）：选区就位时 Ctrl+V 即贴（菜单待命锚点优先）；编辑态/浮层内不劫持。
+  // 直接粘贴（M5 批2；F2-W18：待命态退役——菜单项改为「把选区放到该格」，Esc 走既有选区路由）：
+  // 选区就位时 Ctrl+V 即贴；编辑态/浮层内不劫持。
   document.addEventListener('paste', (e) => {
     if (menuOpen()) return;
     const t = e.target;
     if (isTypingTarget(t)) return;
     if (document.querySelector('.cell-editor, .cam-editor')) return;
-    const anchor = pasteAnchor || (selCurrent() ? tlCell() : null);
+    const anchor = selCurrent() ? tlCell() : null;
     if (!anchor) return;
     e.preventDefault();
     e.stopPropagation();
-    if (pasteArmed) pasteArmed();
     const text = e.clipboardData ? e.clipboardData.getData('text/plain') : '';
     pasteBlock(anchor, text, pasteCtx);
   }, true);
@@ -118,8 +118,7 @@ function openSelMenu(td, tr, e) {
       return;
     }
     if (k === 'paste') {
-      const tlc = tlCell();
-      if (tlc) armPaste({ td: tlc.td, tr: tlc.tr, field: tlc.field });
+      toast('已就位：Ctrl+V 从选区左上粘贴（Esc 取消）');
       return;
     }
     onCellMenuPick(k, td, tr, findShot(Number(tr.dataset.id)), td.dataset.field, td.closest('table'), e);
@@ -149,7 +148,8 @@ async function onCellMenuPick(k, td, tr, s, key, table, e) {
   } else if (k === 'joinPrev') {
     await joinPrevGroup(s.id);
   } else if (k === 'paste') {
-    armPaste({ td, tr, field: key });
+    selectCell(td);                                 // F2-W18：锚点=选区左上（直连路径），Esc 由选区路由取消
+    toast('已就位：Ctrl+V 从此格起粘贴（Esc 取消）');
   } else if (k === 'clear') {
     const old = s[key] == null ? '' : s[key];
     if (String(old) === '') { toast('本来就是空的'); return; }
@@ -185,41 +185,9 @@ async function duplicateRow(s) {
   }
 }
 
-// 粘贴待命（菜单发起）：登记锚点，等用户 Ctrl+V 时由直连监听取用；
-// 直连路径（M5 批2）锚点未登记时取选区左上——选区就位直接 Ctrl+V 即贴。
-let pasteArmed = null;    // disarm 回调
-let pasteAnchor = null;   // 菜单登记的待命锚点
-
-function armPaste(anchor) {
-  if (pasteArmed) pasteArmed();
-  pasteAnchor = anchor;
-  toast('粘贴就绪：按 Ctrl+V（Esc 取消）');
-  const onKey = (e) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      e.stopPropagation();
-      disarm();
-      toast('已取消粘贴');
-    }
-  };
-  const tmr = setTimeout(() => { disarm(); }, 6000);
-  function disarm() {
-    document.removeEventListener('keydown', onKey, true);
-    clearTimeout(tmr);
-    pasteArmed = null;
-    pasteAnchor = null;
-  }
-  pasteArmed = disarm;
-  document.addEventListener('keydown', onKey, true);
-}
-
-const pasteCtx = {
-  getShot: findShot,
-  refreshCell: function (id, key) {
-    const s = findShot(id);
-    if (s) refreshShotCell(s, key);
-  },
-};
+// 粘贴待命态已退役（F2-W18）：菜单项改为把选区放到目标格，Ctrl+V 直连路径取选区左上；
+// 原 capture Esc + 6s 定时器的私有待命态会抢占编辑面 Esc（B5）——随退役消失。
+const pasteCtx = { getShot: findShot };
 
 // ── M2-6 结构操作 ──
 

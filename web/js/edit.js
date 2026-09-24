@@ -77,6 +77,12 @@ export function notifyRowsChanged(table, field, id) {
 
 // cfg: { table, id, field, label, getValue(), onLocal(v), renderCell(),
 //        multiline?, select?: [options], save?: async (oldV, newV) => (抛错=失败) }
+// 编辑句柄（F2-W11）：跨模块入口收进 WeakMap，不再借 DOM expando 传值
+const EDITOR_HANDLES = new WeakMap();
+export function editorHandleAt(host) {
+  return EDITOR_HANDLES.get(host) || null;
+}
+
 export function attachEditable(host, cfg) {
   host.classList.add('editable');
   if (!host.title) host.title = cfg.dbl ? '双击编辑' : '点击编辑';
@@ -84,12 +90,19 @@ export function attachEditable(host, cfg) {
     ev.stopPropagation();
     if (cfg.dbl) ev.preventDefault();
     if (cfg.select) {
-      host._seedText = null;
       openSelectMenu(host, cfg);
       return;
     }
     if (host.querySelector('.cell-editor')) return;
-    openEditor(host, cfg);
+    openEditor(host, cfg, null);
+  });
+  EDITOR_HANDLES.set(host, {
+    openSeed(seed) {                                  // 打字即编入口（F2-W11）：替代 td._seedText + 合成 dblclick
+      if (cfg.select) { openSelectMenu(host, cfg); return true; }
+      if (host.querySelector('.cell-editor')) return false;
+      openEditor(host, cfg, seed);
+      return true;
+    },
   });
 }
 
@@ -105,9 +118,7 @@ function openSelectMenu(host, cfg) {
   }, { onClosed: () => host.classList.remove('editing') });
 }
 
-function openEditor(host, cfg) {
-  const seed = host._seedText;      // 打字即编种子（M5 批2，一次性）
-  host._seedText = null;
+function openEditor(host, cfg, seed) {
   let base = cfg.getValue() == null ? '' : String(cfg.getValue());
   const ed = document.createElement(cfg.multiline ? 'textarea' : 'input');
   ed.value = seed != null ? String(seed) : base;
@@ -273,10 +284,16 @@ export function attachCamEditor(host, cfg) {
     if (host.querySelector('.cam-editor')) return;
     openCamForm(host, cfg);
   });
+  EDITOR_HANDLES.set(host, {
+    openSeed() {                                      // 打字即编落在摄影机格 → 开复合控件（种子不适用）
+      if (host.querySelector('.cam-editor')) return false;
+      openCamForm(host, cfg);
+      return true;
+    },
+  });
 }
 
 function openCamForm(host, cfg) {
-  host._seedText = null;
   const cam = cfg.getCam();
   const opts = cfg.camOptions();
   const p = parseCam(cam.raw);
