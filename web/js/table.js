@@ -4,7 +4,7 @@ import { state, fieldOf, groupsById, fieldsOf, fieldLabel } from './state.js';
 import { buildGrid, applyColWidthTo } from './grid.js';
 import { el, fmt, toast, flashIntoView } from './ui.js';
 import { cellContent } from './cells.js';
-import { attachEditable, attachCamEditor, parseCam, recordUndo, batchUpdate } from './edit.js';
+import { attachEditable, attachCamEditor, recordUndo, batchUpdate } from './edit.js';
 import { api } from './api.js';
 import { buildPromptBox, openPromptDrawer, paintPromptCell } from './hotbox.js';
 import { isAiField, aiOpenFor } from './aiwrite.js';
@@ -265,29 +265,22 @@ function camAttachCfg(s, onRender, dbl) {
   };
 }
 
-// 焦段编辑归一化：写 focal；若旧串内嵌焦段 → 顺带把串重写为纯景别（一份来源）
+// 焦段编辑：直写 focal（F1-L4：旧串归一由一次性迁移 + 服务端校验接管，前端不再重写串）
 function lensSave(s, refresh) {
   return async (oldV, newV) => {
-    const p = parseCam(s.shot_size);
-    const oldValues = { shot_size: s.shot_size, focal: s.focal };
-    const writes = [{ field: 'focal', value: newV }];
-    if (p.lens) writes.push({ field: 'shot_size', value: p.t1 + (p.t2 ? ' ↓ ' + p.t2 : '') });
-    for (const w of writes) s[w.field] = w.value;
+    const oldFocal = s.focal;
+    s.focal = newV;
     refresh();
     try {
-      await batchUpdate(writes.map((w) => ({ table: 'shots', id: s.id, field: w.field, value: w.value })));
+      await batchUpdate([{ table: 'shots', id: s.id, field: 'focal', value: newV }]);
       recordUndo({
         type: 'custom', label: '焦段',
         undo: async () => {
-          await batchUpdate([
-            { table: 'shots', id: s.id, field: 'shot_size', value: oldValues.shot_size == null ? '' : oldValues.shot_size },
-            { table: 'shots', id: s.id, field: 'focal', value: oldValues.focal == null ? '' : oldValues.focal },
-          ]);
+          await batchUpdate([{ table: 'shots', id: s.id, field: 'focal', value: oldFocal == null ? '' : oldFocal }]);
         },
       });
     } catch (err) {
-      s.shot_size = oldValues.shot_size;
-      s.focal = oldValues.focal;
+      s.focal = oldFocal;
       refresh();
       throw err;
     }

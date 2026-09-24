@@ -388,8 +388,6 @@ async function commitCam(cfg, st, resetSlots) {
   const writes = [];
   if (newSize !== (cur.raw || '')) writes.push({ field: 'shot_size', value: newSize });
   if (lens !== (cur.focal || '')) writes.push({ field: 'focal', value: lens });
-  const pd = parseCam(cur.raw);
-  if (pd.dof && !cur.dof) writes.push({ field: 'dof', value: pd.dof });
   if (!writes.length) return;
   const oldVals = {};
   for (const w of writes) oldVals[w.field] = w.field === 'shot_size' ? cur.raw : cur[w.field];

@@ -113,6 +113,38 @@ class TestSceneNoGuards(unittest.TestCase):
         self.assertEqual(con.execute("SELECT scene_no FROM scenes WHERE id=1").fetchone()["scene_no"], "s010B")
 
 
+class TestCamEmbedGuard(unittest.TestCase):
+    """摄影机内嵌格式守卫（F1-L4）：shot_size 不得带焦段(mm)/景深(·浅|中|深)；update / batch 同源。"""
+
+    def test_update_rejects_embedded_lens(self):
+        con = make_db()
+        with self.assertRaises(ValueError) as cm:
+            ops.update_field(con, "shots", 1, "shot_size", "近景 ★★★★ 50mm·中")
+        self.assertIn("不能内嵌焦段", str(cm.exception))
+
+    def test_update_rejects_embedded_dof_only(self):
+        con = make_db()
+        with self.assertRaises(ValueError):
+            ops.update_field(con, "shots", 1, "shot_size", "近景 ★★★★ ·浅")
+
+    def test_update_allows_clean_and_two_tier(self):
+        con = make_db()
+        row, changed = ops.update_field(con, "shots", 1, "shot_size", "中景 ★★★")
+        self.assertTrue(changed)
+        self.assertEqual(row["shot_size"], "中景 ★★★")
+        row2, changed2 = ops.update_field(con, "shots", 1, "shot_size", "近景 ★★★★ ↓ 中全 ★★")
+        self.assertTrue(changed2)
+
+    def test_batch_same_guard(self):
+        con = make_db()
+        res = ops.batch_update(con, [
+            {"table": "shots", "id": 1, "field": "shot_size", "value": "极特 ★★★★★ 100mm·浅"},
+            {"table": "shots", "id": 2, "field": "shot_size", "value": "中景 ★★★"},
+        ])
+        self.assertEqual(res["changed"], 1)
+        self.assertIn("不能内嵌焦段", res["results"][0]["error"])
+
+
 class TestRenumber(unittest.TestCase):
     def test_renumber_by_position(self):
         con = make_db()

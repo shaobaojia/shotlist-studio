@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """写路径核心：字段更新 / 批量更新 / 痕迹（历史）/ 值校验（原 ops.py 拆分 · S1-L1）。"""
+import re
 from datetime import date, datetime
 from core import db, fields
 
@@ -69,6 +70,9 @@ def scene_no_taken(con, scene_no, exclude_id=None):
     return row is not None
 
 
+_CAM_EMBED_RE = re.compile(r"\d+mm|·(?:浅|中|深)")   # 摄影机内嵌焦段/景深判据（F1-L4 单源校验）
+
+
 def _check_field_value(con, table, row_id, field, value):
     """per-field 域层校验（update / batch 同源；P0·S1-B1）：返回规整后的值。
     场号：trim + 非空 + 唯一（唯一性检查与写入同连接、同事务收口）。"""
@@ -79,6 +83,10 @@ def _check_field_value(con, table, row_id, field, value):
         if scene_no_taken(con, v, exclude_id=row_id):
             raise ValueError("场号已存在：%s" % v)
         return v
+    if table == "shots" and field == "shot_size":
+        v = "" if value is None else str(value)
+        if _CAM_EMBED_RE.search(v):
+            raise ValueError("摄影机值不能内嵌焦段/景深——焦段→focal、景深→dof（分开写入）")
     return value
 
 
