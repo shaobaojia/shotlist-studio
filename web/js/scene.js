@@ -2,6 +2,7 @@
 // 表格与节拍区在 table.js；编辑引擎在 edit.js；拖动在 drag.js；筛选在 filter.js。
 import { api } from './api.js';
 import { state, fieldOf } from './state.js';
+import { hashOf, isCurrentScene } from './route.js';
 import { el, fmt, toast } from './ui.js';
 import { JIWEI_LEGEND } from './cells.js';
 import { buildTable, beatSection } from './table.js';
@@ -62,10 +63,7 @@ export async function renderScene(view, sceneNo) {
     view.appendChild(el('div', 'empty err', '加载失败：' + err.message));
     return;
   }
-  const curH = location.hash === '' ? '#/' : location.hash;
-  let curD = curH;
-  try { curD = decodeURIComponent(curH); } catch (e) { /* keep */ }
-  if (curD !== '#/' + sceneNo) return;
+  if (!isCurrentScene(sceneNo)) return;
   _refreshSeq++;   // 本场渲染生效：作废切场前在飞的刷新回包（P0·F1-B1）
   sortState = null;
   resetFilter();
@@ -123,10 +121,7 @@ export async function refreshCurrentView() {
   try {
     const next = await api.scene(no);
     if (seq !== _refreshSeq) return;                 // 更新一轮刷新在飞：本回包作废
-    const curH = location.hash === '' ? '#/' : location.hash;
-    let curD = curH;
-    try { curD = decodeURIComponent(curH); } catch (e) { /* keep */ }
-    if (curD !== '#/' + no) return;                  // 路由已切走：不回写
+    if (!isCurrentScene(no)) return;                 // 路由已切走：不回写
     if (!currentData || currentData.scene.scene_no !== no) return;   // 已切场：不回写
     currentData = next;
     paintScene(view);
@@ -388,9 +383,7 @@ function sceneHead(sc, data) {
       sc.scene_no = v;
       const st = state.scenes.find((x) => x.id === sc.id);
       if (st) st.scene_no = v;
-      if (location.hash === '#/' + oldV || location.hash === '#/' + encodeURIComponent(oldV)) {
-        location.hash = '#/' + v;
-      }
+      if (isCurrentScene(oldV)) location.hash = hashOf(v);
       window.dispatchEvent(new CustomEvent('shotlist:film-changed'));
       recordUndo({
         type: 'custom', label: '场号',
@@ -399,9 +392,7 @@ function sceneHead(sc, data) {
           sc.scene_no = oldV;
           const st2 = state.scenes.find((x) => x.id === sc.id);
           if (st2) st2.scene_no = oldV;
-          if (location.hash === '#/' + v || location.hash === '#/' + encodeURIComponent(v)) {
-            location.hash = '#/' + oldV;
-          }
+          if (isCurrentScene(v)) location.hash = hashOf(oldV);
           window.dispatchEvent(new CustomEvent('shotlist:film-changed'));
         },
       });

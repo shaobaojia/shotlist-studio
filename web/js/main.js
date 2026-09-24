@@ -2,6 +2,7 @@
 import { api } from './api.js';
 import { state } from './state.js';
 import { el, toast } from './ui.js';
+import { parseHash, sceneNo, hashOf } from './route.js';
 import { renderFilm } from './film.js';
 import { renderScene, refreshCurrentView } from './scene.js';
 import { undo, recordUndo } from './edit.js';
@@ -12,14 +13,6 @@ import { closeAuditPanel } from './auditpanel.js';
 
 let navBound = false;
 let dragChip = null;
-
-function decHash(h) {
-  try { return decodeURIComponent(h || ''); } catch (e) { return h || ''; }
-}
-
-function currentHash() {
-  return location.hash === '' ? '#/' : location.hash;
-}
 
 function buildNav() {
   const nav = document.getElementById('scene-nav');
@@ -152,12 +145,12 @@ async function onSceneMenuPick(k, sc) {
         type: 'custom', label: '创建场次副本',
         undo: async () => {
           await api.del({ table: 'scenes', id: ns.id });
-          location.hash = '#/' + sc.scene_no;
+          location.hash = hashOf(sc.scene_no);
           window.dispatchEvent(new CustomEvent('shotlist:film-changed'));
         },
       });
       await reloadFilm();
-      if (ns.scene_no) location.hash = '#/' + ns.scene_no;
+      if (ns.scene_no) location.hash = hashOf(ns.scene_no);
     } else if (k === 'del') {
       const res = await api.del({ table: 'scenes', id: sc.id });
       const d = res.deleted || {};
@@ -167,11 +160,10 @@ async function onSceneMenuPick(k, sc) {
         undo: async () => {
           await api.restore({ kind: 'scene', payload: d });
           window.dispatchEvent(new CustomEvent('shotlist:film-changed'));
-          if (d.scene && d.scene.scene_no) location.hash = '#/' + d.scene.scene_no;
+          if (d.scene && d.scene.scene_no) location.hash = hashOf(d.scene.scene_no);
         },
       });
       await reloadFilm();
-      if (currentHash() === '#/' + sc.scene_no) location.hash = '#/';
     }
   } catch (err) {
     toast('操作失败：' + err.message, 'err');
@@ -191,7 +183,7 @@ async function addScene() {
       },
     });
     await reloadFilm();
-    if (sc.scene_no) location.hash = '#/' + sc.scene_no;
+    if (sc.scene_no) location.hash = hashOf(sc.scene_no);
   } catch (err) {
     toast('添加失败：' + err.message, 'err');
   }
@@ -205,21 +197,20 @@ async function reloadFilm() {
     buildNav();
     refreshNavBadges();
     applyNavOn();   // 重建后重打高亮（拖动排序/删场触发；hash 未变无 hashchange）（P0·F1-B7）
-    const cur = decHash(currentHash());
-    const m = cur.match(/^#\/(.+)$/);
-    if (m && !state.scenes.some((x) => x.scene_no === m[1])) {
+    const curNo = sceneNo();
+    if (curNo && !state.scenes.some((x) => x.scene_no === curNo)) {
       location.hash = '#/';
       return;
     }
-    if (!m) renderFilm(document.getElementById('view'));
+    if (!curNo) renderFilm(document.getElementById('view'));
   } catch (err) { /* 保留现状 */ }
 }
 
 // 按当前 hash 重打导航高亮（nav 重建后调用；不触发视图重绘）（P0·F1-B7）
 function applyNavOn() {
-  const cur = decHash(currentHash());
+  const cur = parseHash();
   document.querySelectorAll('#scene-nav .chip').forEach((chip) => {
-    chip.classList.toggle('on', decHash(chip.getAttribute('href') || '') === cur);
+    chip.classList.toggle('on', parseHash(chip.getAttribute('href') || '') === cur);
   });
   const onChip = document.querySelector('#scene-nav .chip.on');
   if (onChip && onChip.scrollIntoView) onChip.scrollIntoView({ inline: 'nearest', block: 'nearest' });
@@ -227,10 +218,9 @@ function applyNavOn() {
 
 function route() {
   applyNavOn();
-  const cur = decHash(currentHash());
+  const curNo = sceneNo();
   const view = document.getElementById('view');
-  const m = cur.match(/^#\/(.+)$/);
-  if (m) renderScene(view, m[1]);
+  if (curNo) renderScene(view, curNo);
   else { closeAuditPanel(); renderFilm(view); }   // 离场去「全片」：清单不留浮（M4）
 }
 

@@ -3,6 +3,7 @@
 // 跳镜一律 filter.jumpToShotById（滚行+闪烁单点）；命令复用既有工具栏按钮（有则点，无则提示）。
 import { el, toast } from './ui.js';
 import { state } from './state.js';
+import { sceneNo, hashOf } from './route.js';
 import { jumpToShotById } from './filter.js';
 
 let wrap = null, inputEl = null, listEl = null;
@@ -26,10 +27,10 @@ function clickToolbar(text) {
 }
 
 function exportScene(fmt) {
-  const m = location.hash.match(/^#\/(s\w+)/);
-  if (!m) { toast('先进入一个场，再导出'); return; }
+  const no = sceneNo();
+  if (!no) { toast('先进入一个场，再导出'); return; }
   const a = document.createElement('a');
-  a.href = '/api/export?scene=' + encodeURIComponent(m[1]) + '&format=' + fmt;
+  a.href = '/api/export?scene=' + encodeURIComponent(no) + '&format=' + fmt;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -64,7 +65,7 @@ function collect(q) {
     for (const sc of state.scenes || []) {
       const label = sc.scene_no + (sc.title ? ' ' + sc.title : '');
       const r = Math.max(rank(sc.scene_no, ql), rank(label, ql), rank(sc.title, ql));
-      if (r) scn.push({ group: '场次', label, hint: '跳转', run: () => { location.hash = '#/' + sc.scene_no; } });
+      if (r) scn.push({ group: '场次', label, hint: '跳转', run: () => { location.hash = hashOf(sc.scene_no); } });
     }
     let n = 0;
     for (const tr of document.querySelectorAll('tr.shot[data-id]')) {

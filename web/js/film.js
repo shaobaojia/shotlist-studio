@@ -1,4 +1,5 @@
 import { state } from './state.js';
+import { hashOf } from './route.js';
 import { el, fmt } from './ui.js';
 
 const COLS = [
@@ -56,7 +57,7 @@ export function renderFilm(view) {
       td.title = td.textContent;
       tr.appendChild(td);
     });
-    tr.addEventListener('click', () => { location.hash = '#/' + sc.scene_no; });
+    tr.addEventListener('click', () => { location.hash = hashOf(sc.scene_no); });
     tb.appendChild(tr);
   }
   t.appendChild(tb);
