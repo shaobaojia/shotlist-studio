@@ -4,6 +4,7 @@
 import { api } from './api.js';
 import { el, toast } from './ui.js';
 import { refreshHistoryIfOpen } from './history.js';
+import { isRowVisible } from './filter.js';
 
 let ctx = null;        // { getData }
 let cur = null;        // { sceneId, issues, counts, job }
@@ -85,12 +86,12 @@ function resolveCarrier(carrier, target, data) {
     const row = first && document.querySelector('tr.shot[data-id="' + first.id + '"]');
     if (!row) return null;
     return { node: row, lamp: row.querySelector('td.cell-toggle') || row, head: null, row: row, sec: null,
-             hidden: row.style.display === 'none' };
+             hidden: !isRowVisible(row) };
   }
   const row = document.querySelector('tr.shot[data-id="' + shotIdOf(carrier, target) + '"]');
   if (!row) return null;
   return { node: row, lamp: row.querySelector('td.cell-toggle') || row, head: null, row: row, sec: null,
-           hidden: row.style.display === 'none' };
+           hidden: !isRowVisible(row) };
 }
 
 function decorate(data) {

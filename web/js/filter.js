@@ -140,6 +140,11 @@ export function jumpToShot(raw, ctx) {
 }
 
 // 滚到行并闪烁（id 单点；挂件带/镜号跳转共用）
+// 行可见性谓词（F1-W24 单点）：行是否被过滤藏起（filter 写、各处读）
+export function isRowVisible(tr) {
+  return tr.style.display !== 'none';
+}
+
 export function jumpToShotById(id) {
   const tr = document.querySelector('tr.shot[data-id="' + id + '"]');
   if (!tr) return false;

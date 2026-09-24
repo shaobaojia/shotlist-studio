@@ -1,7 +1,7 @@
 // 挂件带 v2.1（M5k-2）——底部冻结通栏 + 向上浮层。
 // 一条条带三种读法：①竖向高/色＝景别 ②横向宽＝时长（横轴＝时间刻度尺）③情绪曲线叠加（平滑曲线+数据点）。
 // 交互：上沿拖拽＝面板高矮（窗口式）；滚轮＝横向缩放（时间轴式，光标锚定）；中键拖拽＝平移；shift+滚轮＝横滚。
-import { el, toast, durTick } from './ui.js';
+import { el, toast, durTick, lsGet, lsSet, clamp } from './ui.js';
 import { jumpToShotById } from './filter.js';
 
 const KEY = 'studio.dock';
@@ -41,25 +41,17 @@ function bindTip(node) {
   node.addEventListener('click', tipHide);
 }
 
-function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
-
 function load() {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return;
-    const o = JSON.parse(raw);
-    if (!o || typeof o !== 'object') return;
-    ST.open = !!o.open;
-    if ('size' in o) ST.size = !!o.size;
-    if ('rhythm' in o) ST.rhythm = !!o.rhythm;
-    if ('mood' in o) ST.mood = !!o.mood;
-    if (typeof o.h === 'number') ST.h = clamp(Math.round(o.h), 40, 380);
-    if (typeof o.zoom === 'number') ST.zoom = clamp(o.zoom, ZMIN, ZMAX);
-  } catch (e) { /* ignore */ }
+  const o = lsGet(KEY, null);
+  if (!o || typeof o !== 'object') return;
+  ST.open = !!o.open;
+  if ('size' in o) ST.size = !!o.size;
+  if ('rhythm' in o) ST.rhythm = !!o.rhythm;
+  if ('mood' in o) ST.mood = !!o.mood;
+  if (typeof o.h === 'number') ST.h = clamp(Math.round(o.h), 40, 380);
+  if (typeof o.zoom === 'number') ST.zoom = clamp(o.zoom, ZMIN, ZMAX);
 }
-function save() {
-  try { localStorage.setItem(KEY, JSON.stringify(ST)); } catch (e) { /* ignore */ }
-}
+function save() { lsSet(KEY, ST); }
 
 function tierOf(str) {
   const v = String(str == null ? '' : str);

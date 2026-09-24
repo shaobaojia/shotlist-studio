@@ -3,6 +3,7 @@
 import { api } from './api.js';
 import { toast } from './ui.js';
 import { recordUndo } from './edit.js';
+import { isRowVisible } from './filter.js';
 
 export function writeClipboard(text) {
   return new Promise((resolve) => {
@@ -92,7 +93,7 @@ export async function pasteBlock(anchor, text, ctx) {
   const keys = tableFieldKeys(table);
   const col0 = keys.indexOf(anchor.field);
   if (col0 === -1) { toast('这个格子不支持粘贴'); return; }
-  const trs = Array.from(table.querySelectorAll('tbody tr.shot')).filter((tr) => tr.style.display !== 'none');
+  const trs = Array.from(table.querySelectorAll('tbody tr.shot')).filter(isRowVisible);
   const row0 = trs.indexOf(anchor.tr);
   if (row0 === -1) { toast('找不到粘贴起点'); return; }
   const jobs = [];

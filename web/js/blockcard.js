@@ -4,7 +4,7 @@
 // 方向随贴附：浮窗、右贴附＝从左边抽（标签在左缘）；下贴附＝从上边抽（标签在上缘）。
 // 只在编辑态出现；宽度 / 高度沿卡缘拖拽可调并记忆；内容＝块库（分类筛选 + 搜索 + 点击插入）。
 // M5d-4：随面板入场后再浮现（防「块库先于面板」）；贴紧时面板去左/上投影（bc-under）。
-import { el } from './ui.js';
+import { el, lsGet, lsSet, clamp } from './ui.js';
 import {
   ensureBlocks, blocksData, onBlocksChange, blockMatch, sortedBlocks,
 } from './blocks.js';
@@ -35,9 +35,8 @@ const mem = { w: DEF_W, h: DEF_H, open: false };
 let filter = 'all';
 let query = '';
 
-function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-function lsLoad() { try { return JSON.parse(localStorage.getItem(LS_KEY) || '{}') || {}; } catch (e) { return {}; } }
-function lsSave() { try { localStorage.setItem(LS_KEY, JSON.stringify(mem)); } catch (e) { /* ignore */ } }
+function lsLoad() { return lsGet(LS_KEY, {}) || {}; }
+function lsSave() { lsSet(LS_KEY, mem); }
 
 // 面板「贴紧」类：只有镜像状态真的变化才写 DOM——本环境 classList 幂等操作也会
 // 虚假触发 attribute mutation，直接写会与观察者形成无限回路（M5d-4 实测死机根因）
@@ -101,9 +100,10 @@ function buildList(host) {
 
   let folded = foldLoad();   // 折叠集：'c<id>' / 'none'
   function foldLoad() {
-    try { const v = JSON.parse(localStorage.getItem(LS_FOLD) || '[]'); return new Set(Array.isArray(v) ? v : []); } catch (e) { return new Set(); }
+    const v = lsGet(LS_FOLD, []);
+    return new Set(Array.isArray(v) ? v : []);
   }
-  function foldSave() { try { localStorage.setItem(LS_FOLD, JSON.stringify(Array.from(folded))); } catch (e) { /* ignore */ } }
+  function foldSave() { lsSet(LS_FOLD, Array.from(folded)); }
 
   // 卡片 API（列表 / 菜单共用）：refresh=重绘；insert=插入到编辑面；foldAll=全收/全展
   const ctx = {

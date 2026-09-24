@@ -7,10 +7,16 @@ import { attachEditable, attachCamEditor, parseCam, recordUndo } from './edit.js
 import { api } from './api.js';
 import { buildPromptBox, openPromptDrawer, paintPromptCell } from './hotbox.js';
 import { isAiField, aiOpenFor } from './aiwrite.js';
+import { isRowVisible } from './filter.js';
 
 // 多行编辑判据＝字段字典的 multiline（F1-P5：白名单收进 fields.py 单源）
 function isMultiline(f) {
   return !!(f && f.multiline);
+}
+
+// 节拍「数字序号」判据单点（F1-W15）：数字开头（"12b" 同判为编号）
+function isBeatNumbered(b) {
+  return !!(b && b.beat_no != null && /^\d+/.test(String(b.beat_no)));
 }
 
 const tableCols = new WeakMap();   // table 元素 → 列定义（列宽跨表同步用）
@@ -185,7 +191,7 @@ function shotCell(s, f, groups, data, hook) {
   if (f.key === '__beat') {
     const b = data.beats.find((x) => x.id === s.beat_id);
     td.textContent = b
-      ? ((/^\d+$/.test(String(b.beat_no)) ? b.beat_no + ' · ' : '') + (b.name || ''))
+      ? ((isBeatNumbered(b) ? b.beat_no + ' · ' : '') + (b.name || ''))
       : '—';
     return td;
   }
@@ -201,24 +207,7 @@ function shotCell(s, f, groups, data, hook) {
   td.dataset.field = f.key;
 
   if (f.type === 'camera') {
-    attachCamEditor(td, {
-      dbl: true,
-      id: s.id,
-      getCam: () => ({ raw: s.shot_size, focal: s.focal, dof: s.dof }),
-      setCam: (k, v) => { s[k] = v; },
-      renderCell: () => {
-        renderShotField(td, s, f);
-        refreshDetailValue(s, 'shot_size');
-        refreshDetailValue(s, 'focal');
-        refreshDetailValue(s, 'dof');
-      },
-      refreshSiblings: () => {
-        refreshDetailValue(s, 'shot_size');
-        refreshDetailValue(s, 'focal');
-        refreshDetailValue(s, 'dof');
-      },
-      camOptions: camOptions,
-    });
+    attachCamEditor(td, camAttachCfg(s, () => { renderShotField(td, s, f); refreshCamValues(s); }, true));
     return td;
   }
 
@@ -247,36 +236,28 @@ function refreshDetailValue(s, key) {
     .forEach((v) => { v.textContent = fmt(s[key]); });
 }
 
-function refreshTableValue(s, key) {
-  const f = fieldOf(key);
-  if (!f) return;
-  document.querySelectorAll('tr.shot[data-id="' + s.id + '"] td[data-field="' + key + '"]')
-    .forEach((td) => { renderShotField(td, s, f); });
-}
-
 function camOptions() {
   const sz = fieldOf('shot_size');
   const fo = fieldOf('focal');
   return { tiers: (sz && sz.options) || [], lens: (fo && fo.options) || [] };
 }
 
-function detailCamCfg(s, v) {
+// 摄影机三元组刷新单点（F1-W11）：表内列 + 详情三值，一处口径
+const CAM_KEYS = ['shot_size', 'focal', 'dof'];
+function refreshCamValues(s) {
+  refreshShotCell(s, 'shot_size');
+  for (const k of CAM_KEYS) refreshDetailValue(s, k);
+}
+
+// 摄影机控件装配单点（F1-W11）：表内 / 详情共用；dbl=表内双击口径；onRender=各自重画体
+function camAttachCfg(s, onRender, dbl) {
   return {
+    dbl: !!dbl,
     id: s.id,
     getCam: () => ({ raw: s.shot_size, focal: s.focal, dof: s.dof }),
     setCam: (k, val) => { s[k] = val; },
-    renderCell: () => {
-      v.textContent = fmt(s.shot_size);
-      refreshTableValue(s, 'shot_size');
-      refreshDetailValue(s, 'shot_size');
-      refreshDetailValue(s, 'focal');
-      refreshDetailValue(s, 'dof');
-    },
-    refreshSiblings: () => {
-      refreshTableValue(s, 'shot_size');
-      refreshDetailValue(s, 'focal');
-      refreshDetailValue(s, 'dof');
-    },
+    renderCell: onRender,
+    refreshSiblings: () => refreshCamValues(s),
     camOptions: camOptions,
   };
 }
@@ -317,8 +298,8 @@ function detailBox(s, groups, data) {
     item.appendChild(el('div', 'kv-label', f.label));
     const v = el('div', 'kv-value', fmt(s[f.key]));
     v.dataset.field = f.key;
-    if (f.key === 'shot_size') {
-      attachCamEditor(v, detailCamCfg(s, v));
+    if (f.type === 'camera') {
+      attachCamEditor(v, camAttachCfg(s, () => { v.textContent = fmt(s.shot_size); refreshCamValues(s); }));
     } else if (f.key === 'focal') {
       attachEditable(v, {
         table: 'shots', id: s.id, field: 'focal', label: f.label,
@@ -328,8 +309,7 @@ function detailBox(s, groups, data) {
         renderCell: () => { v.textContent = fmt(s.focal); },
         save: lensSave(s, () => {
           v.textContent = fmt(s.focal);
-          refreshTableValue(s, 'shot_size');
-          refreshDetailValue(s, 'shot_size');
+          refreshShotCell(s, 'shot_size');
         }),
       });
     } else {
@@ -341,7 +321,7 @@ function detailBox(s, groups, data) {
         aiOpen: isAiField(f.key) ? aiOpenFor : undefined,
         getValue: () => s[f.key],
         onLocal: (val) => { s[f.key] = val; },
-        renderCell: () => { v.textContent = fmt(s[f.key]); refreshTableValue(s, f.key); },
+        renderCell: () => { v.textContent = fmt(s[f.key]); refreshShotCell(s, f.key); },
       });
     }
     item.appendChild(v);
@@ -354,7 +334,7 @@ function detailBox(s, groups, data) {
 export function beatSection(b, data, opts) {
   const sec = el('section', 'beat');
   if (b.id != null) sec.dataset.beatId = b.id;
-  const numeric = b.beat_no != null && /^\d+/.test(String(b.beat_no));
+  const numeric = isBeatNumbered(b);
   if (numeric) {
     const head = el('div', 'beat-head');
     head.draggable = true;
@@ -534,7 +514,7 @@ function walkCell(td, dir) {
 }
 
 export function visibleRows(table) {
-  return Array.from(table.querySelectorAll('tbody tr.shot')).filter((tr) => tr.style.display !== 'none');
+  return Array.from(table.querySelectorAll('tbody tr.shot')).filter(isRowVisible);
 }
 
 // 单格重画 + 详情区同步（批量/清空/粘贴共用）

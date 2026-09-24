@@ -1,23 +1,15 @@
 // 浮层抽屉基件（M5 批3「右缘抽屉体系」）
 // 形态基准 = 旧版提示词面板：浮动卡片 + 标题栏拖拽 + 八向缩放 + 贴附（右/下）+ 钉住 + 位置尺寸记忆。
 // 按钮行由使用方按序装配（panel-btn 统一样式：红底白字 11px 中文全词）。
-import { el } from './ui.js';
+import { el, lsGet, lsSet, clamp, readVarPx } from './ui.js';
 
 const MIN_W = 320, MIN_H = 200;
 const LS = (id) => 'studio.drawer.' + id;
 
-function lsGet(id) {
-  try { return JSON.parse(localStorage.getItem(LS(id)) || 'null'); } catch (e) { return null; }
-}
-function lsSet(id, v) {
-  try { localStorage.setItem(LS(id), JSON.stringify(v)); } catch (e) { /* ignore */ }
-}
-function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-
-// 吸顶区上界：顶栏高度（右贴附/默认打开的顶界用）
+// 吸顶区上界：顶栏高度读 CSS 变量（F1-B6：与顶栏实测同一来源；旧 .topbar 选择器已不存在）
 function headTop() {
-  const tb = document.querySelector('.topbar');
-  return Math.max(48, tb ? tb.offsetHeight : 48) + 6;
+  const h = readVarPx('--topbar-h');
+  return Math.max(48, h || 0) + 6;
 }
 
 export function createDrawer(opts) {
@@ -51,7 +43,7 @@ export function createDrawer(opts) {
   function saveState() {
     if (frame.hidden) return;
     const r = frame.getBoundingClientRect();
-    lsSet(id, {
+    lsSet(LS(id), {
       dock: st.dock,
       left: Math.round(r.left), top: Math.round(r.top),
       width: Math.round(r.width), height: Math.round(r.height),
@@ -59,7 +51,7 @@ export function createDrawer(opts) {
   }
 
   function applyRect() {
-    const m = lsGet(id) || {};
+    const m = lsGet(LS(id), null) || {};
     const vw = window.innerWidth, vh = window.innerHeight;
     const w = clamp(Number(m.width) || opts.width || 500, MIN_W, Math.round(vw * 0.9));
     const h = clamp(Number(m.height) || opts.height || Math.round(vh * 0.72), MIN_H, Math.round(vh * 0.9));
