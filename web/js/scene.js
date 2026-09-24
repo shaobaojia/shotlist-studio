@@ -28,9 +28,22 @@ let sortState = null;      // { key, dir: 1|-1 } | null —— 仅视图，不�
 let currentData = null;
 let promptGroupsMap = {};   // 本帧渲染共用的组映射（拼装台就地更新用；平铺/分组各表共此一份）
 
+// 整场镜头数组缓存（F1-W22）：currentData 换对象即失效；走格/查找/右键等高频路径共用
+let _shotsCache = null, _shotsCacheFor = null;
+function allShotsCached() {
+  if (_shotsCacheFor !== currentData) {
+    _shotsCacheFor = currentData;
+    _shotsCache = currentData ? allShots(currentData) : [];
+  }
+  return _shotsCache;
+}
+
 const fctx = {
   getData: () => currentData,
-  allShots: () => (currentData ? allShots(currentData) : []),
+  allShots: () => allShotsCached(),
+  shotOf: (id) => allShotsCached().find((s) => s.id === id) || null,
+  beatOf: (id) => { const d = currentData; return d ? (d.beats || []).find((b) => b.id === id) || null : null; },
+  scene: () => (currentData ? currentData.scene : null),
   getView: () => document.getElementById('view'),
   repaint: () => paintScene(document.getElementById('view')),
   apply: () => { clearSel(); applyFilter(fctx); },
@@ -72,30 +85,30 @@ export async function renderScene(view, sceneNo) {
   currentData = data;
   bindDragOnce(view);
   bindCellMenu(view, {
-    allShots: () => (currentData ? allShots(currentData) : []),
+    allShots: fctx.allShots,
     beats: () => (currentData ? currentData.beats : []),
     sceneId: () => (currentData ? currentData.scene.id : null),
     refresh: refreshCurrentView,
   });
   bindSelection(view, {
-    getShot: (id) => (currentData ? allShots(currentData).find((s) => s.id === id) : null),
-    getBeat: (id) => (currentData ? (currentData.beats || []).find((b) => b.id === id) : null),
-    getScene: () => (currentData ? currentData.scene : null),
+    getShot: fctx.shotOf,
+    getBeat: fctx.beatOf,
+    getScene: fctx.scene,
     refreshScene: refreshSceneSoon,
   });
   initHotbox({
-    getData: () => currentData,
+    getData: fctx.getData,
     refresh: refreshCurrentView,
-    allShots: () => (currentData ? allShots(currentData) : []),
+    allShots: fctx.allShots,
     groupsMap: () => promptGroupsMap,
-    reapply: () => { clearSel(); applyFilter(fctx); },
+    reapply: fctx.apply,
   });
   initScriptDrawer({
-    getScene: () => (currentData ? currentData.scene : null),
+    getScene: fctx.scene,
   });
-  initAudit({ getData: () => currentData });
+  initAudit({ getData: fctx.getData });
   initAiWrite({
-    getShot: (id) => (currentData ? allShots(currentData).find((s) => s.id === id) : null),
+    getShot: fctx.shotOf,
     sceneId: () => (currentData ? currentData.scene.id : null),
   });
   paintScene(view);
@@ -291,19 +304,25 @@ window.addEventListener('shotlist:rows-changed', (ev) => {
   if (hit) syncLive();
 });
 
+// 活体同步（F1-W8）：rAF 合并同帧多次事件；镜头数组单次取用（W22 缓存）
+let _liveRaf = 0;
 function syncLive() {
+  if (_liveRaf) return;
+  _liveRaf = requestAnimationFrame(() => { _liveRaf = 0; applyLive(); });
+}
+function applyLive() {
   const data = currentData;
   const view = document.getElementById('view');
   if (!data || !view) return;
+  const shs = allShotsCached();
   const st = view.querySelector('.scene-stats .ss-text');
   if (st) {
-    const shs = allShots(data);
     const total = shs.reduce((n, s) => n + (parseFloat(s.duration) || 0), 0);
     st.textContent = shs.length + ' 镜 / ' + data.beats.length + ' 节拍 / 总时长 ' + fmtDur(total);
   }
   const old = view.querySelector('.dock');
   if (old) {
-    const fresh = buildRibbon(data, allShots(data));
+    const fresh = buildRibbon(data, shs);
     if (fresh) old.replaceWith(fresh); else old.remove();
     document.documentElement.style.setProperty('--dock-h', fresh ? fresh.offsetHeight + 'px' : '0px');
   }
