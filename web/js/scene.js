@@ -469,7 +469,7 @@ function sceneHead(sc, data) {
   head.appendChild(h1);
 
   const meta = el('div', 'scene-meta');
-  const kvEdit = (label, field) => {
+  const kvEdit = (field, label) => {
     if (sc[field] == null || sc[field] === '') return;
     const s = el('span', 'kv');
     s.appendChild(el('b', null, label));
@@ -483,15 +483,18 @@ function sceneHead(sc, data) {
     s.appendChild(v);
     meta.appendChild(s);
   };
-  kvEdit('价值', 'value');
-  if (sc.pole_start || sc.pole_end) {
+  const arcKv = () => {   // 派生条目：弧线=pole 合成（与全片页列同规则——紧随「价值」）
+    if (!(sc.pole_start || sc.pole_end)) return;
     const s = el('span', 'kv');
     s.appendChild(el('b', null, '弧线'));
     s.appendChild(document.createTextNode([sc.pole_start, sc.pole_end].filter(Boolean).join(' → ')));
     meta.appendChild(s);
+  };
+  for (const f of fieldsOf('scenes')) {   // F1-L3 余部：kv 字段面由字典派生（kv 短名单源，显示与旧逐行手写零差）
+    if (!f.kv) continue;
+    kvEdit(f.key, f.kv);
+    if (f.key === 'value') arcKv();
   }
-  kvEdit('翻转', 'turn');
-  kvEdit('视点', 'pov');
 
   const s1 = el('span', 'kv scene-stats');
   s1.appendChild(el('b', null, '规模'));

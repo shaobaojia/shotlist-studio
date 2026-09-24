@@ -48,11 +48,11 @@ SHOT_FIELDS = [
 SCENE_FIELDS = [
     {"key": "scene_no",   "label": "场号",     "type": "text", "w": 76,  "in_table": True},
     {"key": "title",      "label": "场景名",   "type": "text", "w": 120, "in_table": True, "batch": True},
-    {"key": "value",      "label": "场景价值", "type": "text", "w": 76,  "in_table": True, "batch": True},
+    {"key": "value",      "label": "场景价值", "type": "text", "w": 76,  "in_table": True, "batch": True, "kv": "价值"},
     {"key": "pole_start", "label": "起点极",   "type": "text", "w": 90,  "in_table": False, "batch": True},
     {"key": "pole_end",   "label": "终点极",   "type": "text", "w": 90,  "in_table": False, "batch": True},
-    {"key": "turn",       "label": "翻转",     "type": "text", "w": 150, "in_table": True, "batch": True},
-    {"key": "pov",        "label": "视点角色", "type": "text", "w": 64,  "in_table": True, "batch": True},
+    {"key": "turn",       "label": "翻转",     "type": "text", "w": 150, "in_table": True, "batch": True, "kv": "翻转"},
+    {"key": "pov",        "label": "视点角色", "type": "text", "w": 64,  "in_table": True, "batch": True, "kv": "视点"},
 ]
 
 BEAT_KINDS = ["🔴 戏点", "🟡 空间建立", "⚪ 填充"]      # 节拍类型（P3②：随 meta 下发，服务端/前端单源）
