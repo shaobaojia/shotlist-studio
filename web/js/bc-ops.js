@@ -98,54 +98,57 @@ export function renameCatInline(ctx, nameEl, cat) {
   });
 }
 
+let newCatInput = null;   // 在开的新分类输入面（F3-W10：跟踪引用，不再查选择器）
 export function newCatInline(listEl) {
-  const ex = listEl.querySelector('.bco-newcat input');
-  if (ex) { ex.focus(); return; }
-  openInline({
+  if (newCatInput && newCatInput.isConnected) { newCatInput.focus(); return; }
+  const { el0 } = openInline({
     placeholder: '新分类名…（Enter 建 · Esc 弃）',
     wrapClass: 'bco-newcat', mount: { kind: 'prepend', host: listEl },
-    onCancel: (el0, wrap) => { wrap.remove(); },
-    onCommit: (v, unlock, el0, wrap) => {
+    onCancel: (el0b, wrap) => { newCatInput = null; wrap.remove(); },
+    onCommit: (v, unlock, el0b, wrap) => {
       blockOp({ action: 'cat_create', name: v }).then((res) => {
-        if (!res || !res.category) { failRestore({ message: '响应异常' }, unlock, el0, '建分类'); return; }
+        if (!res || !res.category) { failRestore({ message: '响应异常' }, unlock, el0b, '建分类'); return; }
+        newCatInput = null;
         wrap.remove();
         const cid = res.category.id;
         recordUndo({ type: 'custom', label: '新分类',
           undo: async () => { await blockOp({ action: 'cat_delete', id: cid }); } });
-      }).catch((err) => failRestore(err, unlock, el0, '建分类'));
+      }).catch((err) => failRestore(err, unlock, el0b, '建分类'));
     },
   });
+  newCatInput = el0;
 }
 
 // ── 块草稿行：保存后才入库（空＝弃；失败留字可重试）──
+let draftArea = null;   // 在开的新块草稿面（F3-W10：跟踪引用，不再查选择器）
 export function draftBlockInline(sec, cat) {
   const rows = sec.querySelector('.bco-rows');
   if (!rows) return;
-  const ex = rows.querySelector('.bco-draft textarea');
-  if (ex) { ex.focus(); return; }
-  openInline({
+  if (draftArea && draftArea.isConnected) { draftArea.focus(); return; }
+  const { el0 } = openInline({
     tag: 'textarea', cls: 'bco-edit', placeholder: '新块内容…（Ctrl+Enter 存 · Esc 弃）', rows: 2,
     wrapClass: 'bco-row bco-draft', multiline: true, mount: { kind: 'append', host: rows },
-    onCancel: (el0, wrap) => { wrap.remove(); },
-    onCommit: (v, unlock, el0, wrap) => {
+    onCancel: (el0b, wrap) => { draftArea = null; wrap.remove(); },
+    onCommit: (v, unlock, el0b, wrap) => {
       blockOp({ action: 'create', text: v, category_id: cat ? cat.id : null }).then((res) => {
+        draftArea = null;
         wrap.remove();
         if (res && res.block) {
           const bid = res.block.id;
           recordUndo({ type: 'custom', label: '添加块',
             undo: async () => { await blockOp({ action: 'delete', id: bid }); } });
         }
-      }).catch((err) => failRestore(err, unlock, el0, '创建'));
+      }).catch((err) => failRestore(err, unlock, el0b, '创建'));
     },
   });
+  draftArea = el0;
 }
 
 // 入口：在目标分类里开草稿行（供段头右键 / 底栏「＋新建块」）——不切任何模式
 export function newBlockInCat(ctx, cat) {
-  const key = cat ? 'c' + cat.id : 'none';
-  if (ctx.folded.has(key)) { ctx.folded.delete(key); ctx.foldSave(); ctx.refresh(); }
+  if (ctx.revealSection) ctx.revealSection(cat ? cat.id : null);   // 展开+重绘（F3-W10 适配器）
   requestAnimationFrame(() => {
-    const sec = ctx.list.querySelector('.bco-sec[data-catkey="' + (cat ? cat.id : 'none') + '"]');
+    const sec = ctx.sectionEl ? ctx.sectionEl(cat ? cat.id : null) : null;
     if (sec) { sec.scrollIntoView({ block: 'nearest' }); draftBlockInline(sec, cat); }
   });
 }
@@ -156,14 +159,8 @@ export function newBlockUncat(ctx) { newBlockInCat(ctx, null); }
 export function startEditBlock(ctx, id) {
   const d = blocksData();
   const b = d && d.blocks ? d.blocks.find((x) => x.id === id) : null;
-  if (b) {
-    const key = b.category_id == null ? 'none' : 'c' + b.category_id;
-    if (ctx.folded.has(key)) { ctx.folded.delete(key); ctx.foldSave(); ctx.refresh(); }
-  }
-  requestAnimationFrame(() => {
-    const row = ctx.list.querySelector('.bco-row[data-id="' + id + '"]');
-    if (row && row._startEdit) row._startEdit();   // 滚动由 _startEdit 一处负责（F3-W15①：原先双份）
-  });
+  if (b && ctx.revealSection) ctx.revealSection(b.category_id);   // 展开+重绘（F3-W10 适配器）
+  if (ctx.editRow) ctx.editRow(id);                               // 滚达 + 进入编辑（滚动由 _startEdit 一处负责）
 }
 
 // ── 三处右键菜单 ──
@@ -194,7 +191,7 @@ export function attachRowMenu(ctx, rowEl, b) {
   });
 }
 
-export function attachSecMenu(ctx, headEl, cid) {
+export function attachSecMenu(ctx, headEl, cid, nameEl) {
   const cat = cid == null ? null : (((blocksData() || { categories: [] }).categories.find((c) => c.id === cid)) || null);
   headEl.addEventListener('contextmenu', (e) => {
     e.preventDefault();
@@ -211,7 +208,7 @@ export function attachSecMenu(ctx, headEl, cid) {
     }
     openMenu(pt, items, (k) => {
       if (k === 'add') newBlockInCat(ctx, cat);
-      else if (k === 'ren') renameCatInline(ctx, headEl.querySelector('.bc-secname'), cat);
+      else if (k === 'ren') renameCatInline(ctx, nameEl, cat);
       else if (k === 'up') catMove(cat, -1);
       else if (k === 'dn') catMove(cat, 1);
       else if (k === 'del') deleteCat(cat);

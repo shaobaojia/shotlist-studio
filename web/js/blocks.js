@@ -63,10 +63,17 @@ export function catColorOf(cid) {
   return colorMap.get(cid) || PALETTE[PALETTE.length - 1];
 }
 
-// 搜索口径单点（正文 + 分类名；管理器 / 热盒条共用）
+// 搜索口径单点（正文 + 分类名；管理器 / 热盒条共用）；
+// haystack 记忆（F3-W18）：块对象每次取数换代，WeakMap 随旧对象自然回收
+const HAY = new WeakMap();
 export function blockMatch(b2, q) {
   if (!q) return true;
-  return (String(b2.text) + ' ' + catName(b2.category_id)).toLowerCase().indexOf(q) !== -1;
+  let h = HAY.get(b2);
+  if (h == null) {
+    h = (String(b2.text) + ' ' + catName(b2.category_id)).toLowerCase();
+    HAY.set(b2, h);
+  }
+  return h.indexOf(q) !== -1;
 }
 
 // ── 块移动（管理器 / 热盒条共用）：换类 + 定位 → 后端 position 支持 ──

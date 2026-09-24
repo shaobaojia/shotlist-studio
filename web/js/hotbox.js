@@ -7,7 +7,7 @@ import { groupsById } from './state.js';
 import { openMenu, menuEl } from './menu.js';
 import { recordUndo, undo as globalUndo } from './edit.js';
 import { storeAsBlock, byPosition, PLACEHOLDERS } from './blocks.js';
-import { initBlockCard, cardLayout, cardSetActive, cardSetInsert } from './blockcard.js';
+import { initBlockCard, cardSetActive, cardSetInsert } from './blockcard.js';
 import { writeClipboard, copyText } from './clipboard.js';
 import { aiTextMenu } from './aiwrite.js';
 import { openPromptDraft } from './draft.js';

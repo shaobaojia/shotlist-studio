@@ -8,7 +8,7 @@ import { el } from './ui.js';
 import { recordUndo } from './edit.js';
 import {
   blocksData, blockOp, moveBlockTo, togglePin, deleteBlockWithUndo,
-  sectionsOf, dropIndex, catColorOf,
+  sectionsOf, dropIndex, catColorOf, foldKeyOf,
 } from './blocks.js';
 import {
   openInline, failRestore, attachSecMenu, attachRowMenu, newBlockUncat, newCatInline,
@@ -169,9 +169,10 @@ function listSection(ctx, spec, dragOn) {
   const dot = el('span', 'bc-secdot');
   dot.style.setProperty('--bc-cat', catColorOf(spec.cid));
   sh.appendChild(dot);
-  sh.appendChild(el('span', 'bc-secname', spec.name));
+  const nameEl = el('span', 'bc-secname', spec.name);
+  sh.appendChild(nameEl);
   sh.appendChild(el('span', 'bc-seccount', '（' + spec.items.length + '）'));   // 计数贴组名：骨架（1）
-  attachSecMenu(ctx, sh, spec.cid);                  // 右键：＋块 / 改名 / 上移 / 下移 / 删类
+  attachSecMenu(ctx, sh, spec.cid, nameEl);          // 右键：＋块 / 改名 / 上移 / 下移 / 删类（nameEl 由本模块给出，操作族不再自拼选择器）
   sh.addEventListener('mousedown', (e) => e.preventDefault());
   sh.addEventListener('click', () => {
     if (closed) ctx.folded.delete(key); else ctx.folded.add(key);
@@ -190,8 +191,21 @@ function listSection(ctx, spec, dragOn) {
 // ── 列表总渲染：flat＝搜索平铺（不可拖）；否则全部分类（含空类，供拖放/新建）＋ 未分类 ＋ 底栏 ──
 export function renderList(ctx, listEl, arr, opts) {
   opts = opts || {};
-  const dragOn = opts.drag !== false;
-  if (opts.flat) {
+  // 模块边界适配器（F3-W10）：操作族经 ctx 访问本模块 DOM，不再自拼选择器串
+  ctx.sectionEl = (cid) => listEl.querySelector('.bco-sec[data-catkey="' + (cid == null ? 'none' : String(cid)) + '"]');
+  ctx.revealSection = (cid) => {
+    const key = foldKeyOf(cid);
+    if (ctx.folded.has(key)) { ctx.folded.delete(key); ctx.foldSave(); ctx.refresh(); return true; }
+    return false;
+  };
+  ctx.editRow = (id) => {
+    requestAnimationFrame(() => {
+      const row = listEl.querySelector('.bco-row[data-id="' + id + '"]');
+      if (row && row._startEdit) row._startEdit();
+    });
+  };
+  const dragOn = opts.draggable !== false;
+  if (opts.mode === 'flat') {
     for (const b of arr) listEl.appendChild(blockRow(ctx, b, { drag: false }));
     return;
   }

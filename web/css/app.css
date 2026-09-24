@@ -834,6 +834,7 @@ table.shots tr.shot.cover-off:hover td { opacity: 1; }
 .bc-text { font-size: 11px; color: var(--ink2); line-height: 1.5;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .bc-empty { font-size: 11px; color: var(--dim); padding: 6px 8px; }
+.bc-retry { margin-left: 8px; color: var(--accent); cursor: pointer; text-decoration: underline; }
 
 /* ── M5d-4：三区固定 / 影子方向 / 时序 / 块样 ── */
 .hb-scroll { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
