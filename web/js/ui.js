@@ -52,7 +52,10 @@ export function flashClass(el0, cls, ms, opts) {
     void el0.offsetWidth;
     el0.classList.add(cls);
   }
-  return setTimeout(() => el0.classList.remove(cls), ms);
+  return setTimeout(() => {
+    el0.classList.remove(cls);
+    if (o.onEnd) o.onEnd();
+  }, ms);
 }
 
 // 指针拖拽三件套单点（F3-W27①）：capture 绑定 + 收尾卸绑 + 松键护栏（窗口外松开后裸移自动收工）

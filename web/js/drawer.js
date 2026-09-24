@@ -1,7 +1,7 @@
 // 浮层抽屉基件（M5 批3「右缘抽屉体系」）
 // 形态基准 = 旧版提示词面板：浮动卡片 + 标题栏拖拽 + 八向缩放 + 贴附（右/下）+ 钉住 + 位置尺寸记忆。
 // 按钮行由使用方按序装配（panel-btn 统一样式：红底白字 11px 中文全词）。
-import { el, lsGet, lsSet, clamp, readVarPx, trackDrag, onResizeCoalesced, flashClass, isTypingTarget, isFloatTarget } from './ui.js';
+import { el, lsGet, lsSet, clamp, readVarPx, trackDrag, onResizeCoalesced, flashClass, isTypingTarget, isFloatTarget, silent } from './ui.js';
 
 const MIN_W = 320, MIN_H = 200;
 // 屏内夹取与停靠常量单点（F3-W23：原先六处手抄同一组数）
@@ -58,7 +58,7 @@ export function createDrawer(opts) {
   frame.appendChild(head);
   frame.appendChild(body);
 
-  const st = { open: false, pinned: false, dock: null };
+  const st = { open: false, pinned: false, dock: null, entering: false };
   let tIn = null, tBn = null;
 
   // ── 八向缩放手柄 ──
@@ -77,6 +77,7 @@ export function createDrawer(opts) {
     frame.style.top = Math.round(top) + 'px';
     frame.style.right = 'auto';
     frame.style.bottom = 'auto';
+    emitGeom();                                    // F3-L1：几何契约通知（rAF 合并）
   }
 
   // ── 记忆 ──
@@ -120,6 +121,7 @@ export function createDrawer(opts) {
       frame.style.width = 'auto';
       frame.style.height = Math.round(vh * DOCK.bottom.vhRatio) + 'px';
     }
+    emitGeom();                                    // F3-L1：几何契约通知
   }
   function dockTo(side) {                        // 几何 + 落盘 + 回弹（按钮通道）
     st.dock = side;
@@ -129,14 +131,20 @@ export function createDrawer(opts) {
   }
 
   // 入场动画：一次性 .enter（播完即摘——常驻会导致回弹类摘除时动画重播=「多闪一次」）
+  // F3-L1：entering 状态单点（几何契约读它，不再由消费方嗅探 .enter 类）；播毕发几何通知
   function playIn() {
     clearTimeout(tIn);
-    tIn = flashClass(frame, 'enter', 400, { clear: ['snap-bounce'] });   // F3-W25 单点
+    st.entering = true;
+    tIn = flashClass(frame, 'enter', 400, {                    // F3-W25 单点
+      clear: ['snap-bounce'],
+      onEnd: () => { st.entering = false; if (st.open) emitGeom(); },
+    });
   }
 
   function bounce() {
     // 先清入场类（flashClass 内）：回弹结束摘类时无动画可回退，防重播
     clearTimeout(tBn);
+    st.entering = false;                                       // F3-L1：回弹接手入场（enter 随摘）
     tBn = flashClass(frame, 'snap-bounce', 360, { clear: ['enter'] });
   }
 
@@ -255,8 +263,10 @@ export function createDrawer(opts) {
     if (pinBtn) pinBtn.classList.remove('pinned');
     frame.classList.remove('open', 'enter', 'snap-bounce');
     frame.hidden = true;
+    st.entering = false;                             // F3-L1：关即中断入场
     clearTimeout(tIn);                               // F3-W25：关掉入场/回弹计时器（原先悬挂，当前无害）
     clearTimeout(tBn);
+    emitGeom();                                      // F3-L1：关闭通知（订阅方据此隐藏）
     document.removeEventListener('mousedown', onDoc, true);
     const ai = ACTIVE.indexOf(dr);
     if (ai !== -1) ACTIVE.splice(ai, 1);
@@ -284,6 +294,42 @@ export function createDrawer(opts) {
     return tb;
   }
 
+  // ── 几何契约（F3-L1）：对外只读几何 + 变更订阅 + 贴紧标记收编 ──
+  // geom()：open/pinned/dock/entering + frame 四元组。offset* 不受 transform/动画影响
+  // （免疫「动画期 rect 漂」）；drawer 恒为 fixed 浮层（body 直属），offsetLeft/Top 即视口坐标。
+  // 注意：close 后 frame 隐藏，几何读数为 0（订阅方应以 open 判定先行）。
+  function geom() {
+    return {
+      open: st.open, pinned: st.pinned, dock: st.dock, entering: st.entering,
+      left: frame.offsetLeft, top: frame.offsetTop,
+      width: frame.offsetWidth, height: frame.offsetHeight,
+    };
+  }
+  // onGeom(cb)：几何/贴附/开合/入场完成变化时回调（rAF 合并——每帧至多一次）；返回退订。
+  const geomSubs = new Set();
+  let geomRaf = 0;
+  function emitGeom() {
+    if (!geomSubs.size || geomRaf) return;
+    geomRaf = requestAnimationFrame(() => {
+      geomRaf = 0;
+      const g = geom();
+      for (const cb of geomSubs) { try { cb(g); } catch (e) { silent(e, 'drawer-geom'); } }
+    });
+  }
+  function onGeom(cb) {
+    geomSubs.add(cb);
+    return () => { geomSubs.delete(cb); };
+  }
+  // setUnder(mode)：贴紧标记（'none'|'left'|'up'）——往抽屉写类收编在此（含镜像抑制，
+  // 防「写类→观察者回调」回路；F3-W22 原先由块库卡反向往抽屉写）。
+  let underApplied = null;
+  function setUnder(mode) {
+    if (mode === underApplied) return;
+    underApplied = mode;
+    frame.classList.toggle('bc-under', mode !== 'none');
+    frame.classList.toggle('bc-under-up', mode === 'up');
+  }
+
   const dr = {
     el: frame, bodyEl: body, headEl: head, titleEl: title, btnsEl: btns,
     open, close,
@@ -292,6 +338,7 @@ export function createDrawer(opts) {
     setTitle: (t) => { title.textContent = t; title.title = t; },
     addButton, addPinButton, addDockButton, addCloseButton, addStandardButtons,
     getDock: () => st.dock,
+    geom, onGeom, setUnder,                          // F3-L1 几何契约
   };
   return dr;
 }

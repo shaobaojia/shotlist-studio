@@ -22,13 +22,11 @@ let dr = null;
 let root = null;
 let innerEl = null;
 let listRefresh = null;
-let obs = null;
 let insertCb = null;
 let active = false;
 let upMode = false;
 let pendShow = false;                  // 面板入场动画未毕，卡先藏（入场完再浮现）
 let tAppear = null;
-let underApplied = null;               // 镜像：'none' | 'left' | 'up'（对照后再写，杜绝观察者回路）
 const mem = { w: DEF_W, h: DEF_H, open: false };
 let pinnedOnly = false;        // 置顶筛选（F3-W16：原先 'all'|'pin'，判定收窄为布尔）
 let query = '';
@@ -37,37 +35,9 @@ let loadErr = null;            // 载入失败信息（F3-B5：可上屏可重�
 function lsLoad() { return lsGet(LS_KEY, {}) || {}; }
 function lsSave() { lsSet(LS_KEY, mem); }
 
-// 面板「贴紧」类：只有镜像状态真的变化才写 DOM——本环境 classList 幂等操作也会
-// 虚假触发 attribute mutation，直接写会与观察者形成无限回路（M5d-4 实测死机根因）
-function applyUnder(mode) {
-  if (mode === underApplied || !dr || !dr.el) return;
-  underApplied = mode;
-  try {
-    dr.el.classList.toggle('bc-under', mode !== 'none');
-    dr.el.classList.toggle('bc-under-up', mode === 'up');
-  } catch (e) { /* ignore */ }
-}
-
-// 面板几何：优先取内联样式坐标（开合/回弹动画期间 rect 会漂，样式值恒定）
-// 单轴边值解析（F3-W21①）：先取直写轴；缺则用对侧轴反算；仍缺回 null
-function edgeValue(style, a, b, size, extent) {
-  const v = parseFloat(style[a]);
-  if (Number.isFinite(v)) return v;
-  const w = parseFloat(style[b]);
-  return Number.isFinite(w) ? extent - w - size : null;
-}
-
-function frameRect() {
-  const fe = dr.el;
-  const s = fe.style;
-  const w = parseFloat(s.width), h = parseFloat(s.height);
-  if (!Number.isFinite(w) || !Number.isFinite(h)) return fe.getBoundingClientRect();
-  const de = document.documentElement;
-  const left = edgeValue(s, 'left', 'right', w, de.clientWidth);
-  const top = edgeValue(s, 'top', 'bottom', h, de.clientHeight);
-  if (left == null || top == null) return fe.getBoundingClientRect();
-  return { left: left, top: top, width: w, height: h };
-}
+// 面板几何与贴紧标记：一律走抽屉几何契约（F3-L1）——dr.geom() 只读几何（免疫动画期 rect 漂）、
+// dr.setUnder() 写贴紧类（镜像抑制在抽屉侧）。原先的样式反解（edgeValue/frameRect，含 5 处
+// parseFloat）与 applyUnder 直写类均已退役。
 
 // ── 内容：块库列表（A3 分段标题 + 搜索 + 行点插；含全部收起/展开）──
 const LS_FOLD = 'studio.blockcard.fold';
@@ -195,32 +165,25 @@ function place(w, h, left, top, tf) {
   root.style.transform = tf;
 }
 
-// 布局 rAF 合并（F3-W20）：观察者 / 窗口 resize 每帧至多触发一次（抽屉拖拽期每 mousemove 触发观察者，直调即每事件一次同步布局）
-let layoutRaf = 0;
-function scheduleLayout() {
-  if (layoutRaf) return;
-  layoutRaf = requestAnimationFrame(() => { layoutRaf = 0; layout(); });
-}
-
-// ── 布局同步（随抽屉几何/贴附/开合；靠 MutationObserver 跟拖拽与贴附）──
+// ── 布局同步（随抽屉几何/贴附/开合；靠 onGeom 订阅跟拖拽与贴附，F3-L1）──
 function layout() {
   if (!root) return;
-  if (!active || !dr || !dr.isOpen()) {
+  const g = (dr && dr.geom) ? dr.geom() : null;
+  if (!active || !g || !g.open) {
     root.hidden = true;
-    applyUnder('none');
+    if (g) dr.setUnder('none');
     return;
   }
-  // 面板入场动画进行中：先藏（否则「块库先于面板出现」）；入场类摘除时观察者会再触发本函数
-  if (dr.el.classList.contains('enter')) { root.hidden = true; pendShow = true; applyUnder('none'); return; }
-  const r = frameRect();
-  const dock = dr.getDock ? dr.getDock() : null;
-  const up = (dock === 'bottom');
+  // 面板入场动画进行中：先藏（否则「块库先于面板出现」）；入场完成事件（onGeom）会再触发本函数
+  if (g.entering) { root.hidden = true; pendShow = true; dr.setUnder('none'); return; }
+  const r = g;
+  const up = (g.dock === 'bottom');
   const switched = (up !== upMode);
   upMode = up;
   root.hidden = false;
   root.classList.toggle('bc-clps', !mem.open);   // 收起态：露边盖干净「纸口」
   root.classList.toggle('bc-up', up);            // 上贴模式位（标签/拉手转上缘的 CSS 依赖它——重写时勿丢！）
-  applyUnder(up ? 'up' : 'left');
+  dr.setUnder(up ? 'up' : 'left');
   if (pendShow) {
     pendShow = false;
     clearTimeout(tAppear);
@@ -301,10 +264,9 @@ export function initBlockCard(drawer) {
     if (listRefresh) listRefresh();
   });
 
-  // 跟面板：style / class / hidden 变动即重排（拖拽 / 贴附 / 开合全覆盖）；
-  // 观察者回调 rAF 合并（F3-W20）：每帧至多一次重排
-  obs = new MutationObserver(() => scheduleLayout());
-  obs.observe(dr.el, { attributes: true });
+  // 跟面板（F3-L1 几何契约）：抽屉几何/贴附/开合/入场完成 → onGeom 订阅（订阅侧已按帧合并）；
+  // 原先「全属性观察者 + 样式反解」退役
+  dr.onGeom(() => layout());
   onResizeCoalesced(layout);                       // F3-W27③：与抽屉共用一帧一次
   layout();
 }
