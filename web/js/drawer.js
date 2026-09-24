@@ -28,7 +28,7 @@ function headTop() {
 
 export function createDrawer(opts) {
   const id = opts.id;
-  const frame = el('div', 'drawer');
+  const frame = el('div', 'drawer float-card');   // F3-W28：挂基类（点名豁免名单随之收窄）
   if (opts.id) frame.dataset.drawer = opts.id;
   frame.hidden = true;
   const head = el('div', 'drawer-head');
@@ -247,13 +247,25 @@ export function createDrawer(opts) {
     freeRect(p.left, p.top);
   });
 
+  // 标准钮组单点（F3-W31）：贴底 / 贴右 / 钉住 / 编辑 / 复制 / ✕（两条抽屉原先逐字两份）
+  function addStandardButtons(so) {
+    so = so || {};
+    addDockButton('bottom');
+    addDockButton('right');
+    addPinButton();
+    const tb = addButton('编辑', { title: so.toggleTitle || '编辑', onClick: so.onToggleMode });
+    addButton('复制', { title: so.copyTitle || '复制', onClick: so.onCopy });
+    addCloseButton(so.onClose);
+    return tb;
+  }
+
   return {
     el: frame, bodyEl: body, headEl: head, titleEl: title, btnsEl: btns,
     open, close,
     isOpen: () => st.open,
     isPinned: () => st.pinned,
     setTitle: (t) => { title.textContent = t; title.title = t; },
-    addButton, addPinButton, addDockButton, addCloseButton,
+    addButton, addPinButton, addDockButton, addCloseButton, addStandardButtons,
     getDock: () => st.dock,
   };
 }

@@ -21,12 +21,13 @@ const IMP = { card: null, lastText: '' };
 function ensureDrawer() {
   if (dr) return dr;
   dr = createDrawer({ id: 'script', width: 460, onOutside: onOutside, onClose: onClosed });
-  dr.addDockButton('bottom');
-  dr.addDockButton('right');
-  dr.addPinButton();
-  toggleBtn = dr.addButton('编辑', { title: '切换 查看 ⇄ 编辑（编辑中点击＝保存回查看）', onClick: onToggleMode });
-  dr.addButton('复制', { title: '复制本场台本全文', onClick: onCopy });
-  dr.addCloseButton(() => commitClose());
+  toggleBtn = dr.addStandardButtons({                   // F3-W31：标准钮组单点
+    onToggleMode: onToggleMode,
+    toggleTitle: '切换 查看 ⇄ 编辑（编辑中点击＝保存回查看）',
+    onCopy: onCopy,
+    copyTitle: '复制本场台本全文',
+    onClose: () => commitClose(),
+  });
 
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;

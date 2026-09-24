@@ -277,7 +277,7 @@ export function initBlockCard(drawer) {
   if (!Number.isFinite(mem.h)) mem.h = DEF_H;
   if (typeof mem.open !== 'boolean') mem.open = false;
 
-  root = el('div', 'bcard');
+  root = el('div', 'bcard float-card');   // F3-W28：挂基类
   root.hidden = true;
   innerEl = el('div', 'bc-inner');
   root.appendChild(innerEl);

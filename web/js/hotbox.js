@@ -66,18 +66,13 @@ function ensureDrawer() {
     onClose: onDrawerClosed,
   });
   initBlockCard(dr);
-  dr.addDockButton('bottom');
-  dr.addDockButton('right');
-  dr.addPinButton();
-  S.toggleBtn = dr.addButton('编辑', {
-    title: '进入编辑面（编辑态无保存钮：Ctrl+Enter／点外面即存）',
-    onClick: onToggleMode,
+  S.toggleBtn = dr.addStandardButtons({                 // F3-W31：标准钮组单点
+    onToggleMode: onToggleMode,
+    toggleTitle: '进入编辑面（编辑态无保存钮：Ctrl+Enter／点外面即存）',
+    onCopy: onCopy,
+    copyTitle: '复制全文（自动过滤 [镜XX] 注释）',
+    onClose: () => commitClose(),
   });
-  dr.addButton('复制', {
-    title: '复制全文（自动过滤 [镜XX] 注释）',
-    onClick: onCopy,
-  });
-  dr.addCloseButton(() => commitClose());
 
   if (!escWired) {
     escWired = true;
@@ -685,9 +680,7 @@ function renderPreview(pb) {
     renderRichText(rich, text);
   }
   body.appendChild(rich);
-  body.addEventListener('click', (e) => {
-    const t = e.target;
-    if (t.closest && t.closest('#block-manager')) return;
+  body.addEventListener('click', () => {
     openPromptDrawer(s.id);
   });
   pb.appendChild(body);

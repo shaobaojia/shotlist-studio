@@ -170,7 +170,7 @@ export function flashIntoView(node, opts) {
 // 浮层豁免单点（批4/L1 + F1-B5）：结构浮层根名单；点外监听一律走这里，勿再手抄。
 // .scene-freeze（吸顶场头）是在流页面元素、不挂 .float-card：天然不算浮层（F1-B5）。
 // opts.prompt：附加「提示词预览 / 提示词列」（抽屉点外判定用）。
-const FLOAT_SEL = '.float-card, .menu, .drawer, .bcard, #block-manager, #draft-card, #hist-panel, #sel-bar, .ai-diff, [id^="ai-"]';
+const FLOAT_SEL = '.float-card, .menu, #draft-card, #hist-panel, #sel-bar, .ai-diff, [id^="ai-"]';   // F3-W28：抽屉/块库经 .float-card 收敛；#block-manager 死项撤
 const FLOAT_SEL_PROMPT = FLOAT_SEL + ', .prompt-box, .cell-prompt';
 export function isFloatTarget(t, opts) {
   if (!t || !t.closest) return false;
@@ -259,7 +259,7 @@ export function installWheelGuards() {
     document.addEventListener('wheel', (ev) => {
       const t = ev.target;
       if (!(t instanceof Element) || !ev.deltaY) return;
-      if (!t.closest('.drawer, .bcard, .menu, .float-card, #hist-panel')) return;
+      if (!t.closest('.menu, .float-card, #hist-panel')) return;
       let n = t;
       while (n && n !== document.documentElement) {
         if (wheelCanConsume(n, ev.deltaY)) return;     // 有可消费的内层 → 放行
