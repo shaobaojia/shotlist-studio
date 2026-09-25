@@ -4,6 +4,7 @@
 规矩：开工前先读本文件；收尾时更新下面四字段。状态权威 = 本文件 + git log。仓库：GitHub `shaobaojia/shotlist-studio`（公开）。
 
 ## 刚做完
+- 2026-09-25 **M8 Simplify 清理落账（刀C 后端 `e3b0229` ＋ 刀D 前端 `f4c5457`）**：四镜审计（复用/质量/效率/深度）一二三四批全清＋场号唯一性按工程。刀C：片缺失精确诊断（「无片/片号缺失」分判）／粘贴上限 BATCH_MAX／留底单点 `snapshot_io`（名尾补 id 防同秒互盖）／`follow_no` 追号单点／paste 去重＋返回瘦身／history 工程级入滤／ACTIONS 单源；测试 315→326（+11 咬合点；4 处降级 5/5 翻车）。刀D：`clip.js` 叶子化解环（selbar→filmlib→scene→selbar）／切工程单链（真机 film×1+audit×1，原 3 重）／弹层在飞守卫／改名原位更新（标题即换·非当前不动）＋Esc·点外「关层即弃」（移除-blur 时序咬出）／关当前入口／删光空态收口／LS 键单点／boot 并行；真机两轮全链（含空态/粘贴链），0 报错。
 - 2026-09-25 **工程库（M8）刀B 落账（前端全链）**：`web/js/filmlib.js`（375 行）＝标题位「当前工程名 ▾」→弹层（●当前/○已打开/自由关/＋新建（空白·复制）/✎改名/⋯归档·删除）；剪贴板条「复制行→跟人走→粘贴到本场」；`POST /api/paste`（paste_shots 深拷目标场尾·编号顺延·未归节拍）；api.js `setFilmId` 上下文单点（film/scene/renumber/create/exportUrl 全带 film）；真机全链（建/切/关/改名/档/删双confirm/跨工程粘贴 2→4 镜）＋咬出并修「切工程旧选区残留」；**315/315**。
 - 2026-09-25 **工程库（M8）刀A 落账（后端全链多工程化）**：films 域 CRUD——复制＝深拷场/节拍/镜/组（_copy_row 动态列集＋id 全重映射）；删除＝整片 JSON 留底（snapshots/films/＋snapshots 表 scope=film/manual）＋级联；单工程假设全点改造（db.film/load_scene/create_scene/history_of/build_scene_html/scene_or_404 ＋ handlers 五处 `?id=`/`?film=`/`film_id`）；路由与 api.js 五调用接线（test_routes 双向对账 16/25、39）；**311/311**＋沙盘冒烟 15 步＋咬合 2 则（film_id 忽略/不拷场均翻车）。
 - 2026-09-25 **收尾杂项（随第 2 波收官）**：probes 清理（23MB→1.6MB，正式材料保留）；沉淀 `structural-refactor-patterns` skill（10 模式库 + 通用 modlib，冒烟全通）；审计规则「动作具象化」开启（API 写入，真库 10/10 全开）；AGENTS+需求池滞后状态刷新；C10/B5/B8 销账（拍板放弃）。
@@ -154,7 +155,7 @@
 - 2026-09-23 **M5 批4（视觉核验·第一轮）✅**：五档扫描（1024/1280/1440/1920/2560——主界面×5＋抽屉·块库卡×4＋下贴附/台本/行菜单/设置@1280）：零横溢出、零截断错位、抽屉全在视口、脚排单行、行菜单 10 项完整、设置 620×640 在视口；**顶栏「＋≤1440 换行孤立」未复现**（现为横滚不换行，细滚动条系设计内）。修复：**滚动定位避让吸顶**——`tr.shot, section.beat` 加 `scroll-margin-top`（topbar+freeze+10），跳镜/闪烁不再藏进吸顶下（chips 跳镜行顶 152→184＝吸顶底+10 实测；咬合：margin 归零即不动作）。次级浮层（审计/AI/草稿/痕迹）未重扫（批次内无改动）。
 
 ## 正在做
-- **工程库（M8）✅ 全链完成（2026-09-25）**：刀A 后端 `2fc3b08` ＋ 刀B 前端 `76570a0`；真机全链验讫（建/切/关/改名/档/删/跨工程粘贴）；**待推送**（未推 3 笔）。
+- **工程库（M8）＋ Simplify 清理 ✅ 全链完成（2026-09-25）**：刀A `2fc3b08` ＋ 刀B `76570a0`；**清理刀C（后端）`e3b0229` ＋ 刀D（前端）`f4c5457`**（四镜审计一二三四批全清＋场号唯一性按工程——跨工程命名/序号互不影响）；两轮真机全链验讫（含单链渲染/关层弃编辑/删光空态）；**待推送（未推 7 笔）**。
 - 第 2 波立项 · 批1（S 系 15 条）：刀1 拆包双子 ✅、刀2 db 边界 ✅、刀3 api 收口全录 ✅、刀4 路由安全网 ✅、…**批2 已完成（20/20）**：刀1–刀20 全部落账（…/F5-L3/F5-L4/F1-L3余）。第 2 波（批1 S 系 15 + 批2 F 系 20）全量收官——**已随收尾推 GitHub**。拍板已定：块序走服务端统一（a）、摄影机清洗已做、审计「动作具象化」已开启。
 - M5 追问轮④ 收口：滚轮护栏 + 拖拽直操（排序/换组/组头）+ 就地编辑（拆整理模式）+ 大三角 ✅ 全链实测（真鼠标拖往返净回）；M5g 补丁（计数贴名「骨架（1）」+ 编辑态点击守护；测试泄漏还原 #965）✅。批4 视觉核验·第一轮 ✅（五档扫描零问题＋滚动避让吸顶修复）。下一步 → 无（v1.0 已冻结 2026-09-23；新需求走需求池）。
 - M5 批5 挂件带（形态 B）✅：表头上方细带、默认收起（localStorage 记忆）；①景别序列条一格一镜——高度/色阶＝档位（渐紧渐松）、同档相连（连续同景别）、点击跳镜；②节奏视窗——条长＝时长时间轴 × 情绪温度曲线（按节拍读 `mood_temp`）。实测：34 格/34 块、跳镜闪烁可见、曲线假数据（8→y10.8／空→虚线／3→y22.8）、持久化 ✓、平铺共存 ✓、空场守卫 ✓、0 报错。跳镜收敛单点 `filter.jumpToShotById`（镜号跳转/挂件带共用）。**情绪温度曲线候数据**：`mood_temp` 全表为空——节拍行填「情绪温度」后曲线自动出。
@@ -304,3 +305,8 @@
 - serve.pid 判活坑（2026-09-25 工程库刀A 实测）：serve.pid 存的是「包装 bash 守护」（while-true，其 cmdline 文本**含 `server/app.py` 字样**）——判「python 服务进程」**禁对整条 cmdline 文本 grep**（会误命中包装 bash：杀守护、python 孤儿续跑旧代码，热重载假成功）；判据＝argv 数组逐段（`argv[0].endswith('python3') and 'server/app.py' in argv`，参照沙盘脚本）。守护被误杀后热重载路子：TERM 孤儿 python → `bash scripts/serve.sh start` 重开（serve.sh 自带判活）。
 - confirm() 真机验证坑（2026-09-25 工程库刀B 实测）：JS dialog 打开期间一切 CDP evaluate/screenshot 阻塞；**物理 mousePressed 分裂发送**（pressed 后 released 未达）会卡死渲染器且 `No dialog` 假象（click 未合成）——**正确姿势**：js click（evaluate 同步进 confirm、超时异常可吞）→ `Page.handleJavaScriptDialog(accept=true)` ×N（每次 confirm 各一次）；卡死 tab 弃用另开新 tab。
 - CDP 组合键鼠标坑（2026-09-25 工程库刀B 实测）：Shift+点击类选择走 `Input.dispatchMouseEvent` 时**必须显式带 `modifiers=8`**（click_at_xy 不带 modifiers：Shift 扩选会静默退化为普通点击）；modifiers 位：Alt=1/Ctrl=2/Meta=4/Shift=8。
+- 移除-blur 时序坑（2026-09-25 清理刀D 实测）：`el.remove()` 触发的 blur 同步 fire 且**此时 `el.isConnected` 仍为 true**——「blur 里判 isConnected」挡不住误提交。凡「浮层关闭路径」与「blur 提交」并存：取消逻辑放**关闭回调**内（关层即弃钩子：先置 settled 再还原，关闭路径不提交），弹层内失焦仍走 blur 提交（语义分层）。
+- capture 注册坑（同上）：`onOutsideClose` 系 `addEventListener(..., true)` 注册——Esc 在目标元素（输入框）keydown listener **之前**被 document 捕获：target 级 stopPropagation/preventDefault 对关闭行为无效；「编辑中 Esc」的行为只能由 capture 侧（关闭回调）决定。
+- CDP 真机验证姿势更新（同上）：①`fill_input` 本体**不产生 blur**（逐字 press_key + input/change 注入；先排除工具伪影再查链路）；②验证「Esc/失焦链路」用 `Input.insertText` 直发；③触发 confirm 类阻塞：`setTimeout(() => el.click(), 60)` **异步调度** + `Page.handleJavaScriptDialog` 循环 accept（幂等、吞 no-dialog 错）——比「js click 吞超时 + 另开 tab」更稳（本条更新刀B confirm 坑的姿势）。
+- browser-harness 共享 session 坑（同上）：默认 session 会被其它任务/用户操作**挤占**（tab 被导航走，脚本首步 `getElementById` 即 null）——长链真机验证一律**命名 session**（session 参数）；异常先 `page_info()` 核对 URL。
+- 双源收单必须两侧同批（同上）：把「双写」收成单源时改动清单要**双边核对**（读点/写点/存储点）——只改调用侧（main 删双写）漏存储侧（api 的 setFilmId 实现）→ 直写目标恒 null、弹层当前行与标题即换全失灵（真机首轮即咬出）。
