@@ -3,7 +3,7 @@
 import { el } from './ui.js';
 
 // 层（同层互斥 = 同族浮卡，开新关旧）：
-//   'panel' 设置卡 ↔ 审计设置 ｜ 'ai' AI 单格/批量卡 ｜ 'draft' 场次草稿 ↔ 组级初稿 ｜ 'import' 台本导入卡（F4-W32）
+//   'panel' 设置卡 ↔ 审计设置 ｜ 'ai' AI 单格/批量卡 ｜ 'draft' 场次草稿 ↔ 组级初稿 ｜ 'import' 台本导入卡（F4-W32） ｜ 'film' 工程弹层（M8）
 const LIVE = {};   // layer -> close()
 
 // 开卡登记：同层已有别的卡开着 → 先关旧再登记（关闭异常不阻断新卡）

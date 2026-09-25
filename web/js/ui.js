@@ -182,7 +182,7 @@ export function flashIntoView(node, opts) {
 // .scene-freeze（吸顶场头）是在流页面元素、不挂 .float-card：天然不算浮层（F1-B5）。
 // opts.prompt：附加「提示词预览 / 提示词列」（抽屉点外判定用）。
 const FLOAT_ROLL_ROOTS = '.menu, .float-card, #hist-panel, .cmdk-mask';   // F5-L2：具备内滚的浮层根（滚轮护栏名单＝本常量，与浮层名单同源防漂移）
-const FLOAT_SEL = FLOAT_ROLL_ROOTS + ', #draft-card, #sel-bar, .ai-diff, [id^="ai-"], .audit-card-tr, .audit-card';   // F3-W28 收敛；F5-P1：⌘K 模态层 + 审计行内卡（退浮层类，改走名单）入豁免
+const FLOAT_SEL = FLOAT_ROLL_ROOTS + ', #draft-card, #sel-bar, #clip-bar, .ai-diff, [id^="ai-"], .audit-card-tr, .audit-card';   // F3-W28 收敛；F5-P1：⌘K 模态层 + 审计行内卡（退浮层类，改走名单）入豁免；#clip-bar（M8 清理刀）
 const FLOAT_SEL_PROMPT = FLOAT_SEL + ', .prompt-box, .cell-prompt';
 export function isFloatTarget(t, opts) {
   if (!t || !t.closest) return false;
@@ -242,13 +242,21 @@ export function placeFlip(anchorRect, boxW, boxH, opts) {
 
 // 点外关闭 + Esc 单点（F2-W23）：浮层根 el；返回 cleanup。
 // opts：onEsc 返回 true 则让位（如「菜单优先」优先级）；keepFocus＝内部 mousedown preventDefault；
-// closeOnScroll / closeOnResize＝附加收起条件；floatExempt＝浮层内点击不算点外；stopProp 默认 true。
+// closeOnScroll / closeOnResize＝附加收起条件；floatExempt＝浮层内点击不算点外；stopProp 默认 true；
+// exempt＝额外豁免（元素 / 选择器 / 谓词；M8 清理刀——如「按钮自负 toggle」）。
 export function onOutsideClose(el, onClose, opts) {
   const o = opts || {};
   const onDown = (e) => {
     if (el.contains(e.target)) {
       if (o.keepFocus) e.preventDefault();
       return;
+    }
+    if (o.exempt) {
+      const ex = o.exempt;
+      const hit = typeof ex === 'function' ? ex(e.target)
+        : typeof ex === 'string' ? !!(e.target.closest && e.target.closest(ex))
+        : (ex === e.target || !!(ex.contains && ex.contains(e.target)));
+      if (hit) return;
     }
     if (o.floatExempt && isFloatTarget(e.target)) return;
     onClose('down');

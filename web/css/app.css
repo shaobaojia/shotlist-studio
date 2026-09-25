@@ -938,7 +938,7 @@ table.shots tr.shot.cover-off:hover td { opacity: 1; }
 .fp-new input { flex: 1 1 130px; min-width: 0; }
 .fp-new select { flex: 1 1 100%; }
 .fp-empty { padding: 12px; color: var(--dim); font-size: var(--fs-md); }
-#clip-bar { position: fixed; right: 16px; bottom: 16px; z-index: var(--z-float); display: none;
+#clip-bar { position: fixed; right: 16px; bottom: calc(16px + var(--dock-h, 0px)); z-index: var(--z-float); display: none;   /* 挂件带让位（M8 清理刀；同 #sel-bar 口径） */
   align-items: center; gap: 10px; padding: 7px 14px; background: var(--card);
   border: 1px solid rgba(90, 78, 55, 0.30); border-left: 3px solid var(--accent);
   border-radius: var(--r-3); box-shadow: var(--shadow-float); }

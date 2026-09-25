@@ -8,7 +8,7 @@ import { onChange, current, clearSel, rectOf, copySelection, clearSelectionCells
 import { deleteSelectedRows } from './cellmenu.js';
 import { mergeShotsByIds, detachShotsByIds } from './hotbox.js';
 import { runCmdbarFromSel } from './aiwrite.js';
-import { setClip } from './filmlib.js';
+import { setClip } from './clip.js';   // 剪贴板叶子模块（M8 清理刀：解环）
 
 const CLEAR = '（清空）';
 

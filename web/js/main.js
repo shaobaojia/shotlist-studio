@@ -11,7 +11,8 @@ import { openMenu } from './menu.js';
 import { bindSettingsBtn } from './settings.js';
 import { bindCmdK } from './cmdk.js';
 import { closeAuditPanel } from './auditpanel.js';
-import { initFilmLib, filmsChanged, resolveCurrentFilm } from './filmlib.js';
+import { initFilmLib, filmsChanged, resolveCurrentFilm, writeLastFilm, rememberScene, recallScene } from './filmlib.js';
+import { initClipBar } from './clip.js';
 
 let dragChip = null;
 
@@ -180,35 +181,42 @@ function applyFilm(fd, badgesP) {
   refreshNavBadges(badgesP);
 }
 
-async function reloadFilm() {
+async function reloadFilm(opts) {
+  const o = opts || {};
   try {
     applyFilm(await api.film());
     applyNavOn();   // 重建后重打高亮（拖动排序/删场触发；hash 未变无 hashchange）（P0·F1-B7）
     const curNo = sceneNo();
     if (curNo && !state.scenes.some((x) => x.scene_no === curNo)) {
-      location.hash = '#/';
+      if (!o.keepHash) location.hash = '#/';   // keepHash：hash 归调用方单次写入（M8 清理刀）
       return;
     }
     if (!curNo) renderFilm(document.getElementById('view'));
   } catch (err) { silent(err, 'reloadFilm'); }
 }
 
-// 工程切换（M8 工程库）：换上下文 → 记/取场记忆 → 数据重载 → 全链重渲
+// 工程切换（M8 工程库）：换上下文 → 记/取场记忆 → 数据重载 → 单次全链重渲
+// （M8 清理刀：hash 单写 + keepHash——消 2~3 轮重复渲染；fid=null → 空态收口）
 async function switchFilm(fid) {
-  if (fid == null || fid === state.filmId) return;
-  if (state.filmId) {
-    try { localStorage.setItem('studio.filmstate.' + state.filmId, sceneNo() || ''); } catch (e) { /* ignore */ }
-  }
-  state.filmId = fid;
-  setFilmId(fid);
-  try { localStorage.setItem('studio.film', String(fid)); } catch (e) { /* ignore */ }
+  if (fid === state.filmId) return;
+  if (state.filmId) rememberScene(state.filmId, sceneNo() || '');   // 记旧工程当前场
+  setFilmId(fid);                       // 单源：state.filmId 与 api 上下文同点（M8 清理刀）
   closeAuditPanel();
   clearSel();          // 换工程清旧选区（防残留选对旧工程行误操作；真机咬出）
-  await reloadFilm();
-  let mem = '';
-  try { mem = localStorage.getItem('studio.filmstate.' + fid) || ''; } catch (e) { /* ignore */ }
-  location.hash = mem ? hashOf(mem) : '#/';
-  route();
+  if (fid == null) {                   // 无工程空态（删光；M8 清理刀）
+    state.film = null;
+    state.scenes = [];
+    buildNav();
+    if (parseHash() === '#/') route(); else location.hash = '#/';
+    filmsChanged();
+    return;
+  }
+  writeLastFilm(fid);
+  await reloadFilm({ keepHash: true });
+  let mem = recallScene(fid);
+  if (mem && !state.scenes.some((s) => s.scene_no === mem)) mem = '';
+  const h = mem ? hashOf(mem) : '#/';
+  if (parseHash() === h) route(); else location.hash = h;   // hash 未变显式路由；变了交 hashchange 单点
   filmsChanged();
 }
 
@@ -240,21 +248,23 @@ async function boot() {
   const view = document.getElementById('view');
   try {
     let fid = null;
-    try {
-      const filmsRes = await api.films();                  // M8 工程库：先定当前工程（记忆 → 第一个）
+    const [filmsRes, meta] = await Promise.all([           // M8 清理刀：films 与 meta 并行
+      api.films().catch((e) => { silent(e, 'films-boot'); return null; }),   // 旧服务兜底：无 /api/films 时按单工程链路
+      api.meta(),
+    ]);
+    if (filmsRes) {
       const films = filmsRes.films || [];
       if (films.length) {
-        fid = resolveCurrentFilm(films);
-        state.filmId = fid;
+        fid = resolveCurrentFilm(films);                   // 记忆 → 第一个非归档 → 第一个
         setFilmId(fid);
-        try { localStorage.setItem('studio.film', String(fid)); } catch (e) { /* ignore */ }
+        writeLastFilm(fid);
       }
-    } catch (e) { /* 旧服务兜底：无 /api/films 时按单工程链路 */ }
-    const [meta, filmData] = await Promise.all([api.meta(), api.film(fid)]);
+    }
     state.meta = meta;
-    applyFilm(filmData, api.auditSummary());   // 徽标预取并联（W2：省一次串行往返）
+    applyFilm(await api.film(fid), api.auditSummary());    // 徽标预取并联（W2：省一次串行往返）
     syncTopbarVar();
-    initFilmLib({ onSwitch: switchFilm, onReload: () => reloadFilm() });   // 标题位 + 弹层 + 剪贴板（M8）
+    initFilmLib({ onSwitch: switchFilm });                 // 标题位 + 弹层（M8）
+    initClipBar({ onPasted: refreshCurrentView });         // 剪贴板条（M8 清理刀：独立叶子模块）
     bindSettingsBtn(document.getElementById('settings-btn'));
     bindCmdK();
     installWheelGuards();   // 滚轮护栏：起手即装（F1-B4：曾只在提示词抽屉首开时装）
