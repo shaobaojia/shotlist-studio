@@ -143,12 +143,13 @@ def _col_w(col):
     return col.get("w") or 100
 
 
-def build_scene_html(con, scene_no, fmt="page"):
+def build_scene_html(con, scene_no, fmt="page", film_id=None):
     """构场导出件（P1·S4-A2）：返回 SceneExport(html/name_utf8/name_ascii)。
-    场不存在 raise SceneNotFound；未知格式 raise ValueError。"""
+    场不存在 raise SceneNotFound；未知格式 raise ValueError。
+    film_id 给定 → 限定工程（M8 工程库）。"""
     if fmt not in FORMATS:
         raise ValueError("未知导出格式：%s" % fmt)
-    _film, sc = db.load_scene(con, scene_no)
+    _film, sc = db.load_scene(con, scene_no, film_id)
     if not sc:
         raise SceneNotFound(scene_no)
     beats = db.beats(con, sc["id"])

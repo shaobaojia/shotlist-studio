@@ -7,6 +7,7 @@ import re
 from urllib.parse import quote
 
 from api import _guard as guard
+from api import params
 from core import export as core_export
 
 
@@ -24,10 +25,14 @@ def export_get(m, q):
         return guard.err("format 只支持 %s" % " / ".join(sorted(core_export.FORMATS)))
     if not scene_no:
         return guard.err("缺 scene 参数")
+    try:
+        fid = params.opt_int_q(q or {}, "film")   # M8 工程库：?film= 限定工程
+    except ValueError as e:
+        return guard.err(str(e))
 
     def run(con):
         try:
-            ex = core_export.build_scene_html(con, scene_no, fmt)
+            ex = core_export.build_scene_html(con, scene_no, fmt, fid)
         except core_export.SceneNotFound:
             return guard.err("场景不存在：%s" % scene_no, 404)
         body = ex.html.encode("utf-8")

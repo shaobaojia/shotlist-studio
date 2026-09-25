@@ -39,9 +39,9 @@ def _scene_payload(con, scene_id):
     }
 
 
-def create_scene(con):
-    """在影片末尾追加空场（场号自动）。"""
-    f = db.film(con)
+def create_scene(con, film_id=None):
+    """在影片末尾追加空场（场号自动）。film_id 给定 → 限定工程（M8 工程库）。"""
+    f = db.film(con, film_id)
     if not f:
         raise ValueError("还没有影片")
     scenes = list(con.execute("SELECT * FROM scenes WHERE film_id=? ORDER BY position, id", (f["id"],)))

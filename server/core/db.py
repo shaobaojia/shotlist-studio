@@ -57,8 +57,12 @@ def _dicts(rows):
     return [dict(r) for r in rows]
 
 
-def film(con):
-    rows = _dicts(con.execute("SELECT * FROM films ORDER BY id LIMIT 1"))
+def film(con, film_id=None):
+    """工程行（M8 工程库）：film_id 给定 → 按 id；缺省 → 第一行（旧单工程口径，兼容）。"""
+    if film_id is None:
+        rows = _dicts(con.execute("SELECT * FROM films ORDER BY id LIMIT 1"))
+    else:
+        rows = _dicts(con.execute("SELECT * FROM films WHERE id=?", (film_id,)))
     return rows[0] if rows else None
 
 
@@ -130,9 +134,10 @@ def group_members(con, group_ids):
     return out
 
 
-def load_scene(con, scene_no):
-    """按场号装载（单点，P1·S4-A8）：返回 (film, scene)；影片缺或场缺时对应项为 None。"""
-    f = film(con)
+def load_scene(con, scene_no, film_id=None):
+    """按场号装载（单点，P1·S4-A8）：返回 (film, scene)；影片缺或场缺时对应项为 None。
+    film_id 给定 → 限定工程（M8 工程库）；缺省 → 第一行（旧口径，兼容）。"""
+    f = film(con, film_id)
     if not f:
         return None, None
     return f, scene_by_no(con, f["id"], scene_no)

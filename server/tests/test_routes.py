@@ -14,6 +14,7 @@ from api import ai as ai_api  # noqa: E402
 from api import audit as audit_api  # noqa: E402
 from api import draft as draft_api  # noqa: E402
 from api import export as export_api  # noqa: E402
+from api import films as films_api  # noqa: E402
 from api import handlers  # noqa: E402
 from api import prompts as prompts_api  # noqa: E402
 from _fixture import make_prompts_db  # noqa: E402
@@ -29,6 +30,7 @@ CONTRACT_GET = [
     ("/api/health", handlers.health),
     ("/api/export", export_api.export_get),
     ("/api/meta", handlers.meta),
+    ("/api/films", films_api.films_list),
     ("/api/film", handlers.film),
     ("/api/scenes/s010", handlers.scene),
     ("/api/history", handlers.history),
@@ -52,6 +54,10 @@ CONTRACT_POST = [
     ("/api/create", handlers.create),
     ("/api/restore", handlers.restore),
     ("/api/lock", handlers.lock),
+    ("/api/film/create", films_api.film_op),
+    ("/api/film/rename", films_api.film_op),
+    ("/api/film/archive", films_api.film_op),
+    ("/api/film/delete", films_api.film_op),
     ("/api/blocks", prompts_api.blocks_op),
     ("/api/prompt/set_text", prompts_api.prompt_op),
     ("/api/audit/run", audit_api.run),
@@ -97,8 +103,8 @@ class TestFrontendAlignment(unittest.TestCase):
     """① 前后端对账：api.js 的每个路径都能在服务端命中。"""
 
     def test_frontend_path_count(self):
-        """提取防回归：api.js 34 个 unique 路径（blocks / audit/rules / ai/settings 三对 GET/POST 同路径）。"""
-        self.assertEqual(len(_frontend_paths()), 34)
+        """提取防回归：api.js 39 个 unique 路径（M8 新增 /api/films 与 film 四动词；blocks / audit/rules / ai/settings 三对 GET/POST 同路径）。"""
+        self.assertEqual(len(_frontend_paths()), 39)
 
     def test_frontend_paths_all_resolve(self):
         for p in sorted(_frontend_paths()):
@@ -134,8 +140,8 @@ class TestRouteContract(unittest.TestCase):
         self._check(app_mod.POST_ROUTES, CONTRACT_POST, "POST")
 
     def test_table_sizes(self):
-        self.assertEqual(len(app_mod.ROUTES), 15)
-        self.assertEqual(len(app_mod.POST_ROUTES), 24)
+        self.assertEqual(len(app_mod.ROUTES), 16)
+        self.assertEqual(len(app_mod.POST_ROUTES), 25)
 
 
 class _FakeHandler:

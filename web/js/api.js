@@ -21,7 +21,12 @@ function post(path, payload) {
 
 export const api = {
   meta: () => get('/api/meta'),
-  film: () => get('/api/film'),
+  film: (id) => get('/api/film' + (id ? '?id=' + id : '')),
+  films: () => get('/api/films'),
+  filmCreate: (payload) => post('/api/film/create', payload),
+  filmRename: (id, title) => post('/api/film/rename', { id: id, title: title }),
+  filmArchive: (id, archived) => post('/api/film/archive', { id: id, archived: archived }),
+  filmDelete: (id) => post('/api/film/delete', { id: id }),
   scene: (no) => get('/api/scenes/' + encodeURIComponent(no)),
   update: (table, id, field, value) => post('/api/update', { table: table, id: id, field: field, value: value }),
   renumber: (no) => post('/api/scenes/' + encodeURIComponent(no) + '/renumber', {}),

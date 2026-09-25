@@ -24,6 +24,17 @@ def req_int(body, key):
     return v
 
 
+def opt_int_q(q, name):
+    """query 可选行 id（M8 工程库）：缺省/空 → None；有值非法 → ValueError。"""
+    raw = q1(q, name)
+    if raw in (None, ""):
+        return None
+    v = as_int(raw, name)
+    if not fields.is_id(v):
+        raise ValueError("参数不完整（%s）" % name)
+    return v
+
+
 def req_int_q(q, name):
     """query 里的行 id；缺失/非法 → ValueError（同文案）。——P0·S2-P3"""
     raw = q1(q, name)

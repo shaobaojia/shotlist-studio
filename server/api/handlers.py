@@ -28,21 +28,31 @@ def meta(m, q):
 
 
 def film(m, q):
+    try:
+        fid = params.opt_int_q(q or {}, "id")   # M8 工程库：?id= 指定工程；缺省第一行（兼容）
+    except ValueError as e:
+        return guard.err(str(e))
+
     def run(con):
-        f = db.film(con)
+        f = db.film(con, fid)
         if not f:
-            return guard.err("库里还没有影片—先跑迁移脚本", 404)
-        return {"film": {"id": f["id"], "title": f["title"]},
-                "scenes": db.scenes(con, f["id"])}, 200
+            if fid is None:
+                return guard.err("库里还没有影片—先跑迁移脚本", 404)
+            return guard.err("工程不存在：%s" % fid, 404)
+        return {"film": f, "scenes": db.scenes(con, f["id"])}, 200
 
     return guard.read(run)
 
 
 def scene(m, q):
     scene_no = unquote(m.group(1))
+    try:
+        fid = params.opt_int_q(q or {}, "film")   # M8 工程库：?film= 限定工程
+    except ValueError as e:
+        return guard.err(str(e))
 
     def run(con):
-        sc, gone = guard.scene_or_404(con, scene_no)
+        sc, gone = guard.scene_or_404(con, scene_no, fid)
         if gone:
             return gone
         _, beats, shots = db.scene_ctx(con, sc["id"])   # 整场装载单点（P0·S1-W1）
@@ -69,12 +79,16 @@ def history(m, q):
         except ValueError as e:
             return guard.err(str(e))   # 非数字 → 400（不再 500；P0·S1-B3）
     try:
+        fid = params.opt_int_q(q or {}, "film")   # M8 工程库：?film= 限定工程
+    except ValueError as e:
+        return guard.err(str(e))
+    try:
         limit = params.as_int(params.q1(q, "limit") or str(ops.HISTORY_LIMIT_DEFAULT), "limit")
     except ValueError:
         limit = ops.HISTORY_LIMIT_DEFAULT
 
     def run(con):
-        return {"history": ops.history_of(con, sid, limit)}, 200   # 上限钳制在 ops（P0·S1-P2④）
+        return {"history": ops.history_of(con, sid, limit, fid)}, 200   # 上限钳制在 ops（P0·S1-P2④）
 
     return guard.read(run)
 
@@ -147,9 +161,13 @@ def move(m, body, q):
 def renumber(m, body, q):
     """M2 整理镜号：按当前顺序整场顺排；旧号入痕迹。"""
     scene_no = unquote(m.group(1))
+    try:
+        fid = params.opt_int_q(q or {}, "film")   # M8 工程库：?film= 限定工程
+    except ValueError as e:
+        return guard.err(str(e))
 
     def run(con):
-        sc, gone = guard.scene_or_404(con, scene_no)
+        sc, gone = guard.scene_or_404(con, scene_no, fid)
         if gone:
             return gone
         return {"ok": True, "changes": ops.renumber_scene(con, sc["id"])}, 200
@@ -217,13 +235,16 @@ def create(m, body, q):
     elif kind == "beat":
         if not fields.is_id(scene_id):
             return guard.err("参数不完整（scene_id）")
+    film_id = body.get("film_id")   # M8 工程库：kind=scene 可指定工程；缺省第一行（兼容）
+    if film_id is not None and not fields.is_id(film_id):
+        return guard.err("参数不完整（film_id）")
 
     def run(con):
         if kind == "shot":
             return {"ok": True, "shot": ops.create_blank_shot(con, scene_id, beat_id, index)}, 200
         if kind == "beat":
             return {"ok": True, "beat": ops.create_beat(con, scene_id)}, 200
-        return {"ok": True, "scene": ops.create_scene(con)}, 200
+        return {"ok": True, "scene": ops.create_scene(con, film_id)}, 200
 
     return guard.write(run)
 

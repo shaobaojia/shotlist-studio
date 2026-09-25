@@ -176,13 +176,16 @@ def batch_update(con, items, source="manual"):
     return {"changed": changed, "results": results}
 
 
-def history_of(con, scene_id=None, limit=HISTORY_LIMIT_DEFAULT):
+def history_of(con, scene_id=None, limit=HISTORY_LIMIT_DEFAULT, film_id=None):
     limit = min(HISTORY_LIMIT_MAX, max(1, int(limit)))   # 上限钳制下沉域层（接口层只做类型解析）——P0·S1-P2④
     q = "SELECT * FROM history"
     args = []
     if scene_id is not None:
         q += " WHERE scene_id=?"
         args.append(scene_id)
+    elif film_id is not None:                            # 工程视图过滤（M8）：scene_id 优先
+        q += " WHERE scene_id IN (SELECT id FROM scenes WHERE film_id=?)"
+        args.append(film_id)
     q += " ORDER BY id DESC LIMIT ?"
     args.append(int(limit))
     return [dict(r) for r in con.execute(q, args)]

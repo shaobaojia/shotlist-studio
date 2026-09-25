@@ -29,9 +29,10 @@ def write(fn):
         return err(str(e))
 
 
-def scene_or_404(con, scene_no):
-    """场装载 + 404 双判（S1-L2 单点）：返回 (sc, None) 或 (None, (obj, code))。"""
-    f, sc = db.load_scene(con, scene_no)
+def scene_or_404(con, scene_no, film_id=None):
+    """场装载 + 404 双判（S1-L2 单点）：返回 (sc, None) 或 (None, (obj, code))。
+    film_id 给定 → 限定工程（M8 工程库）。"""
+    f, sc = db.load_scene(con, scene_no, film_id)
     if not f:
         return None, err("库里还没有影片—先跑迁移脚本", 404)
     if not sc:

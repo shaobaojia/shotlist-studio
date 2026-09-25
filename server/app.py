@@ -19,6 +19,7 @@ from api import ai as ai_api  # noqa: E402
 from api import recipes as recipes_api  # noqa: E402
 from api import draft as draft_api  # noqa: E402
 from api import export as export_api  # noqa: E402
+from api import films as films_api  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB_DIR = (ROOT / "web").resolve()
@@ -27,6 +28,7 @@ ROUTES = [
     (re.compile(r"^/api/health$"), handlers.health),
     (re.compile(r"^/api/export$"), export_api.export_get),   # 统一路由表（原 do_GET 特判退役）——P0·S1-W18
     (re.compile(r"^/api/meta$"), handlers.meta),
+    (re.compile(r"^/api/films$"), films_api.films_list),   # 工程库（M8）
     (re.compile(r"^/api/film$"), handlers.film),
     (re.compile(r"^/api/scenes/([^/]+)$"), handlers.scene),
     (re.compile(r"^/api/history$"), handlers.history),
@@ -66,6 +68,7 @@ POST_ROUTES = [
     (re.compile(r"^/api/ai/draft$"), draft_api.start),
     (re.compile(r"^/api/ai/draft/prompt$"), draft_api.prompt),
     (re.compile(r"^/api/ai/draft/apply$"), draft_api.apply_op),
+    (re.compile(r"^/api/film/(create|rename|archive|delete)$"), films_api.film_op),   # 工程库（M8）
 ]
 
 CONTENT_TYPES = {
