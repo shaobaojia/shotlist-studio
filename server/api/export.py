@@ -33,6 +33,10 @@ def export_get(m, q):
     def run(con):
         try:
             ex = core_export.build_scene_html(con, scene_no, fmt, fid)
+        except core_export.FilmNotFound as e:
+            if e.film_id is None:
+                return guard.err(guard.MSG_NO_FILM, 404)
+            return guard.err(guard.MSG_FILM_MISSING % e.film_id, 404)
         except core_export.SceneNotFound:
             return guard.err("场景不存在：%s" % scene_no, 404)
         body = ex.html.encode("utf-8")

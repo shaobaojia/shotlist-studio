@@ -2,6 +2,7 @@
 """共享测试夹具（审计 §三-1）：test_ops / test_prompts 同源——手写 SQL 建状态，不用被测代码搭夹具。"""
 import sqlite3
 import time
+from contextlib import contextmanager
 
 import _boot   # 引导单点（P2·S4-P3）
 
@@ -79,6 +80,19 @@ def conn_factory(db_path, timeout=10):
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA foreign_keys=ON")
         return con
+    return f
+
+
+def make_conn(db_path=None):
+    """schema 载入的标准连接（公开别名 · M8 清理刀）：内存库或文件库，生产同款 PRAGMA。"""
+    return _conn(db_path)
+
+
+def fake_rw(con):
+    """假写连接工厂（M8 清理刀；envelope 测试用）：`with mock.patch("core.db.conn_rw", fake_rw(con)):`。"""
+    @contextmanager
+    def f(db_path=None):
+        yield con
     return f
 
 

@@ -7,6 +7,8 @@
 from core import db
 
 UNKNOWN_ACTION = "未知 action：%s"          # P7③：文案单点
+MSG_NO_FILM = "库里还没有影片—先跑迁移脚本"    # 无片文案单点（M8 清理刀）
+MSG_FILM_MISSING = "工程不存在：%s"          # 指定片号缺失文案单点（同上）
 
 
 def err(msg, code=400):
@@ -34,7 +36,9 @@ def scene_or_404(con, scene_no, film_id=None):
     film_id 给定 → 限定工程（M8 工程库）。"""
     f, sc = db.load_scene(con, scene_no, film_id)
     if not f:
-        return None, err("库里还没有影片—先跑迁移脚本", 404)
+        if film_id is None:
+            return None, err(MSG_NO_FILM, 404)
+        return None, err(MSG_FILM_MISSING % film_id, 404)   # 指定片号缺失：精确诊断（M8 清理刀）
     if not sc:
         return None, err("场景不存在：%s" % scene_no, 404)
     return sc, None

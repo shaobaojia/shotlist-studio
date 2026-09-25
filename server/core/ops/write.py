@@ -61,13 +61,18 @@ def _guarded_set(con, table, field, row_id, old, value):
 
 
 
-def scene_no_taken(con, scene_no, exclude_id=None):
-    """场号唯一性单点（写路径不变量；trim/唯一校验共用）——P0·S1-W12。"""
-    if exclude_id is None:
-        row = con.execute("SELECT id FROM scenes WHERE scene_no=?", (scene_no,)).fetchone()
-    else:
-        row = con.execute("SELECT id FROM scenes WHERE scene_no=? AND id<>?", (scene_no, exclude_id)).fetchone()
-    return row is not None
+def scene_no_taken(con, scene_no, exclude_id=None, film_id=None):
+    """场号唯一性单点（写路径不变量；trim/唯一校验共用）——P0·S1-W12。
+    film_id 给定 → 按工程判重（M8 清理刀：跨工程互不影响）；缺省 → 全库（保守）。"""
+    q = "SELECT id FROM scenes WHERE scene_no=?"
+    args = [scene_no]
+    if film_id is not None:
+        q += " AND film_id=?"
+        args.append(film_id)
+    if exclude_id is not None:
+        q += " AND id<>?"
+        args.append(exclude_id)
+    return con.execute(q, args).fetchone() is not None
 
 
 _CAM_EMBED_RE = re.compile(r"\d+mm|·(?:浅|中|深)")   # 摄影机内嵌焦段/景深判据（F1-L4 单源校验）
@@ -80,7 +85,9 @@ def _check_field_value(con, table, row_id, field, value):
         v = ("" if value is None else str(value)).strip()
         if not v:
             raise ValueError("场号不能为空")
-        if scene_no_taken(con, v, exclude_id=row_id):
+        row = con.execute("SELECT film_id FROM scenes WHERE id=?", (row_id,)).fetchone()
+        if scene_no_taken(con, v, exclude_id=row_id,
+                          film_id=row["film_id"] if row else None):
             raise ValueError("场号已存在：%s" % v)
         return v
     if table == "shots" and field == "shot_size":
@@ -184,8 +191,9 @@ def history_of(con, scene_id=None, limit=HISTORY_LIMIT_DEFAULT, film_id=None):
         q += " WHERE scene_id=?"
         args.append(scene_id)
     elif film_id is not None:                            # 工程视图过滤（M8）：scene_id 优先
-        q += " WHERE scene_id IN (SELECT id FROM scenes WHERE film_id=?)"
-        args.append(film_id)
+        q += (" WHERE (scene_id IN (SELECT id FROM scenes WHERE film_id=?)"
+              " OR (scene_id IS NULL AND entity='films' AND entity_id=?))")   # 含工程级痕迹（M8 清理刀）
+        args.extend([film_id, film_id])
     q += " ORDER BY id DESC LIMIT ?"
     args.append(int(limit))
     return [dict(r) for r in con.execute(q, args)]

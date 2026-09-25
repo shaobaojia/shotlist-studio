@@ -41,15 +41,24 @@ def _max_num(rows, key):
     return mx
 
 
-def _next_scene_no(con):
-    """下一个场号：最大数字 +10，步进风格 sNNN（s010→s090；冲突顺延）。"""
+def follow_no(mx, k, width=0):
+    """追号单点（M8 清理刀）：最大数字 mx 起，顺延第 k 个（0 基）。
+    width=2 → %02d 补零（01、02…）；0 → 纯数字（1、2…）。"""
+    n = mx + 1 + k
+    return ("%0*d" % (width, n)) if width else str(n)
+
+
+def _next_scene_no(con, film_id):
+    """下一个场号：本工程内最大数字 +10，步进风格 sNNN（s010→s090；冲突顺延）。
+    唯一性按工程（M8 清理刀：跨工程互不影响）。"""
     mx = 0
-    for r in con.execute("SELECT scene_no FROM scenes"):
+    for r in con.execute("SELECT scene_no FROM scenes WHERE film_id=?", (film_id,)):
         m = re.match(r"^s(\d+)$", (r["scene_no"] or "").strip())
         if m:
             mx = max(mx, int(m.group(1)))
     n = (mx + 10) if mx else 10
-    taken = {(r["scene_no"] or "") for r in con.execute("SELECT scene_no FROM scenes")}
+    taken = {(r["scene_no"] or "") for r in con.execute(
+        "SELECT scene_no FROM scenes WHERE film_id=?", (film_id,))}
     while ("s%03d" % n) in taken:
         n += 10
     return "s%03d" % n

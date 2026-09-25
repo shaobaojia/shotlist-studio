@@ -69,6 +69,14 @@ class SceneNotFound(Exception):
     """场不存在（P1·S4-A2）：接口层转 404。"""
 
 
+class FilmNotFound(Exception):
+    """工程不存在（M8 清理刀）：接口层转 404；film_id=None 表示库中无片。"""
+
+    def __init__(self, film_id):
+        super().__init__(film_id)
+        self.film_id = film_id
+
+
 SceneExport = namedtuple("SceneExport", "html name_utf8 name_ascii")
 
 
@@ -150,6 +158,8 @@ def build_scene_html(con, scene_no, fmt="page", film_id=None):
     if fmt not in FORMATS:
         raise ValueError("未知导出格式：%s" % fmt)
     _film, sc = db.load_scene(con, scene_no, film_id)
+    if not _film:
+        raise FilmNotFound(film_id)
     if not sc:
         raise SceneNotFound(scene_no)
     beats = db.beats(con, sc["id"])

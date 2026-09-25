@@ -403,7 +403,9 @@ class TestDeleteGuards(unittest.TestCase):
             for body in bad:
                 res, code = api_handlers.delete_row(None, dict(body), {})
                 self.assertEqual(code, 400, "body=%r" % (body,))
-                self.assertIn("table", res["error"])
+                # 缺/非法 table → 指向 table；有 table 缺 id/ids → 指向 ids（M8 清理刀收编文案）
+                self.assertTrue("table" in res["error"] or "ids" in res["error"],
+                                "body=%r error=%r" % (body, res["error"]))
 
 
 class TestHistoryParams(unittest.TestCase):

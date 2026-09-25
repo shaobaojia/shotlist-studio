@@ -37,8 +37,8 @@ def film(m, q):
         f = db.film(con, fid)
         if not f:
             if fid is None:
-                return guard.err("库里还没有影片—先跑迁移脚本", 404)
-            return guard.err("工程不存在：%s" % fid, 404)
+                return guard.err(guard.MSG_NO_FILM, 404)
+            return guard.err(guard.MSG_FILM_MISSING % fid, 404)
         return {"film": f, "scenes": db.scenes(con, f["id"])}, 200
 
     return guard.read(run)
@@ -131,7 +131,7 @@ def move(m, body, q):
     rid = body.get("id")
     ids = body.get("ids")
     index = body.get("index", 0)
-    ok_ids = isinstance(ids, list) and len(ids) >= 1 and all(fields.is_id(x) for x in ids)
+    ok_ids = params.ids_ok(ids)   # id/ids 二选一判据收编（M8 清理刀）
     err_params = guard.err("参数不完整（table/id/index）")   # 同函数三处同文案（P0·S1-P4④）
     if table not in ops.TABLES_ALLOWED or not (fields.is_id(rid) or ok_ids):
         return err_params
@@ -201,11 +201,10 @@ def delete_row(m, body, q):
     ids = body.get("ids")
     if ids is None and fields.is_id(body.get("id")):
         ids = [body.get("id")]
-    if not isinstance(ids, list) or not ids \
-            or not all(fields.is_id(x) for x in ids):
-        return guard.err("参数不完整（table + id/ids）")
-    if len(ids) > fields.DELETE_MAX:
-        return guard.err("一次最多 %d 行" % fields.DELETE_MAX)
+    try:
+        ids = params.req_ids({"ids": ids}, "ids", max_n=fields.DELETE_MAX)   # ids 守卫收编（M8 清理刀）
+    except ValueError as e:
+        return guard.err(str(e))
 
     def run(con):
         if table == "shots":

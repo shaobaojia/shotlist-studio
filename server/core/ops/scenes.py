@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """场级操作：创建 / 移动 / 复制 / 删除 / 整号 / 载荷（原 ops.py 拆分 · S1-L1）。"""
-from datetime import datetime
 from pathlib import Path
 
-from core import db, fsutil, paths
+from core import db, paths
 from .write import record_history, _row_or_raise
-from .structure import _scene_beats, _scene_shots, reseq, _make_room, _reseq_survivors, _table_cols, _copy_row
+from .structure import _scene_beats, _scene_shots, reseq, _make_room, _reseq_survivors, _table_cols, _copy_row, copy_scene_children
 from .numbering import COPY_COLS, _next_scene_no
+from . import snapshot_io
 
 
 def renumber_scene(con, scene_id):
@@ -28,14 +28,21 @@ def renumber_scene(con, scene_id):
     return changes
 
 
-def _scene_payload(con, scene_id):
-    """场次完整载荷：{scene, beats, shots, groups}（锁底/删场撤销共用单点）——P0·S1-W4。"""
+def _scene_children(con, scene_id):
+    """场子树装载（M8 清理刀）：{beats, shots, groups}——_scene_payload 与工程留底共用。"""
     return {
-        "scene": dict(_row_or_raise(con, "scenes", scene_id, "场景")),
         "beats": [dict(b) for b in _scene_beats(con, scene_id)],
         "shots": [dict(s) for s in _scene_shots(con, scene_id)],
         "groups": [dict(g) for g in con.execute(
             "SELECT * FROM prompt_groups WHERE scene_id=? ORDER BY position, id", (scene_id,))],
+    }
+
+
+def _scene_payload(con, scene_id):
+    """场次完整载荷：{scene, beats, shots, groups}（锁底/删场撤销共用单点）——P0·S1-W4。"""
+    return {
+        "scene": dict(_row_or_raise(con, "scenes", scene_id, "场景")),
+        **_scene_children(con, scene_id),
     }
 
 
@@ -45,7 +52,7 @@ def create_scene(con, film_id=None):
     if not f:
         raise ValueError("还没有影片")
     scenes = list(con.execute("SELECT * FROM scenes WHERE film_id=? ORDER BY position, id", (f["id"],)))
-    no = _next_scene_no(con)
+    no = _next_scene_no(con, f["id"])
     cur = con.execute(
         "INSERT INTO scenes (film_id, position, scene_no, title) VALUES (?,?,?,?)",
         (f["id"], len(scenes), no, "新场"))
@@ -75,36 +82,21 @@ def duplicate_scene(con, scene_id):
     """场次深拷：场 + 节拍 + 镜头 + 提示词组；新场紧跟源场；场号自动；镜号原样（新场不冲突）。"""
     src = _row_or_raise(con, "scenes", scene_id, "场景")
     film_id = src["film_id"]
-    new_no = _next_scene_no(con)
+    new_no = _next_scene_no(con, film_id)
     _make_room(con, "scenes", "film_id", film_id, src["position"], after=True)
     scols = _table_cols(con, "scenes")
-    bcols = _table_cols(con, "beats")
-    gcols = _table_cols(con, "prompt_groups")
     skeys = [k for k in src.keys() if k in scols and k not in ("id", "position", "scene_no", "locked", "film_id")]
     new_sid = _copy_row(con, "scenes", src,
                         {"film_id": film_id, "position": src["position"] + 1, "scene_no": new_no, "locked": 0},
                         skeys)
-    bmap = {}
-    for b in _scene_beats(con, scene_id):
-        bkeys = [k for k in b.keys() if k in bcols and k not in ("id", "scene_id")]
-        bmap[b["id"]] = _copy_row(con, "beats", b, {"scene_id": new_sid}, bkeys)
-    gmap = {}
-    for g in con.execute("SELECT * FROM prompt_groups WHERE scene_id=? ORDER BY position, id", (scene_id,)):
-        gkeys = [k for k in g.keys() if k in gcols and k not in ("id", "scene_id")]
-        gmap[g["id"]] = _copy_row(con, "prompt_groups", g, {"scene_id": new_sid}, gkeys)
-    s2 = _scene_shots(con, scene_id)
-    for shot in s2:
-        bid = bmap.get(shot["beat_id"]) if shot["beat_id"] is not None else None
-        gid = gmap.get(shot["prompt_group_id"]) if shot["prompt_group_id"] is not None else None
-        _copy_row(con, "shots", shot,
-                  {"scene_id": new_sid, "beat_id": bid, "position": shot["position"],
-                   "shot_no": shot["shot_no"], "prompt_group_id": gid},
-                  COPY_COLS)
+    bmap, _gmap, n_shots = copy_scene_children(
+        con, scene_id, new_sid, s_cols=COPY_COLS,
+        s_extra=lambda s, _bm, _gm: {"position": s["position"], "shot_no": s["shot_no"]})
     nbeats = len(bmap)
     record_history(con, new_sid, "scenes", new_sid, field="create", old_value=src["scene_no"],
-                   new_value="%s（%d 节拍 / %d 镜）" % (new_no, nbeats, len(s2)))
+                   new_value="%s（%d 节拍 / %d 镜）" % (new_no, nbeats, n_shots))
     con.commit()
-    return {"id": new_sid, "scene_no": new_no, "beats": nbeats, "shots": len(s2)}
+    return {"id": new_sid, "scene_no": new_no, "beats": nbeats, "shots": n_shots}
 
 
 def delete_scene(con, scene_id):
@@ -125,18 +117,10 @@ def lock_scene(con, scene_id, lock=True, snap_root=None):
     sc = _row_or_raise(con, "scenes", scene_id, "场景")
     snap = None
     if lock:
-        payload = {"saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                   **_scene_payload(con, scene_id)}
         root = Path(snap_root) if snap_root else paths.SNAP_SCENES_DIR
-        root.mkdir(parents=True, exist_ok=True)
-        fname = "%s-%s.json" % (sc["scene_no"] or ("scene%d" % scene_id),
-                                datetime.now().strftime("%Y%m%d-%H%M%S"))
-        fpath = root / fname
-        fsutil.dump_json(fpath, payload)   # 原子写单点（P1·S4-P5）
-        rel = str(fpath.relative_to(paths.ROOT))   # 恒仓库相对（snap_root 只决定文件落哪）——P0·S1-W15
-        con.execute("INSERT INTO snapshots (scope, kind, label, path) VALUES ('scene','locked',?,?)",
-                    (sc["scene_no"], rel))
-        snap = {"path": rel, "at": payload["saved_at"]}
+        name_base = "%s-s%d" % (sc["scene_no"] or ("scene%d" % scene_id), scene_id)   # 名尾补 id：防同秒同名互盖（M8 清理刀）
+        snap = snapshot_io.write_snapshot(con, root, name_base, _scene_payload(con, scene_id),
+                                          "scene", "locked", sc["scene_no"])
     con.execute("UPDATE scenes SET locked=? WHERE id=?", (1 if lock else 0, scene_id))
     record_history(con, scene_id, "scenes", scene_id, field="locked",
                    old_value="1" if sc["locked"] else "0", new_value="1" if lock else "0")

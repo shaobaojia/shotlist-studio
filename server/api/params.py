@@ -46,6 +46,22 @@ def req_int_q(q, name):
     return v
 
 
+def ids_ok(v):
+    """行 id 列表判据（M8 清理刀）：非空列表且全为 id（move 的 id/ids 二选一用）。"""
+    return isinstance(v, list) and len(v) >= 1 and all(fields.is_id(x) for x in v)
+
+
+def req_ids(body, key="ids", max_n=None):
+    """body 里的行 id 列表（非空、全 id；max_n 可选上限）→ list；缺失/非法/超限 → ValueError。
+    ——S1-P4④ 手抄第 3 份收编（M8 清理刀：delete_row / paste_op / move 共用）。"""
+    v = body.get(key)
+    if not ids_ok(v):
+        raise ValueError("参数不完整（%s）" % key)
+    if max_n is not None and len(v) > max_n:
+        raise ValueError("一次最多 %d 行" % max_n)
+    return v
+
+
 def req_str(body, key):
     """body 里的非空字符串；缺失/非法 → ValueError（400 文案统一）。——P0·S3-P7①"""
     v = body.get(key)

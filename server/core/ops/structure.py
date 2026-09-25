@@ -2,7 +2,7 @@
 """结构操作：镜头/节拍级——序号重排 / 移动 / 增删拷贝（原 ops.py 拆分 · S1-L1）。"""
 from core import db
 from .write import record_history, _row_or_raise
-from .numbering import COPY_COLS, _next_letter_no, _next_shot_no, _max_num, _next_beat_no
+from .numbering import COPY_COLS, _next_letter_no, _next_shot_no, _max_num, _next_beat_no, follow_no
 
 
 BEAT_KIND_DEFAULT = "⚪ 填充"   # 新建节拍默认类型（P0·S1-W7；测试引用，勿手抄）
@@ -180,6 +180,31 @@ def _copy_row(con, table, src, overrides, cols):
     return _insert_dict(con, table, d)
 
 
+def copy_scene_children(con, scene_id, new_scene_id, *, s_cols, s_extra,
+                        b_cols=None, g_cols=None, b_extra=None, g_extra=None):
+    """场子树深拷单点（M8 清理刀）：提示词组 / 节拍 / 镜 → 新场；ID 全重映射（镜的节拍/组归属随映射）。
+    b/g/s_cols：列集（None → 动态全列 − id）；b/g_extra：常量 overrides；s_extra：每行回调 (src_row, bmap, gmap) → overrides。
+    不 commit（调用方收尾）。返回 (bmap, gmap, n_shots)。"""
+    b_cols = b_cols if b_cols is not None else (_table_cols(con, "beats") - {"id"})
+    g_cols = g_cols if g_cols is not None else (_table_cols(con, "prompt_groups") - {"id"})
+    bmap = {}
+    for b in _scene_beats(con, scene_id):
+        bmap[b["id"]] = _copy_row(con, "beats", b,
+                                  {"scene_id": new_scene_id, **(b_extra or {})}, b_cols)
+    gmap = {}
+    for g in con.execute("SELECT * FROM prompt_groups WHERE scene_id=? ORDER BY position, id", (scene_id,)):
+        gmap[g["id"]] = _copy_row(con, "prompt_groups", g,
+                                  {"scene_id": new_scene_id, **(g_extra or {})}, g_cols)
+    shots = _scene_shots(con, scene_id)
+    for s in shots:
+        bid = bmap.get(s["beat_id"]) if s["beat_id"] is not None else None
+        gid = gmap.get(s["prompt_group_id"]) if s["prompt_group_id"] is not None else None
+        ov = {"scene_id": new_scene_id, "beat_id": bid, "prompt_group_id": gid}
+        ov.update(s_extra(s, bmap, gmap))
+        _copy_row(con, "shots", s, ov, s_cols)
+    return bmap, gmap, len(shots)
+
+
 def create_blank_shot(con, scene_id, beat_id, index):
     """插入空行：index=0 基场序位。编号：追加（末尾）=数字顺延；中插=前邻字母后缀。
     idx=0 队首中插：以原首行为基生成后缀（编号序与位置序相反属标签语义——DO_NOT_FLAG A3）。"""
@@ -193,8 +218,7 @@ def create_blank_shot(con, scene_id, beat_id, index):
     if not rows:
         new_no = "01"
     elif idx == len(rows):
-        mx = _max_num(rows, "shot_no")
-        new_no = "%02d" % (mx + 1) if mx else "01"
+        new_no = follow_no(_max_num(rows, "shot_no"), 0, 2)
     else:
         base = rows[idx - 1]["shot_no"] if idx > 0 else rows[0]["shot_no"]
         new_no = _next_shot_no(con, scene_id, base or "01")
@@ -229,12 +253,12 @@ def create_beat(con, scene_id):
     """场景末尾追加空节拍（编号 = 最大数字 +1）。"""
     _row_or_raise(con, "scenes", scene_id, "场景")
     beats = _scene_beats(con, scene_id)
-    mx = _max_num(beats, "beat_no")
+    no = follow_no(_max_num(beats, "beat_no"), 0)
     cur = con.execute(
         "INSERT INTO beats (scene_id, position, beat_no, name, kind) VALUES (?,?,?,?,?)",
-        (scene_id, len(beats), str(mx + 1), "新节拍", BEAT_KIND_DEFAULT))
+        (scene_id, len(beats), no, "新节拍", BEAT_KIND_DEFAULT))
     new_id = cur.lastrowid
-    record_history(con, scene_id, "beats", new_id, field="create", old_value=None, new_value=str(mx + 1))
+    record_history(con, scene_id, "beats", new_id, field="create", old_value=None, new_value=no)
     con.commit()
     return dict(con.execute("SELECT * FROM beats WHERE id=?", (new_id,)).fetchone())
 
@@ -249,7 +273,7 @@ def append_beats(con, scene_id, rows, source="ai"):
     ids = []
     for i, r in enumerate(rows):
         r = r or {}
-        no = str(mx + 1 + i)
+        no = follow_no(mx, i)
         cur = con.execute(
             "INSERT INTO beats (scene_id, position, beat_no, name, kind,"
             " outside_action, reaction, closed_loop) VALUES (?,?,?,?,?,?,?,?)",
@@ -270,7 +294,7 @@ def append_shots(con, scene_id, rows, source="ai"):
     ids = []
     for k, r in enumerate(rows):
         r = r or {}
-        no = "%02d" % (mx + 1 + k)
+        no = follow_no(mx, k, 2)
         cur = con.execute(
             "INSERT INTO shots (scene_id, beat_id, position, shot_no, camera_move,"
             " camera_pos, blocking, dialogue, duration) VALUES (?,?,?,?,?,?,?,?,?)",

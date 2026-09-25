@@ -68,7 +68,7 @@ POST_ROUTES = [
     (re.compile(r"^/api/ai/draft$"), draft_api.start),
     (re.compile(r"^/api/ai/draft/prompt$"), draft_api.prompt),
     (re.compile(r"^/api/ai/draft/apply$"), draft_api.apply_op),
-    (re.compile(r"^/api/film/(create|rename|archive|delete)$"), films_api.film_op),   # 工程库（M8）
+    (re.compile(r"^/api/film/(%s)$" % "|".join(films_api.ACTIONS)), films_api.film_op),   # 工程库（M8）· 动作单源
     (re.compile(r"^/api/paste$"), films_api.paste_op),   # 跨工程粘贴（M8 刀B）
 ]
 

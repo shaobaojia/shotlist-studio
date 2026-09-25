@@ -5,8 +5,8 @@ from core import db  # noqa: F401 — 历史访问面兼容（test_ops 经 ops.d
 
 from .write import (_apply_field, _check_field_value, _guarded_set, _NO_EXPECT, _row_or_raise, _StaleError, batch_update, HISTORY_LIMIT_DEFAULT, HISTORY_LIMIT_MAX, history_of, kv_set, record_history, scene_no_taken, SPECS, TABLES, TABLES_ALLOWED, touch_row, update_field, write_keys)  # noqa: F401
 from core.snapshot import (_prune_snapshots, _snapshot_date, _snapshot_done, _snapshot_lock, ensure_daily_snapshot, SNAPSHOT_RETAIN_DAYS)  # noqa: F401 — 快照族（S1-L4 迁出）
-from .structure import (_copy_row, _insert_dict, _make_room, _reseq_survivors, _scene_beats, _scene_shots, _table_cols, append_beats, append_shots, BEAT_KIND_DEFAULT, create_beat, create_blank_shot, delete_beat, delete_shots, duplicate_beat, duplicate_shot, move_beat, move_shot, move_shots, reseq)  # noqa: F401
-from .scenes import (_scene_payload, create_scene, delete_scene, duplicate_scene, lock_scene, move_scene, renumber_scene)  # noqa: F401
-from .numbering import (_max_num, _next_beat_no, _next_letter_no, _next_scene_no, _next_shot_no, _SUFFIXES, COPY_COLS)  # noqa: F401
+from .structure import (_copy_row, _insert_dict, _make_room, _reseq_survivors, _scene_beats, _scene_shots, _table_cols, append_beats, append_shots, BEAT_KIND_DEFAULT, copy_scene_children, create_beat, create_blank_shot, delete_beat, delete_shots, duplicate_beat, duplicate_shot, move_beat, move_shot, move_shots, reseq)  # noqa: F401
+from .scenes import (_scene_children, _scene_payload, create_scene, delete_scene, duplicate_scene, lock_scene, move_scene, renumber_scene)  # noqa: F401
+from .numbering import (_max_num, _next_beat_no, _next_letter_no, _next_scene_no, _next_shot_no, _SUFFIXES, COPY_COLS, follow_no)  # noqa: F401
 from .films import (archive_film, create_film, delete_film, list_films, paste_shots, rename_film)  # noqa: F401 — 工程域（M8）
 from .restore import (insert_restore, restore_beat, restore_scene_full, restore_shots)  # noqa: F401
