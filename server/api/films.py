@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""工程接口（工程库 · M8）：GET /api/films；POST /api/film/(create|rename|archive|delete)。
+"""工程接口（工程库 · M8）：GET /api/films；POST /api/film/(create|rename|archive|delete)、/api/paste。
 
 写响应附全量 films（F3-L4 信封口径：前端就地套用、不跟发 GET）。
 参数守卫先于写连接；域层 ValueError → 400（guard.run_actions 模板）。
@@ -53,3 +53,21 @@ SPEC = {
 def film_op(m, body, q):
     """POST /api/film/(create|rename|archive|delete)（action 取自 URL 捕获组）。"""
     return guard.run_actions(SPEC, body, precheck=_precheck, action=m.group(1), post=_post)
+
+
+def paste_op(m, body, q):
+    """POST /api/paste：跨工程/跨场粘贴镜头到目标场表尾（M8 刀B）。"""
+    scene_id = body.get("scene_id")
+    ids = body.get("ids")
+    if not fields.is_id(scene_id):
+        return guard.err("参数不完整（scene_id）")
+    if not isinstance(ids, list) or not ids or not all(fields.is_id(x) for x in ids):
+        return guard.err("参数不完整（ids）")
+    if len(ids) > fields.DELETE_MAX:
+        return guard.err("一次最多 %d 行" % fields.DELETE_MAX)
+
+    def run(con):
+        return {"ok": True, "shots": ops.paste_shots(con, ids, scene_id)}, 200
+
+    return guard.write(run)
+

@@ -11,7 +11,8 @@ from datetime import datetime
 from pathlib import Path
 
 from core import db, fsutil, paths
-from .structure import _copy_row, _table_cols
+from .structure import _copy_row, _scene_shots, _table_cols
+from .numbering import _max_num
 from .write import _row_or_raise, record_history
 
 FILM_TITLE_MAX = 60
@@ -167,3 +168,31 @@ def delete_film(con, film_id, snap_root=None):
     con.commit()
     return {"film": dict(f),
             "snapshot": {"path": rel, "at": now.strftime("%Y-%m-%d %H:%M:%S")}}
+
+
+def paste_shots(con, src_ids, target_scene_id):
+    """跨工程/跨场粘贴（M8 刀B）：把源镜头深拷到目标场表尾（未归节拍·无组；编号数字顺延）。
+    素材不限工程（同库 id 寻址）；逐行痕迹；一次事务。返回新行列表（含新 id/编号）。"""
+    _row_or_raise(con, "scenes", target_scene_id, "场景")
+    rows = []
+    for sid in src_ids:
+        r = con.execute("SELECT * FROM shots WHERE id=?", (sid,)).fetchone()
+        if not r:
+            raise ValueError("源镜头不存在：%s" % sid)
+        rows.append(r)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cols = _table_cols(con, "shots") - {"id"}
+    existing = _scene_shots(con, target_scene_id)
+    mx = _max_num(existing, "shot_no")
+    out = []
+    for i, r in enumerate(rows):
+        no = "%02d" % (mx + 1 + i)          # 追加顺延（同 create_blank_shot 口径）
+        new_id = _copy_row(con, "shots", r, {
+            "scene_id": target_scene_id, "beat_id": None, "prompt_group_id": None,
+            "shot_no": no, "position": len(existing) + i, "created_at": now, "updated_at": now}, cols)
+        record_history(con, target_scene_id, "shots", new_id, field="create",
+                       old_value=None, new_value=no)
+        out.append(dict(con.execute("SELECT * FROM shots WHERE id=?", (new_id,)).fetchone()))
+    con.commit()
+    return out
+

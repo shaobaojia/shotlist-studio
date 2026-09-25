@@ -244,5 +244,51 @@ class TestFilmOpEnvelope(unittest.TestCase):
         self.assertIn("title", obj["error"])
 
 
+class TestPasteShots(unittest.TestCase):
+    """跨工程/跨场粘贴（M8 刀B）。"""
+
+    def test_cross_film_paste(self):
+        con = make_films_db()
+        con.execute("INSERT INTO scenes (film_id, position, scene_no, title) VALUES (2, 0, 's001', '乙场')")
+        con.commit()
+        tsc = con.execute("SELECT id FROM scenes WHERE film_id=2").fetchone()[0]
+        src = [r["id"] for r in con.execute("SELECT id FROM shots WHERE scene_id=1 ORDER BY position")]
+        out = ops.paste_shots(con, src, tsc)
+        self.assertEqual(len(out), 2)
+        self.assertTrue(all(r["scene_id"] == tsc for r in out))
+        self.assertTrue(all(r["beat_id"] is None for r in out))          # 未归节拍
+        self.assertTrue(all(r["prompt_group_id"] is None for r in out))  # 无组
+        self.assertEqual([r["shot_no"] for r in out], ["01", "02"])
+        self.assertEqual(out[0]["blocking"], "动作一")                    # 内容随拷
+        self.assertEqual(con.execute("SELECT COUNT(*) FROM shots WHERE scene_id=1").fetchone()[0], 2)   # 源不受影响
+        h = con.execute("SELECT COUNT(*) FROM history WHERE scene_id=? AND entity='shots' AND field='create'",
+                        (tsc,)).fetchone()[0]
+        self.assertEqual(h, 2)
+
+    def test_paste_appends_numbering(self):
+        con = make_films_db()
+        src = [r["id"] for r in con.execute("SELECT id FROM shots WHERE scene_id=1 ORDER BY position")]
+        out = ops.paste_shots(con, src, 1)                               # 同场粘贴
+        self.assertEqual([r["shot_no"] for r in out], ["03", "04"])     # 顺延
+        self.assertEqual(con.execute("SELECT COUNT(*) FROM shots WHERE scene_id=1").fetchone()[0], 4)
+
+    def test_paste_missing_source(self):
+        con = make_films_db()
+        with self.assertRaises(ValueError):
+            ops.paste_shots(con, [999], 1)
+
+    def test_paste_bad_params_400(self):
+        con = make_films_db()
+
+        @contextmanager
+        def fake_rw(db_path=None):
+            yield con
+
+        with mock.patch("core.db.conn_rw", fake_rw):
+            obj, code = films_api.paste_op(None, {"scene_id": 1, "ids": []}, None)
+        self.assertEqual(code, 400)
+        self.assertIn("ids", obj["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,5 +8,5 @@ from core.snapshot import (_prune_snapshots, _snapshot_date, _snapshot_done, _sn
 from .structure import (_copy_row, _insert_dict, _make_room, _reseq_survivors, _scene_beats, _scene_shots, _table_cols, append_beats, append_shots, BEAT_KIND_DEFAULT, create_beat, create_blank_shot, delete_beat, delete_shots, duplicate_beat, duplicate_shot, move_beat, move_shot, move_shots, reseq)  # noqa: F401
 from .scenes import (_scene_payload, create_scene, delete_scene, duplicate_scene, lock_scene, move_scene, renumber_scene)  # noqa: F401
 from .numbering import (_max_num, _next_beat_no, _next_letter_no, _next_scene_no, _next_shot_no, _SUFFIXES, COPY_COLS)  # noqa: F401
-from .films import (archive_film, create_film, delete_film, list_films, rename_film)  # noqa: F401 — 工程域（M8）
+from .films import (archive_film, create_film, delete_film, list_films, paste_shots, rename_film)  # noqa: F401 — 工程域（M8）
 from .restore import (insert_restore, restore_beat, restore_scene_full, restore_shots)  # noqa: F401

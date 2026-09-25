@@ -19,23 +19,28 @@ function post(path, payload) {
   });
 }
 
+// 工程上下文单点（M8 工程库）：当前工程 id——boot / 切换工程经 setFilmId 注入（勿散写）
+let _fid = null;
+export function setFilmId(id) { _fid = id || null; }
+
 export const api = {
   meta: () => get('/api/meta'),
-  film: (id) => get('/api/film' + (id ? '?id=' + id : '')),
+  film: (id) => get('/api/film' + ((id || _fid) ? '?id=' + (id || _fid) : '')),
   films: () => get('/api/films'),
-  filmCreate: (payload) => post('/api/film/create', payload),
+  filmCreate: (title, copyFrom) => post('/api/film/create', copyFrom ? { title: title, copy_from: copyFrom } : { title: title }),
   filmRename: (id, title) => post('/api/film/rename', { id: id, title: title }),
   filmArchive: (id, archived) => post('/api/film/archive', { id: id, archived: archived }),
   filmDelete: (id) => post('/api/film/delete', { id: id }),
-  scene: (no) => get('/api/scenes/' + encodeURIComponent(no)),
+  paste: (sceneId, ids) => post('/api/paste', { scene_id: sceneId, ids: ids }),
+  scene: (no) => get('/api/scenes/' + encodeURIComponent(no) + (_fid ? '?film=' + _fid : '')),
   update: (table, id, field, value) => post('/api/update', { table: table, id: id, field: field, value: value }),
-  renumber: (no) => post('/api/scenes/' + encodeURIComponent(no) + '/renumber', {}),
+  renumber: (no) => post('/api/scenes/' + encodeURIComponent(no) + '/renumber' + (_fid ? '?film=' + _fid : ''), {}),
   move: (table, id, payload) => post('/api/move', Object.assign({ table: table, id: id }, payload || {})),
   moveMany: (table, ids, payload) => post('/api/move', Object.assign({ table: table, ids: ids }, payload || {})),
   batch: (ops) => post('/api/batch', { ops: ops }),
   duplicate: (table, id) => post('/api/duplicate', { table: table, id: id }),
   del: (payload) => post('/api/delete', payload),
-  create: (payload) => post('/api/create', payload),
+  create: (payload) => post('/api/create', _fid ? Object.assign({ film_id: _fid }, payload) : payload),
   restore: (payload) => post('/api/restore', payload),
   lock: (id, lock) => post('/api/lock', { id: id, lock: lock }),
   blocks: () => get('/api/blocks'),
@@ -66,7 +71,7 @@ export const api = {
 
 // 导出单点（F1-P7）：href 模板与下载触发（场务菜单 / 命令面板共用）
 export function exportUrl(no, fmt) {
-  return '/api/export?scene=' + encodeURIComponent(no) + '&format=' + fmt;
+  return '/api/export?scene=' + encodeURIComponent(no) + '&format=' + fmt + (_fid ? '&film=' + _fid : '');
 }
 
 export function downloadUrl(url) {

@@ -1,4 +1,4 @@
-export const state = { film: null, scenes: [], meta: null };
+export const state = { film: null, scenes: [], meta: null, filmId: null };   // filmId：当前工程（M8 工程库）
 
 // 表 → 字段清单（F1-P5 单点）：未知表名回落空表
 const FIELD_TABLES = { shots: 'shot_fields', beats: 'beat_fields', scenes: 'scene_fields' };

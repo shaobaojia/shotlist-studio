@@ -58,6 +58,7 @@ CONTRACT_POST = [
     ("/api/film/rename", films_api.film_op),
     ("/api/film/archive", films_api.film_op),
     ("/api/film/delete", films_api.film_op),
+    ("/api/paste", films_api.paste_op),
     ("/api/blocks", prompts_api.blocks_op),
     ("/api/prompt/set_text", prompts_api.prompt_op),
     ("/api/audit/run", audit_api.run),
@@ -103,8 +104,8 @@ class TestFrontendAlignment(unittest.TestCase):
     """① 前后端对账：api.js 的每个路径都能在服务端命中。"""
 
     def test_frontend_path_count(self):
-        """提取防回归：api.js 39 个 unique 路径（M8 新增 /api/films 与 film 四动词；blocks / audit/rules / ai/settings 三对 GET/POST 同路径）。"""
-        self.assertEqual(len(_frontend_paths()), 39)
+        """提取防回归：api.js 40 个 unique 路径（M8 新增 /api/films、film 四动词、/api/paste；blocks / audit/rules / ai/settings 三对 GET/POST 同路径）。"""
+        self.assertEqual(len(_frontend_paths()), 40)
 
     def test_frontend_paths_all_resolve(self):
         for p in sorted(_frontend_paths()):
@@ -141,7 +142,7 @@ class TestRouteContract(unittest.TestCase):
 
     def test_table_sizes(self):
         self.assertEqual(len(app_mod.ROUTES), 16)
-        self.assertEqual(len(app_mod.POST_ROUTES), 25)
+        self.assertEqual(len(app_mod.POST_ROUTES), 26)
 
 
 class _FakeHandler:

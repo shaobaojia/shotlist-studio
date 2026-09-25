@@ -1,15 +1,17 @@
 // 入口：导航（场次标签：切换 / 拖动排序 / 右键副本·删除 / 末尾＋加场）、路由、全局快捷键。
-import { api } from './api.js';
+import { api, setFilmId } from './api.js';
 import { state, sceneLabel } from './state.js';
 import { el, toast, once, installWheelGuards, isTypingTarget, filmChanged, FILM_CHANGED, silent, setVarPx } from './ui.js';
 import { parseHash, sceneNo, hashOf } from './route.js';
 import { renderFilm } from './film.js';
 import { renderScene, refreshCurrentView } from './scene.js';
 import { undo, recordUndo } from './edit.js';
+import { clearSel } from './selection.js';
 import { openMenu } from './menu.js';
 import { bindSettingsBtn } from './settings.js';
 import { bindCmdK } from './cmdk.js';
 import { closeAuditPanel } from './auditpanel.js';
+import { initFilmLib, filmsChanged, resolveCurrentFilm } from './filmlib.js';
 
 let dragChip = null;
 
@@ -191,6 +193,25 @@ async function reloadFilm() {
   } catch (err) { silent(err, 'reloadFilm'); }
 }
 
+// 工程切换（M8 工程库）：换上下文 → 记/取场记忆 → 数据重载 → 全链重渲
+async function switchFilm(fid) {
+  if (fid == null || fid === state.filmId) return;
+  if (state.filmId) {
+    try { localStorage.setItem('studio.filmstate.' + state.filmId, sceneNo() || ''); } catch (e) { /* ignore */ }
+  }
+  state.filmId = fid;
+  setFilmId(fid);
+  try { localStorage.setItem('studio.film', String(fid)); } catch (e) { /* ignore */ }
+  closeAuditPanel();
+  clearSel();          // 换工程清旧选区（防残留选对旧工程行误操作；真机咬出）
+  await reloadFilm();
+  let mem = '';
+  try { mem = localStorage.getItem('studio.filmstate.' + fid) || ''; } catch (e) { /* ignore */ }
+  location.hash = mem ? hashOf(mem) : '#/';
+  route();
+  filmsChanged();
+}
+
 // 按当前 hash 重打导航高亮（nav 重建后调用；不触发视图重绘）（P0·F1-B7）
 function applyNavOn() {
   const cur = parseHash();
@@ -218,10 +239,22 @@ function syncTopbarVar() {
 async function boot() {
   const view = document.getElementById('view');
   try {
-    const [meta, filmData] = await Promise.all([api.meta(), api.film()]);
+    let fid = null;
+    try {
+      const filmsRes = await api.films();                  // M8 工程库：先定当前工程（记忆 → 第一个）
+      const films = filmsRes.films || [];
+      if (films.length) {
+        fid = resolveCurrentFilm(films);
+        state.filmId = fid;
+        setFilmId(fid);
+        try { localStorage.setItem('studio.film', String(fid)); } catch (e) { /* ignore */ }
+      }
+    } catch (e) { /* 旧服务兜底：无 /api/films 时按单工程链路 */ }
+    const [meta, filmData] = await Promise.all([api.meta(), api.film(fid)]);
     state.meta = meta;
     applyFilm(filmData, api.auditSummary());   // 徽标预取并联（W2：省一次串行往返）
     syncTopbarVar();
+    initFilmLib({ onSwitch: switchFilm, onReload: () => reloadFilm() });   // 标题位 + 弹层 + 剪贴板（M8）
     bindSettingsBtn(document.getElementById('settings-btn'));
     bindCmdK();
     installWheelGuards();   // 滚轮护栏：起手即装（F1-B4：曾只在提示词抽屉首开时装）

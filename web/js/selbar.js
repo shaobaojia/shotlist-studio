@@ -8,6 +8,7 @@ import { onChange, current, clearSel, rectOf, copySelection, clearSelectionCells
 import { deleteSelectedRows } from './cellmenu.js';
 import { mergeShotsByIds, detachShotsByIds } from './hotbox.js';
 import { runCmdbarFromSel } from './aiwrite.js';
+import { setClip } from './filmlib.js';
 
 const CLEAR = '（清空）';
 
@@ -199,6 +200,10 @@ function build() {
   cp.title = '复制选区（TSV，可直接贴进 Excel）';
   cp.addEventListener('click', () => copySelection());
   bar.appendChild(cp);
+  const cpr = el('button', 'tool-btn', '复制行');
+  cpr.title = '把选中镜头记入跨工程剪贴板（切工程后在目标场粘贴）';
+  cpr.addEventListener('click', () => setClip(selRowIds()));
+  bar.appendChild(cpr);
   delBtn = el('button', 'tool-btn', '删除行');
   delBtn.title = '删除选中行（可撤销 · Ctrl+Z）';
   delBtn.addEventListener('click', () => deleteSelectedRows());
